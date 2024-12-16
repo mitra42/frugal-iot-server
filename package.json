@@ -6,7 +6,7 @@
   },
   "bugs": "https://github.com/mitra42/frugal-iot-server/issues",
   "dependencies": {
-    "frugal-iot-logger": "^1.0.1",
+    "frugal-iot-logger": "^1.0.2",
     "express": "^5.0.1",
     "frugal-iot-client": "git://github.com/mitra42/frugal-iot-client.git",
     "morgan": "^1.10.0"
