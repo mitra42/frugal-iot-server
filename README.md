@@ -12,3 +12,5 @@ npm install
 edit `config.yaml`
 
 This will change as we start reading organization specific configurations from `config.d`
+
+node frugal-iot-server.js
