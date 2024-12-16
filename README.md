@@ -38,4 +38,8 @@ and receives data from nodes attached to it.
 
 Open a browser pointing at for example `localhost:8080` and you should see the UI.
 
+#### Running a production server
+To set it up as a service that runs at startup (and instructions vary between flavors of Linux)
 
+copy and edit `frugaliot.service` to `/usr/lib/systemd/system/frugaliot.service` 
+you'll need to change the user and the place where its cloned and possibly the location of `node`

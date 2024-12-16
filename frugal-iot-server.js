@@ -13,7 +13,7 @@ import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http requ
 import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
 
 const htmldir = process.cwd() + "/node_modules/frugal-iot-client";
-const nodemodulesdirparent = process.cwd() + "/.."; //TODO-84 this will probably move as split things up
+const nodemodulesdirparent = process.cwd(); //TODO-84 this will probably move as split things up
 let config;
 let mqttLogger = new MqttLogger();
 

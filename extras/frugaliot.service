@@ -1,0 +1,17 @@
+[Unit]
+Description=frugal-iot server
+After=network-online.target
+
+[Service]
+Type=simple
+User=mitra
+WorkingDirectory=/var/www/frugal-iot
+ExecStart=/usr/bin/node ./frugal-iot-server.js
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=frugaliot
+
+[Install]
+WantedBy=multi-user.target
