@@ -1,24 +1,28 @@
 # Configuration for FrugalIoT server
+# Configuration for FrugalIoT server
 server:
   port: 8080
 mqtt:
   broker: ws://naturalinnovation.org:9012
 organizations:
-  - name: dev
+  dev:
+    name: Development
     mqtt_password: public
     projects:
-      - name: Lotus Ponds
+      Lotus Ponds:
+        duplicates:
+          time: true
         nodes:
-          - id: esp8266-85ea2b
-            track:
-            - temperature
-            - humidity
-          - id: esp8266-95a754
-            track:
-              - temperature
-              - humidity
-          - id: esp32-3c7ab8
-            track:
-              - battery
+          esp8266-85ea2b:
+            topics:
+              temperature:
+              humidity:
+          esp8266-95a754:
+            topics:
+              temperature:
+              humidity:
+          esp32-3c7ab8:
+            topics:
+              battery:
 
 
