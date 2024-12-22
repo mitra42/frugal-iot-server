@@ -17,5 +17,8 @@ organizations:
             track:
               - temperature
               - humidity
+          - id: esp32-3c7ab8
+            track:
+              - battery
 
 
