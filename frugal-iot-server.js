@@ -7,11 +7,18 @@
  */
 import express from 'express'; // http://expressjs.com/
 import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http request logging
-import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
+// Production
+import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
+// Development
+//import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
 //const htmldir = process.cwd() + "/node_modules/frugal-iot-client";
-const htmldir = process.cwd() + "/../frugal-iot-client";  // This is an alternative when developing client and server
+// Production
+const htmldir = process.cwd() + "/node_modules/frugal-iot-client";  // This is an alternative when developing client and server
 const nodemodulesdirparent = process.cwd(); //TODO-84 this will probably move as split things up
+// Development
+//const htmldir = process.cwd() + "/../frugal-iot-client";  // This is an alternative when developing client and server
+//const nodemodulesdirparent = process.cwd(); //TODO-84 this will probably move as split things up but not its also used for serving /data
 let config;
 let mqttLogger = new MqttLogger();
 
