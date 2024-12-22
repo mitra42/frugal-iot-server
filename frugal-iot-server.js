@@ -5,9 +5,6 @@
   * Maintains a client that watches MQTT broker
   * Has data management and graphing functionality
  */
-/* Notes for dev (to be deleted)
-  * Deleted from template: "debug"; fs; sqlite;
- */
 import express from 'express'; // http://expressjs.com/
 import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http request logging
 import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
@@ -90,7 +87,7 @@ mqttLogger.readYamlConfig('./config.yaml', (err, configobj) => {
     app.use(express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
     app.use(express.static(nodemodulesdirparent, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
     startServer();
-    mqttLogger.start(); // TODO-84 rename to start
+    mqttLogger.start();
   }
 });
 

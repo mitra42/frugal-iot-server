@@ -1,5 +1,3 @@
-TODO extract this from frugal-iot/README.md
-
 # Frugal IoT server
 
 ## Installation
@@ -11,6 +9,7 @@ If not then you'll need nodejs from [nodejs.org](https://nodejs.org)
 
 ```
 git clone https://github.com/mitra42/frugal-iot-server.git
+cd frugal-iot-server
 npm install
 ```
 edit `config.yaml`
@@ -33,7 +32,7 @@ mqtt dev connect
 Received dev/Lotus Ponds/esp8266-85ea2b/humidity   71.8
 ```
 Where the config is reported back, 
-then it successully conects to the mqtt server
+then it successfully connects to the mqtt server
 and receives data from nodes attached to it. 
 
 Open a browser pointing at for example `localhost:8080` and you should see the UI.
