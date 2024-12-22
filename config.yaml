@@ -1,15 +1,15 @@
 # Configuration for FrugalIoT server
-# Configuration for FrugalIoT server
 server:
   port: 8080
 mqtt:
   broker: ws://naturalinnovation.org:9012
 organizations:
   dev:
-    name: Development
     mqtt_password: public
+    name: Development
     projects:
-      Lotus Ponds:
+      lotus:
+        name: Lotus Ponds
         duplicates:
           time: true
         nodes:

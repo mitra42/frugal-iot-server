@@ -29,7 +29,7 @@ Serving from /Users/mitra/git/github_mitra42/frugal-iot-server/node_modules/frug
 Server starting on port 8080
 mqtt dev connecting
 mqtt dev connect
-Received dev/Lotus Ponds/esp8266-85ea2b/humidity   71.8
+Received dev/lotus/esp8266-85ea2b/humidity   71.8
 ```
 Where the config is reported back, 
 then it successfully connects to the mqtt server
