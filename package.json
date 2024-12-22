@@ -6,7 +6,7 @@
   },
   "bugs": "https://github.com/mitra42/frugal-iot-server/issues",
   "dependencies": {
-    "frugal-iot-logger": "^1.0.2",
+    "frugal-iot-logger": "^1.0.3",
     "express": "^5.0.1",
     "frugal-iot-client": "git://github.com/mitra42/frugal-iot-client.git",
     "morgan": "^1.10.0"
@@ -26,5 +26,5 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "type": "module",
-  "version": "0.0.1"
+  "version": "0.1.0"
 }
