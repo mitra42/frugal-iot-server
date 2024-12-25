@@ -11,6 +11,7 @@ If not then you'll need nodejs from [nodejs.org](https://nodejs.org)
 git clone https://github.com/mitra42/frugal-iot-server.git
 cd frugal-iot-server
 npm install
+npm update # To make sure you have the latest version of the client since it comes from github
 ```
 edit `config.yaml`
 
