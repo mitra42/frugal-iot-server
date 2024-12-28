@@ -181,7 +181,7 @@ mqttLogger.readYamlConfig('./config.yaml', (err, configobj) => {
     //TODO  Careful as this line is also unintentionally serving up /data and can insecurely server up config.yaml TODO-SECURITY
     app.use(express.static(nodemodulesdirparent, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
     startServer();
-    //XXX mqttLogger.start();
+    mqttLogger.start();
   }
 });
 
