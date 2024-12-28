@@ -22,7 +22,8 @@ import { createMD5 } from 'hash-wasm';
 //const nodemodulesdirparent = process.cwd(); //TODO-84 this will probably move as split things up
 // Development
 const htmldir = process.cwd() + "/../frugal-iot-client";  // This is an alternative when developing client and server
-const nodemodulesdirparent = process.cwd(); //TODO-84 this will probably move as split things up but not its also used for serving /data
+const nodemodulesdir = process.cwd() + "/node_modules"; //TODO-84 this will probably move as split things up but not its also used for serving /data
+const datadir = process.cwd() + "/data"; // serve /data/xxx
 const otadir = process.cwd() + "/ota"; // Hieararchy of bin files for OTA updates
 let config;
 let mqttLogger = new MqttLogger();
@@ -178,8 +179,17 @@ mqttLogger.readYamlConfig('./config.yaml', (err, configobj) => {
     // Use a 1 day cache to keep traffic down TODO might want to override for /data/
     // Its important that frugaliot.css is cached, or the UX will flash while checking it hasn't changed.
     app.use(express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
-    //TODO  Careful as this line is also unintentionally serving up /data and can insecurely server up config.yaml TODO-SECURITY
-    app.use(express.static(nodemodulesdirparent, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+
+    const routerNM = express.Router();
+    app.use('/node_modules', routerNM);
+    routerNM.use(express.static(nodemodulesdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+
+    const routerData = express.Router();
+    app.use('/data', routerData);
+    // Imprtant that these aren't cached, or the data will not be updated.
+    routerData.use('/', (req, res, next) => { console.log("D:", req.url); next(); });
+    routerData.use(express.static(datadir, {immutable: false}));
+
     startServer();
     mqttLogger.start();
   }
