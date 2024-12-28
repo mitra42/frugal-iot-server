@@ -21,8 +21,8 @@ const nodemodulesdir = process.cwd() + "/node_modules"; // Serves "/node_modules
 const htmldir = nodemodulesdir + "/frugal-iot-client";  // Serves "/"
 
 // Development - This is an alternative when developing client and server together
-const htmldir = process.cwd() + "/../frugal-iot-client";  // Serves "/"
-const nodemodulesdir = htmldir + "/node_modules"; // Serves "/node_modules"
+//const htmldir = process.cwd() + "/../frugal-iot-client";  // Serves "/"
+//const nodemodulesdir = htmldir + "/node_modules"; // Serves "/node_modules"
 
 // Currently same on both production and development
 const datadir = process.cwd() + "/data"; // Serves "/data"
