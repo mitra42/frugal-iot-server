@@ -11,7 +11,7 @@ import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http requ
 // Production
 import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
 // Development
-//import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
+// import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
 import { access, constants, createReadStream } from 'fs'; // https://nodejs.org/api/fs.html
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
@@ -23,8 +23,8 @@ const nodemodulesdir = process.cwd() + "/node_modules"; // Serves "/node_modules
 const htmldir = nodemodulesdir + "/frugal-iot-client";  // Serves "/"
 
 // Development - This is an alternative when developing client and server together
-//const htmldir = process.cwd() + "/../frugal-iot-client";  // Serves "/"
-//const nodemodulesdir = htmldir + "/node_modules"; // Serves "/node_modules"
+// const htmldir = process.cwd() + "/../frugal-iot-client";  // Serves "/"
+// const nodemodulesdir = htmldir + "/node_modules"; // Serves "/node_modules"
 
 // Currently same on both production and development
 const datadir = process.cwd() + "/data"; // Serves "/data"
