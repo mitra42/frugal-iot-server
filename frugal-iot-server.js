@@ -60,9 +60,10 @@ app.use((req, res, next) => {
 function findMostSpecificFile(topdir, org, project, node, attribs, cb) {
   let possfiles = [
     `${project}/${node}`,
-    `+/${node}`,
-    `${project}/+`,
-    `+/+`].map(x => `${topdir}/${org}/${x}/${attribs}/frugal-iot.ino.bin`);
+    `/${node}`,
+    `${project}/${attribs}`,
+    `${attribs}`
+    ].map(x => `${topdir}/${org}/${x}/frugal-iot.ino.bin`);
   detectSeries(possfiles, (path, cb1) => {
       access(path, constants.R_OK, (err) => { cb1(null, !err); })},
     cb);
@@ -163,7 +164,7 @@ mqttLogger.readYamlConfig('./config.yaml', (err, configobj) => {
           } else {
             if (path) {
               calculateFileMd5(path, (err, md5) => {
-                console.log("Found OTA file at", path, "with MD5",);
+                console.log("Found OTA file at", path, "with MD5",md5);
                 if (md5 === currentMD5) {
                   console.log("MD5 matches, no update needed");
                   res.sendStatus(304);
