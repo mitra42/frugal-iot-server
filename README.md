@@ -43,3 +43,6 @@ To set it up as a service that runs at startup (and instructions vary between fl
 
 copy and edit `frugaliot.service` to `/usr/lib/systemd/system/frugaliot.service` 
 you'll need to change the user and the place where its cloned and possibly the location of `node`
+
+You can run`service frugaliot start` to start it
+and `systemctl enable frugaliot` to make sure it starts at boot. 
