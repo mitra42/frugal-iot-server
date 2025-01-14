@@ -28,7 +28,7 @@ const htmldir = nodemodulesdir + "/frugal-iot-client";  // Serves "/"
 
 // Currently same on both production and development
 const datadir = process.cwd() + "/data"; // Serves "/data"
-const otadir = process.cwd() + "/ota"; // Hieararchy of bin files for OTA updates
+const otadir = process.cwd() + "/ota"; // Hierarchy of bin files for OTA updates
 
 let config;
 let mqttLogger = new MqttLogger();
@@ -124,8 +124,9 @@ app.get('/echo', (req, res) => {
 app.get('/config.json', (req, res) => {
   res.status(200).json(config);
 });
+
 // Main for server
-mqttLogger.readYamlConfig('./config.yaml', (err, configobj) => {
+mqttLogger.readYamlConfig('.', (err, configobj) => {
   if (err) {
     console.error(err);
   } else {

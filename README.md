@@ -15,7 +15,8 @@ npm update # To make sure you have the latest version of the client since it com
 ```
 edit `config.yaml`
 
-This will change as we start reading organization specific configurations from `config.d`
+in `config.d` put a yaml file for your organization 
+- the repo has an example for `dev` which is the developers. 
 ```
 node frugal-iot-server.js
 ```
@@ -24,7 +25,9 @@ If its working correctly you should see something like
 Config= {
   server: { port: 8080 },
   mqtt: { broker: 'ws://naturalinnovation.org:9012' },
-  organizations: [ { name: 'dev', mqtt_password: 'public', projects: [Array] } ]
+  organizations: { 
+    dev: { mqtt_password: 'public', projects: [Array] } 
+  }
 }
 Serving from /Users/mitra/git/github_mitra42/frugal-iot-server/node_modules/frugal-iot-client
 Server starting on port 8080
