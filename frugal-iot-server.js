@@ -124,8 +124,9 @@ app.get('/echo', (req, res) => {
 app.get('/config.json', (req, res) => {
   res.status(200).json(config);
 });
+
 // Main for server
-mqttLogger.readYamlConfig('./config.yaml', (err, configobj) => {
+mqttLogger.readYamlConfig('.', (err, configobj) => {
   if (err) {
     console.error(err);
   } else {
