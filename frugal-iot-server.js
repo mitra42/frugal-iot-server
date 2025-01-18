@@ -1,9 +1,13 @@
 /*
-  Simple server for FrugalIoT
-
-  * Serves up UI files
-  * Maintains a client that watches MQTT broker
-  * Has data management and graphing functionality
+ * Simple server for FrugalIoT
+ *
+ * It has a few key functions
+ * - Static server of UI files (frugal-iot-client) - intentionally agnostic about those files.
+ * - Spawn the frugal-iot-logger which listens to MQTT and logs to disk
+ * - Static server of Data files created by the logger.
+ * - OTA server.
+ *   - TODO - Place where "projects" can upload bin files for serving by OTA
+ * - Serve up a configuration file that client can use to offer selection or organizations / projects etc.
  */
 import express from 'express'; // http://expressjs.com/
 import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http request logging
@@ -85,11 +89,6 @@ function calculateFileMd5(filePath, cb) {
       cb(err, null);
     });
   });
-  /*
-
-
-
-   */
 }
 
 // ============ End Helper functions ============
@@ -122,6 +121,7 @@ app.get('/echo', (req, res) => {
   res.status(200).json(req.headers);
 });
 app.get('/config.json', (req, res) => {
+  // TODO-89 TODO-90 this should strip out any sensitive information like passwords
   res.status(200).json(config);
 });
 
@@ -182,21 +182,24 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         });
     });
 
-    console.log("Serving from", htmldir);
 
+    // Serve Node modules at /node_modules but configure where to get them.
     const routerNM = express.Router();
     app.use('/node_modules', routerNM);
     //routerData.use('/', (req, res, next) => { console.log("NM:", req.url); next(); });
     routerNM.use(express.static(nodemodulesdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
+    // Serve frugal-iot-logger data at /data but configure where to get them.
     const routerData = express.Router();
     app.use('/data', routerData);
     // Important that these aren't cached, or the data will not be updated.
     //routerData.use('/', (req, res, next) => { console.log("D:", req.url); next(); });
     routerData.use(express.static(datadir, {immutable: false}));
 
-    // Use a 1 day cache to keep traffic down TODO might want to override for /data/
+    // Server HTML files from a configurable location
+    // Use a 1 day cache to keep traffic down
     // Its important that frugaliot.css is cached, or the UX will flash while checking it hasn't changed.
+    console.log("Serving from", htmldir);
     app.use(express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
     startServer();
