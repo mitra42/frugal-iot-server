@@ -122,7 +122,31 @@ app.get('/echo', (req, res) => {
 });
 app.get('/config.json', (req, res) => {
   // TODO-89 TODO-90 this should strip out any sensitive information like passwords
+  let configPlusNodes = config;
+  let nodes = mqttLogger.reportNodes();
+  let oo = configPlusNodes.organizations;
+  Object.entries(nodes).forEach(([orgid, projects]) => {
+    if (!oo[orgid]) {
+      oo[orgid] = { projects: {}};
+    }
+    let pp = oo[orgid].projects;
+    Object.entries(projects).forEach(([projectid, nodes]) => {
+      if (!pp[projectid]) {
+        pp[projectid] = { nodes: {}};
+      }
+      let nn = pp[projectid].nodes;
+      Object.entries(nodes).forEach(([nodeid, lastseen]) => {
+        if (!nn[nodeid]) {
+          nn[nodeid] = {};
+        }
+        nn[nodeid].lastseen = lastseen;
+      });
+    });
+  });
   res.status(200).json(config);
+});
+app.get('/debug', (req, res) => {
+  res.status(200).json(mqttLogger.reportNodes());
 });
 
 // Main for server
