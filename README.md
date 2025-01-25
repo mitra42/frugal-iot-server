@@ -24,7 +24,7 @@ If its working correctly you should see something like
 ```
 Config= {
   server: { port: 8080 },
-  mqtt: { broker: 'ws://naturalinnovation.org:9012' },
+  mqtt: { broker: 'wss://frugaliot.naturalinnovation.org/wss' },
   organizations: { 
     dev: { mqtt_password: 'public', projects: [Array] } 
   }
@@ -49,3 +49,8 @@ you'll need to change the user and the place where its cloned and possibly the l
 
 You can run`service frugaliot start` to start it
 and `systemctl enable frugaliot` to make sure it starts at boot. 
+
+Note that this will give you a http server, and OTA on ESP32 requires HTTPS.
+
+The easiest way to do this is to put it behind a reverse proxy like nginx or apache.
+Feel free to reach out if you do not know how to do this.
