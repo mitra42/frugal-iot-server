@@ -123,7 +123,7 @@ app.get('/echo', (req, res) => {
 app.get('/config.json', (req, res) => {
   // TODO-89 TODO-90 this should strip out any sensitive information like passwords
   let configPlusNodes = config;
-  let nodes = mqttLogger.reportNodes();
+  let nodes = mqttLogger.reportNodes(); // { orgid, { projid, { nodeid: lastseen } }
   let oo = configPlusNodes.organizations;
   Object.entries(nodes).forEach(([orgid, projects]) => {
     if (!oo[orgid]) {
