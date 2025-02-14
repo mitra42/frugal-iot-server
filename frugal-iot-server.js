@@ -44,22 +44,13 @@ const optionsHeaders = {
   // Needs: Range; User-Agent; Not Needed: Authorization; Others are suggested in some online posts
   'Access-Control-Allow-Headers': 'Cache-Control, Content-Type, Content-Length, Range, User-Agent, X-Requested-With',
 };
-/*
-// Not currently used, might add back
 const responseHeaders = {
+  //Need CORS because want to include webcomponents.js from embedded pages
   'Access-Control-Allow-Origin': '*',  // Needed if have CORS issues with things included
-  server: 'express/frugaliot',         // May be worth indicating
-  Connection: 'keep-alive',            // Helps with load, but since serving static it might not be useful
+  Server: 'express/frugaliot',         // May be worth indicating
+  Connection: 'keep-alive',          // Helps with load, its static so after few seconds should drop
   'Keep-Alive': 'timeout=5, max=1000', // Up to 5 seconds idle, 1000 requests max
 };
-app.use((req, res, next) => {
-  res.set(responseHeaders);
-  if (req.url.length > 1 && req.url.endsWith('/')) { // Strip trailing slash
-    req.url = req.url.slice(0, req.url.length - 1);
-    console.log(`Rewriting url to ${req.url}`);
-  }
-  next(); });
-*/
 // ============ Helper functions ============
 function findMostSpecificFile(topdir, org, project, node, attribs, cb) {
   let possfiles = [
@@ -107,6 +98,19 @@ function startServer() {
 
 
 const app = express();
+
+app.use((req, res, next) => {
+  res.set(responseHeaders);
+  /*
+  //Not doing this - not applicable to this server, and "/" is routed explicitly
+  if (req.url.length > 1 && req.url.endsWith('/')) { // Strip trailing slash
+    req.url = req.url.slice(0, req.url.length - 1);
+    console.log(`Rewriting url to ${req.url}`);
+  }
+  */
+  next();
+});
+
 
 // Respond to options - not sure if really needed, but seems to help in other servers.
 app.options('/', (req, res) => {

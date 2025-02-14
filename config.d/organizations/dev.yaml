@@ -37,6 +37,10 @@ projects:
             duplicates:
               significantdate: 900000
               significantvalue: 100
+          relay:
+            type: bool
+          ledbuiltin:
+            type: bool
   magi:
     name: Magi Farm
     nodes:
