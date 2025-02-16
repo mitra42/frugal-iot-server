@@ -11,7 +11,11 @@
     "frugal-iot-client": "git://github.com/mitra42/frugal-iot-client.git",
     "frugal-iot-logger": "^1.0.11",
     "hash-wasm": "^4.12.0",
-    "morgan": "^1.10.0"
+    "morgan": "^1.10.0",
+    "passport": "^0.7.0",
+    "passport-local": "^1.0.0",
+    "sqlite-express-package": "^0.0.2",
+    "sqlite3": "^5.1.7"
   },
   "description": "Frugal IoT client and server",
   "homepage": "https://github.com/mitra42/frugal-iot-server",

@@ -12,23 +12,30 @@
 import express from 'express'; // http://expressjs.com/
 import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http request logging
 
+
 // Production
-import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
+// import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
 // Development
-// import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
+import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
 import { access, constants, createReadStream } from 'fs'; // https://nodejs.org/api/fs.html
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
-
+// Passport is CommonJS - doesnt yet support modules
+import passport from 'passport'
+import LocalStrategy from 'passport-local';
+import sqlite3 from 'sqlite3'; // https://www.npmjs.com/package/sqlite3
+import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
+import {waterfall} from 'async';
+import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
 
 // Production - when client and logger installed by "npm install" on frugal-iot-server
-const nodemodulesdir = process.cwd() + "/node_modules"; // Serves "/node_modules"
-const htmldir = nodemodulesdir + "/frugal-iot-client";  // Serves "/"
+//const nodemodulesdir = process.cwd() + "/node_modules"; // Serves "/node_modules"
+//const htmldir = nodemodulesdir + "/frugal-iot-client";  // Serves "/"
 
 // Development - This is an alternative when developing client and server together
-// const htmldir = process.cwd() + "/../frugal-iot-client";  // Serves "/"
-// const nodemodulesdir = htmldir + "/node_modules"; // Serves "/node_modules"
+const htmldir = process.cwd() + "/../frugal-iot-client";  // Serves "/"
+const nodemodulesdir = htmldir + "/node_modules"; // Serves "/node_modules"
 
 // Currently same on both production and development
 const datadir = process.cwd() + "/data"; // Serves "/data"
@@ -81,6 +88,34 @@ function calculateFileMd5(filePath, cb) {
     });
   });
 }
+// ============ Authentication related =========
+
+passport.use(new LocalStrategy(function verify(username, password, cb) {
+  db.get('SELECT * FROM users WHERE username = ?', [ username ], function(err, user) {
+    if (err) { return cb(err); }
+    if (!user) { return cb(null, false, { message: 'Incorrect username or password.' }); }
+    // TODO- - maybe just import pbkdf2 and timingSafeEqual ?
+    crypto.pbkdf2(password, user.salt, 310000, 32, 'sha256', function(err, hashedPassword) {
+      if (err) { return cb(err); }
+      if (!crypto.timingSafeEqual(user.hashed_password, hashedPassword)) {
+        return cb(null, false, { message: 'Incorrect username or password.' });
+      }
+      return cb(null, user);
+    });
+  });
+}));
+
+// TODO check on size of fields hashed_password and salt
+const sqlstart = `
+CREATE TABLE \`users\` (
+  \`id\` INTEGER PRIMARY KEY AUTOINCREMENT,
+  \`username\` varchar(50) NOT NULL DEFAULT '',
+  \`hashed_password\` varchar(50) UNIQUE,
+  \`salt\` varchar(50) NOT NULL DEFAULT '',
+  \`organization\` varchar(20) NOT NULL DEFAULT ''
+);
+`;
+
 
 // ============ End Helper functions ============
 function startServer() {
@@ -184,7 +219,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     app.get('/ota_update/:org/:project/:node/:attribs', (req, res) => {
       const version = req.headers['x-esp8266-version'] || req.headers['x-esp32-version'];
       const currentMD5 = req.headers['x-esp8266-sketch-md5'] || req.headers['x-esp32-sketch-md5'];
-      console.log("GET: parms=",req.params,"version:",version,"md5",currentMD5);
+      console.log("GET: parms=", req.params, "version:", version, "md5", currentMD5);
       findMostSpecificFile(otadir, req.params.org, req.params.project, req.params.node, req.params.attribs,
         (err, path) => {
           if (err) {
@@ -193,7 +228,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           } else {
             if (path) {
               calculateFileMd5(path, (err, md5) => {
-                console.log("Found OTA file at", path, "with MD5",md5);
+                console.log("Found OTA file at", path, "with MD5", md5);
                 if (md5 === currentMD5) {
                   console.log("MD5 matches, no update needed");
                   res.sendStatus(304);
@@ -203,7 +238,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                 }
               });
             } else { // None of the paths matched
-              console.log("No OTA file for",req.url);
+              console.log("No OTA file for", req.url);
               res.sendStatus(304);
             }
           }
@@ -229,9 +264,26 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     // Its important that frugaliot.css is cached, or the UX will flash while checking it hasn't changed.
     console.log("Serving from", htmldir);
     app.use(express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
-
-    startServer();
-    mqttLogger.start();
+    let dbpath = "frugal-iot.db";
+    let db;
+    waterfall([
+        (cb) => { db = new sqlite3.Database(dbpath, sqlite3.OPEN_READWRITE, cb); },
+        (cb) => { console.log("Opened database"); cb(); },
+        (cb) => { db.exec(sqlstart, cb); },
+        (cb) => { console.log("Execed start"); cb();},
+        (cb) => { db.close(cb);},
+        (cb) => { console.log("closed DB"); cb(); },
+      ],
+      (err) => {
+        if (err) {
+          console.error(err);
+        } else {
+          console.log("XXX Completed waterfall")
+        }
+      });
+    //startServer();
+    //mqttLogger.start();
   }
 });
+
 
