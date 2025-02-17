@@ -1,3 +1,4 @@
+# Often this goes in /usr/lib/systemd/system/frugaliot.service
 [Unit]
 Description=frugal-iot server
 After=network-online.target
