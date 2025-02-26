@@ -22,7 +22,7 @@ import { access, constants, createReadStream } from 'fs'; // https://nodejs.org/
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
 // Passport is CommonJS - doesnt yet support modules
-import passport from 'passport'
+import passport from 'passport';
 import LocalStrategy from 'passport-local';
 import sqlite3 from 'sqlite3'; // https://www.npmjs.com/package/sqlite3
 import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
@@ -88,10 +88,46 @@ function calculateFileMd5(filePath, cb) {
     });
   });
 }
+
 // ============ Authentication related =========
+const dbpath = "/Users/mitra/temp/frugal-iot.db"; // TODO-89 where should this live
+function openOrCreateDatabase(cb) {
+  let db;
+  access(dbpath, (constants.W_OK | constants.R_OK), (err) => {
+    if (err) {
+      console.log("Creating user database");
+      db = new sqlite3.Database(dbpath, sqlite3.OPEN_CREATE | sqlite3.OPEN_READWRITE, (err) => {
+        if (err) {
+          cb(err);
+        } else {
+          console.log("Created user database");
+          db.exec(sqlstart, (err) => {
+            if (err) {
+              cb(err);
+            } else {
+              console.log("Exec-ed start");
+              cb(null, db)
+            }
+          });
+        }
+      });
+    } else {
+      console.log("User Database exists");
+      db = new sqlite3.Database(dbpath, sqlite3.OPEN_READWRITE, (err) => {
+        if (err) {
+          cb(err);
+        } else {
+          console.log("Opened user database");
+          cb(null, db);
+        }
+      });
+    }
+  });
+}
 
 passport.use(new LocalStrategy(function verify(username, password, cb) {
   db.get('SELECT * FROM users WHERE username = ?', [ username ], function(err, user) {
+    console.log("XXX129");
     if (err) { return cb(err); }
     if (!user) { return cb(null, false, { message: 'Incorrect username or password.' }); }
     // TODO- - maybe just import pbkdf2 and timingSafeEqual ?
@@ -264,25 +300,58 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     // Its important that frugaliot.css is cached, or the UX will flash while checking it hasn't changed.
     console.log("Serving from", htmldir);
     app.use(express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
-    let dbpath = "frugal-iot.db";
-    let db;
-    waterfall([
-        (cb) => { db = new sqlite3.Database(dbpath, sqlite3.OPEN_READWRITE, cb); },
-        (cb) => { console.log("Opened database"); cb(); },
-        (cb) => { db.exec(sqlstart, cb); },
-        (cb) => { console.log("Execed start"); cb();},
-        (cb) => { db.close(cb);},
-        (cb) => { console.log("closed DB"); cb(); },
-      ],
-      (err) => {
-        if (err) {
-          console.error(err);
-        } else {
-          console.log("XXX Completed waterfall")
-        }
-      });
-    //startServer();
-    //mqttLogger.start();
+    // TODO-89 should have db creation separate.
+    openOrCreateDatabase((err, db) => {
+      if (err) {
+        console.error("Error opening or creating database", err);
+      } else {
+        ///app.use(express.json()); // Not needed
+        app.use(express.urlencoded({ extended: true })); // Passport wont function without this
+        //app.use(passport.initialize());
+        console.log("Setting up passport for login and register")
+        //https://www.passportjs.org/howtos/password/
+        app.post('/login', passport.authenticate('local', {
+          session: false,
+          successRedirect: '/GOOD',
+          failureRedirect: '/BAD'
+        }));
+        /*
+        app.post('/login', passport.authenticate('local', { session: false }), (req, res) => {
+          res.status(200).json(req.user);
+        });
+         */
+        /* Next is actually /register - but /login for debugging */
+        app.post('/register', (req, res) => {
+          console.log("username=", req.body.username); // may want to log registrations
+          console.log("password=", req.body.password); //TODO-89 remove !
+          const username = req.body.username;
+          const password = req.body.password;
+          const organization = req.body.organization; //TODO-89 should be validated and can only be "dev" without approval
+          crypto.randomBytes(16, (err, salt) => {
+            if (err) {
+              res.status(500).json({ message: 'Internal error' });
+            } else {
+              crypto.pbkdf2(password, salt, 310000, 32, 'sha256', (err, hashedPassword) => {
+                if (err) {
+                  res.status(500).json({ message: 'Internal error' });
+                } else {
+                  db.run('INSERT INTO users (username, hashed_password, salt, organization) VALUES (?, ?, ?, ?)',
+                    [username, hashedPassword, salt, organization], (err) => {
+                      if (err) {
+                        res.status(500).json({ message: 'Internal error' });
+                      } else {
+                        res.status(200).json({ message: 'User created' });
+                      }
+                    });
+                }
+              });
+            }
+          });
+        });
+        startServer();
+        //mqttLogger.start(); //TODO-89 uncomment
+      }
+    });
   }
 });
 
