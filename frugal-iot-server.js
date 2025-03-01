@@ -24,6 +24,7 @@ import { createMD5 } from 'hash-wasm';
 // Passport is CommonJS - doesnt yet support modules
 import passport from 'passport';
 import LocalStrategy from 'passport-local';
+import session from 'express-session'; // https://www.npmjs.com/package/express-session
 import sqlite3 from 'sqlite3'; // https://www.npmjs.com/package/sqlite3
 import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
 import {waterfall} from 'async';
@@ -136,7 +137,7 @@ passport.use(new LocalStrategy(function verify(username, password, cb) {
       if (!crypto.timingSafeEqual(user.hashed_password, hashedPassword)) {
         return cb(null, false, { message: 'Incorrect username or password.' });
       }
-      return cb(null, user);
+      return cb(null, {id: user.id, username: user.username, organization: user.organization});
     });
   });
 }));
@@ -307,6 +308,26 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
       } else {
         ///app.use(express.json()); // Not needed
         app.use(express.urlencoded({ extended: true })); // Passport wont function without this
+        app.use(session({
+          secret: 'keyboard cat', // TODO-89 probably change
+          resave: false,
+          saveUninitialized: false,
+          cookie: { secure: true }
+        }));
+        passport.serializeUser(function(user, cb) {
+          process.nextTick(function() {
+            return cb(null, {
+              id: user.id,
+              username: user.username,
+              picture: user.organization,
+            });
+          });
+        });
+        passport.deserializeUser(function(user, cb) {
+          process.nextTick(function() {
+            return cb(null, user);
+          });
+        });
         //app.use(passport.initialize());
         console.log("Setting up passport for login and register")
         //https://www.passportjs.org/howtos/password/
@@ -348,6 +369,12 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             }
           });
         });
+        app.use(passport.authenticate('session')); // Should - I think - block anything further unless authenticated
+        /* app.get('/pages',
+          passport.authenticate('session'),
+          function(req, res, next) {
+            /* ... */
+          });  // Alternate way to authenticate certain routes - like Data
         startServer();
         //mqttLogger.start(); //TODO-89 uncomment
       }
