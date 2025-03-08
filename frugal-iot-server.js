@@ -9,6 +9,25 @@
  *   - TODO - Place where "projects" can upload bin files for serving by OTA
  * - Serve up a configuration file that client can use to offer selection or organizations / projects etc.
  */
+ /* TODO-89
+ - A: request for config hits check
+ - FAIL -> Open login/register dialog
+ - OK -> config.json
+ - Post/Register - create user, note doesn't have permissions yet.
+ - FAIL -> Display message and reopen
+ - OK -> Open login dialog
+ - Post/Login - check
+ - FAIL -> Login
+ - OK -> session set
+ - retry config
+ - OK -> config.json
+ - also protect /data but not /ota but protect POST/ota
+
+ - A: client:  MqttWrapper:connectedCallBack
+ - A: server: 219 get /config
+  */
+
+
 import express from 'express'; // http://expressjs.com/
 import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http request logging
 
@@ -21,14 +40,6 @@ import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.c
 import { access, constants, createReadStream } from 'fs'; // https://nodejs.org/api/fs.html
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
-// Passport is CommonJS - doesnt yet support modules
-import passport from 'passport';
-import LocalStrategy from 'passport-local';
-import session from 'express-session'; // https://www.npmjs.com/package/express-session
-import sqlite3 from 'sqlite3'; // https://www.npmjs.com/package/sqlite3
-import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
-import {waterfall} from 'async';
-import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
 
 // Production - when client and logger installed by "npm install" on frugal-iot-server
 //const nodemodulesdir = process.cwd() + "/node_modules"; // Serves "/node_modules"
@@ -41,6 +52,16 @@ const nodemodulesdir = htmldir + "/node_modules"; // Serves "/node_modules"
 // Currently same on both production and development
 const datadir = process.cwd() + "/data"; // Serves "/data"
 const otadir = process.cwd() + "/ota"; // Hierarchy of bin files for OTA updates
+
+// Imports needed for Authentication
+import passport from 'passport';
+import LocalStrategy from 'passport-local';
+import session from 'express-session'; // https://www.npmjs.com/package/express-session
+import sqlite3 from 'sqlite3'; // https://www.npmjs.com/package/sqlite3
+import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
+import cookieParser from 'cookie-parser'; // https://www.npmjs.com/package/cookie-parser
+import {waterfall} from 'async';
+import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
 
 let config;
 let mqttLogger = new MqttLogger();
@@ -91,12 +112,14 @@ function calculateFileMd5(filePath, cb) {
 }
 
 // ============ Authentication related =========
-const dbpath = "/Users/mitra/temp/frugal-iot.db"; // TODO-89 where should this live
+let db; // For storing users
+const dbpath = "/Users/mitra/temp/frugal-iot.db"; // TODO-89 where should this live - make sure not somewhere the server will serve it.
+
 function openOrCreateDatabase(cb) {
-  let db;
   access(dbpath, (constants.W_OK | constants.R_OK), (err) => {
     if (err) {
       console.log("Creating user database");
+
       db = new sqlite3.Database(dbpath, sqlite3.OPEN_CREATE | sqlite3.OPEN_READWRITE, (err) => {
         if (err) {
           cb(err);
@@ -106,7 +129,7 @@ function openOrCreateDatabase(cb) {
             if (err) {
               cb(err);
             } else {
-              console.log("Exec-ed start");
+              console.log("Exec-ed starting SQL");
               cb(null, db)
             }
           });
@@ -144,11 +167,11 @@ passport.use(new LocalStrategy(function verify(username, password, cb) {
 
 // TODO check on size of fields hashed_password and salt
 const sqlstart = `
-CREATE TABLE \`users\` (
+CREATE TABLE IF NOT EXISTS \`users\` (
   \`id\` INTEGER PRIMARY KEY AUTOINCREMENT,
-  \`username\` varchar(50) NOT NULL DEFAULT '',
-  \`hashed_password\` varchar(50) UNIQUE,
-  \`salt\` varchar(50) NOT NULL DEFAULT '',
+  \`username\` TEXT UNIQUE,
+  \`hashed_password\` BLOB,
+  \`salt\` BLOB '',
   \`organization\` varchar(20) NOT NULL DEFAULT ''
 );
 `;
@@ -183,6 +206,7 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(cookieParser());
 
 // Respond to options - not sure if really needed, but seems to help in other servers.
 app.options('/', (req, res) => {
@@ -196,7 +220,9 @@ app.options('/', (req, res) => {
 app.get('/echo', (req, res) => {
   res.status(200).json(req.headers);
 });
-app.get('/config.json', (req, res) => {
+app.get('/config.json',
+
+  (req, res) => {
   // TODO-89 TODO-90 this should strip out any sensitive information like passwords
   let configPlusNodes = config;
   let nodes = mqttLogger.reportNodes(); // { orgid, { projid, { nodeid: lastseen } }
@@ -224,7 +250,10 @@ app.get('/config.json', (req, res) => {
 app.get('/debug', (req, res) => {
   res.status(200).json(mqttLogger.reportNodes());
 });
-
+function debugRoutes(req, res, next) {
+  console.log(req.url);
+  next();
+}
 // Main for server
 mqttLogger.readYamlConfig('.', (err, configobj) => {
   if (err) {
@@ -247,6 +276,8 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     "+-ESP8266-sdk-version", "2.2.2-dev(38a443e)", "+-ESP8266-mode", "sketch",  "+-ESP8266-version", "01.02.03",
     "Content-Length", "0"]
      */
+
+    // Just log the request for now
     app.use('/', (req, res, next) => {
       console.log(req.url);
       next();
@@ -300,7 +331,6 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     // Use a 1 day cache to keep traffic down
     // Its important that frugaliot.css is cached, or the UX will flash while checking it hasn't changed.
     console.log("Serving from", htmldir);
-    app.use(express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
     // TODO-89 should have db creation separate.
     openOrCreateDatabase((err, db) => {
       if (err) {
@@ -328,7 +358,6 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             return cb(null, user);
           });
         });
-        //app.use(passport.initialize());
         console.log("Setting up passport for login and register")
         //https://www.passportjs.org/howtos/password/
         app.post('/login', passport.authenticate('local', {
@@ -369,12 +398,24 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             }
           });
         });
-        app.use(passport.authenticate('session')); // Should - I think - block anything further unless authenticated
-        /* app.get('/pages',
+        const routerPrivate = express.Router();
+        app.use('/private', routerPrivate);
+        routerPrivate.use(
+          (req,res,next) => {
+            console.log("/private handler for", req.url);
+            next(); },
           passport.authenticate('session'),
-          function(req, res, next) {
-            /* ... */
-          });  // Alternate way to authenticate certain routes - like Data
+          (req,res,next) => {
+            console.log("/private handler authenticated by session for", req.url); next(); },
+          // TODO-89 should configure where /private is - maybe in frugal-iot-client
+          express.static("./private", {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+
+          // function(req, res, next)
+        // Default catches rest (especially "/" so should be last)
+        app.use(
+          (req,res,next) => {
+            console.log("Default handler for", req.url); next(); },
+          express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
         startServer();
         //mqttLogger.start(); //TODO-89 uncomment
       }

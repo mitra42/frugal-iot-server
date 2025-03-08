@@ -7,6 +7,7 @@
   "bugs": "https://github.com/mitra42/frugal-iot-server/issues",
   "dependencies": {
     "async": "^3.2.6",
+    "cookie-parser": "^1.4.7",
     "express": "^5.0.1",
     "express-session": "^1.18.1",
     "frugal-iot-client": "git://github.com/mitra42/frugal-iot-client.git",
