@@ -10,6 +10,14 @@
  * - Serve up a configuration file that client can use to offer selection or organizations / projects etc.
  */
  /* TODO-89
+  - /dashboard => authenticate => ( server htmldir OR 303:login?tab=signin )
+  - /login => form.
+  - post/login => check and set session => 303:dashboard || 303:login?tab=register
+  - post/register => create user => 303:/dashboard || 303:login?tab=register
+  - /config => authenticate => serve config.json || 401:fail || 403:wrong org
+
+
+ OLD FLOW ...
  - A: request for config hits check
  - FAIL -> Open login/register dialog
  - OK -> config.json
@@ -59,7 +67,7 @@ import LocalStrategy from 'passport-local';
 import session from 'express-session'; // https://www.npmjs.com/package/express-session
 import sqlite3 from 'sqlite3'; // https://www.npmjs.com/package/sqlite3
 import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
-import cookieParser from 'cookie-parser'; // https://www.npmjs.com/package/cookie-parser
+// import cookieParser from 'cookie-parser'; // https://www.npmjs.com/package/cookie-parser (note comment on https://www.npmjs.com/package/express-session that not needed and conflicts with session)
 import {waterfall} from 'async';
 import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
 
@@ -206,7 +214,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(cookieParser());
+//app.use(cookieParser());
 
 // Respond to options - not sure if really needed, but seems to help in other servers.
 app.options('/', (req, res) => {
@@ -220,6 +228,7 @@ app.options('/', (req, res) => {
 app.get('/echo', (req, res) => {
   res.status(200).json(req.headers);
 });
+// TODO-89 - this should authenticate
 app.get('/config.json',
 
   (req, res) => {
@@ -313,7 +322,6 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         });
     });
 
-
     // Serve Node modules at /node_modules but configure where to get them.
     const routerNM = express.Router();
     app.use('/node_modules', routerNM);
@@ -338,14 +346,16 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
       } else {
         ///app.use(express.json()); // Not needed
         app.use(express.urlencoded({ extended: true })); // Passport wont function without this
+        app.set('trust proxy', 1); // trust first proxy - see note in https://www.npmjs.com/package/express-session
         app.use(session({
           secret: 'keyboard cat', // TODO-89 probably change
           resave: false,
           saveUninitialized: false,
-          cookie: { secure: true }
+          cookie: { secure: 'auto' }  // TODO-89 cant be secure: true while testing on HTTP
         }));
         passport.serializeUser(function(user, cb) {
           process.nextTick(function() {
+            console.log("Serializing");
             return cb(null, {
               id: user.id,
               username: user.username,
@@ -355,13 +365,30 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         });
         passport.deserializeUser(function(user, cb) {
           process.nextTick(function() {
+            console.log("Deserializing");
             return cb(null, user);
           });
         });
         console.log("Setting up passport for login and register")
         //https://www.passportjs.org/howtos/password/
-        app.post('/login', passport.authenticate('local', {
-          session: false,
+        app.use(passport.authenticate('session')); // Add user to req.user
+        app.get('/dashboard',
+          (req,res,next) => { console.log("/dashboard handler"); next(); },
+          //passport.authenticate('session'), // Add user to req.user
+          (req,res,next) => {
+          console.log("/dashboard authenticated or not:", req.user); next(); },
+          (req, res) => {
+            if (req.user) {
+              res.status(200).sendFile(process.cwd() + '/dashboard.html');
+            } else {
+              res.redirect(307, "/login.html?tab=signin");
+            }
+          }
+        );
+        // TODO-89 ==== Working from here down =====
+        app.post('/login',
+          passport.authenticate('local', {
+          session: true,
           successRedirect: '/GOOD',
           failureRedirect: '/BAD'
         }));
