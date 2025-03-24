@@ -9,30 +9,25 @@
  *   - TODO - Place where "projects" can upload bin files for serving by OTA
  * - Serve up a configuration file that client can use to offer selection or organizations / projects etc.
  */
- /* TODO-89
-  - /dashboard => authenticate => ( server htmldir OR 303:login?tab=signin )
+ /*
+  How permissions work
+  Look for e.g. "Security Step A" in code below
+  A: /dashboard => authenticate => ( server htmldir OR 303:login?tab=signin )
   - /login => form.
   - post/login => check and set session => 303:dashboard || 303:login?tab=register
   - post/register => create user => 303:/dashboard || 303:login?tab=register
+  === DONE TO HERE TODO-89====
+  - "/" should be protected
   - /config => authenticate => serve config.json || 401:fail || 403:wrong org
-
-
- OLD FLOW ...
- - A: request for config hits check
- - FAIL -> Open login/register dialog
- - OK -> config.json
- - Post/Register - create user, note doesn't have permissions yet.
- - FAIL -> Display message and reopen
- - OK -> Open login dialog
- - Post/Login - check
- - FAIL -> Login
- - OK -> session set
- - retry config
- - OK -> config.json
- - also protect /data but not /ota but protect POST/ota
-
- - A: client:  MqttWrapper:connectedCallBack
- - A: server: 219 get /config
+  - GET/ota NOT protected (as accessed by devices)
+  - POST/ota protected
+  - add CSS to login.html
+  - dont collect picture, but get Name and email and org
+  - Only connect to mqtt with credentials from /config\
+  - Add permissions, not just authentication
+  - Add email and email verification
+  - Add process for approving permissions (esp membership of "org")
+  - /logout
   */
 
 
@@ -161,18 +156,25 @@ passport.use(new LocalStrategy(function verify(username, password, cb) {
   db.get('SELECT * FROM users WHERE username = ?', [ username ], function(err, user) {
     console.log("XXX129");
     if (err) { return cb(err); }
-    if (!user) { return cb(null, false, { message: 'Incorrect username or password.' }); }
+    if (!user) { return cb(null, false, { message: 'Incorrect username or password+' }); }
     // TODO- - maybe just import pbkdf2 and timingSafeEqual ?
     crypto.pbkdf2(password, user.salt, 310000, 32, 'sha256', function(err, hashedPassword) {
       if (err) { return cb(err); }
       if (!crypto.timingSafeEqual(user.hashed_password, hashedPassword)) {
-        return cb(null, false, { message: 'Incorrect username or password.' });
+        return cb(null, false, { message: 'Incorrect username or password*' });
       }
       return cb(null, {id: user.id, username: user.username, organization: user.organization});
     });
   });
 }));
 
+function isLoggedIn(req, res, next) {
+  if (req.isAuthenticated()) {
+    next();
+  } else {
+    res.redirect(307, '/login.html?register=false&message=Please%20login&url=' + req.url);
+  }
+}
 // TODO check on size of fields hashed_password and salt
 const sqlstart = `
 CREATE TABLE IF NOT EXISTS \`users\` (
@@ -347,6 +349,8 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         ///app.use(express.json()); // Not needed
         app.use(express.urlencoded({ extended: true })); // Passport wont function without this
         app.set('trust proxy', 1); // trust first proxy - see note in https://www.npmjs.com/package/express-session
+        // TODO-89 note need to setup session store, defaults to memory store which is not good for production
+        // TODO-89 think about cookie timeout and add "keep me logged in on this device" option that controls it
         app.use(session({
           secret: 'keyboard cat', // TODO-89 probably change
           resave: false,
@@ -372,32 +376,28 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         console.log("Setting up passport for login and register")
         //https://www.passportjs.org/howtos/password/
         app.use(passport.authenticate('session')); // Add user to req.user
-        app.get('/dashboard',
-          (req,res,next) => { console.log("/dashboard handler"); next(); },
-          //passport.authenticate('session'), // Add user to req.user
+        app.get('/dashboard',    // Permissions flow (see notes at top): Security Step A
           (req,res,next) => {
-          console.log("/dashboard authenticated or not:", req.user); next(); },
-          (req, res) => {
-            if (req.user) {
-              res.status(200).sendFile(process.cwd() + '/dashboard.html');
-            } else {
-              res.redirect(307, "/login.html?tab=signin");
-            }
+            console.log("/dashboard handler", !req.user ? "not" : "", "authenticated:", req.user ? req.user : ""); next(); },
+          isLoggedIn,
+          (req,res,next) => {
+            res.status(200).sendFile(process.cwd() + '/dashboard.html');
           }
         );
-        // TODO-89 ==== Working from here down =====
         app.post('/login',
-          passport.authenticate('local', {
-          session: true,
-          successRedirect: '/GOOD',
-          failureRedirect: '/BAD'
-        }));
-        /*
-        app.post('/login', passport.authenticate('local', { session: false }), (req, res) => {
-          res.status(200).json(req.user);
-        });
-         */
-        /* Next is actually /register - but /login for debugging */
+          (req,res,next) => {
+            console.log("Trying to login");
+            // This is ugly, but I cannot see how to pass the URL to passport.authenticate options
+            passport.authenticate('local', {
+              session: true,
+              //failWithError: true,
+              failureRedirect: `/login.html?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
+              successRedirect: req.body.url,
+              // In failure case will also be messages in the session which need clearing out TODO-89
+              //failureRedirect: `/login.html?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
+            })(req, res, next);
+          }
+        );
         app.post('/register', (req, res) => {
           console.log("username=", req.body.username); // may want to log registrations
           console.log("password=", req.body.password); //TODO-89 remove !
@@ -415,9 +415,9 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                   db.run('INSERT INTO users (username, hashed_password, salt, organization) VALUES (?, ?, ?, ?)',
                     [username, hashedPassword, salt, organization], (err) => {
                       if (err) {
-                        res.status(500).json({ message: 'Internal error' });
+                        res.redirect(`/login.html?register=true&message=Registration%20failed&url=${req.body.url}`);
                       } else {
-                        res.status(200).json({ message: 'User created' });
+                        res.redirect(`/login.html?register=false&message=Registration%20successful%20-%20please%20login&url=${req.body.url}`);
                       }
                     });
                 }
