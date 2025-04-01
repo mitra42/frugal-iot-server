@@ -4,10 +4,21 @@
  * It has a few key functions
  * - Static server of UI files (frugal-iot-client) - intentionally agnostic about those files.
  * - Spawn the frugal-iot-logger which listens to MQTT and logs to disk
- * - Static server of Data files created by the logger.
- * - OTA server.
- *   - TODO - Place where "projects" can upload bin files for serving by OTA
- * - Serve up a configuration file that client can use to offer selection or organizations / projects etc.
+ *
+ * Serves up following ....
+ * /      Static serve frugal-iot-client (will move to dashboard and put static HTML here).
+ * /config.json Return configuration info - depends on user's org (TODO-89)
+ * /data  Back files from logger for graphing
+ * /dashboard  Currently just for testing, but eventually will serve current dashboard (frugal-iot-client)
+ * /debug repurposed for development
+ * /echo  Send back headers etc
+ * /login (post) login a user, & redirect (to dashboard typically)
+ * /register (post) register a new user
+ * /node_modules  Javascript libraries (from frugal-iot-client)
+ * /oto_update OTA updates
+ * /ota (post) TODO-89 protected place to upload new binaries
+ * /private Serve up private files under authentication - currently unused
+ *
  */
  /*
   How permissions work
@@ -16,8 +27,8 @@
   - /login => form.
   - post/login => check and set session => 303:dashboard || 303:login?tab=register
   - post/register => create user => 303:/dashboard || 303:login?tab=register
+  - "/dashboard" should be protected (replaces "/")
   === DONE TO HERE TODO-89====
-  - "/" should be protected
   - /config => authenticate => serve config.json || 401:fail || 403:wrong org
   - GET/ota NOT protected (as accessed by devices)
   - POST/ota protected
@@ -28,6 +39,10 @@
   - Add email and email verification
   - Add process for approving permissions (esp membership of "org")
   - /logout
+  - /index-template.html figure out how to authenticate in an embedded context
+  - restart the logger ....
+  - remove unneccesary logging
+  - see if can remove default "/" handler
   */
 
 
@@ -114,6 +129,18 @@ function calculateFileMd5(filePath, cb) {
   });
 }
 
+function startServer() {
+  const server = app.listen(config.server.port); // Intentionally same port as Python gateway defaults to, api should converge
+  console.log('Server starting on port %s', config.server.port);
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log('A server, probably another copy of this, is already listening on port %s', config.server.port);
+    } else {
+      console.log('Server hit error %o', err);
+      throw (err); // Will be uncaught exception
+    }
+  });
+}
 // ============ Authentication related =========
 let db; // For storing users
 const dbpath = "/Users/mitra/temp/frugal-iot.db"; // TODO-89 where should this live - make sure not somewhere the server will serve it.
@@ -168,11 +195,23 @@ passport.use(new LocalStrategy(function verify(username, password, cb) {
   });
 }));
 
+// Helper function - use as middleware for get, put and use
+// TODO-89 this might go away, replaced by shouldIBeLoggedIn - note that /login will be served from default handler which might go away
 function isLoggedIn(req, res, next) {
   if (req.isAuthenticated()) {
     next();
   } else {
-    res.redirect(307, '/login.html?register=false&message=Please%20login&url=' + req.url);
+    // If originalUrl is /private/index.html then req.url is just /index.html
+    res.redirect(307, '/login.html?register=false&message=Please%20login&url=' + req.originalUrl);
+  }
+}
+// While serving from frugal-iot-client its only the dashboard we want to protect
+// as need user to be logged in to access config etc
+function shouldIBeLoggedIn(req, res, next) {
+  if ((['/','/index.html'].includes(req.url)) && !req.isAuthenticated()) {
+    res.redirect(307, './login.html?register=false&message=Please%20login&url=' + req.originalUrl);
+  } else {
+    next();
   }
 }
 // TODO check on size of fields hashed_password and salt
@@ -188,22 +227,10 @@ CREATE TABLE IF NOT EXISTS \`users\` (
 
 
 // ============ End Helper functions ============
-function startServer() {
-  const server = app.listen(config.server.port); // Intentionally same port as Python gateway defaults to, api should converge
-  console.log('Server starting on port %s', config.server.port);
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.log('A server, probably another copy of this, is already listening on port %s', config.server.port);
-    } else {
-      console.log('Server hit error %o', err);
-      throw (err); // Will be uncaught exception
-    }
-  });
-}
-
 
 const app = express();
 
+// Things done on any query
 app.use((req, res, next) => {
   res.set(responseHeaders);
   /*
@@ -216,7 +243,7 @@ app.use((req, res, next) => {
   next();
 });
 
-//app.use(cookieParser());
+//app.use(cookieParser()); // Not required - see comment on https://www.npmjs.com/package/express-session
 
 // Respond to options - not sure if really needed, but seems to help in other servers.
 app.options('/', (req, res) => {
@@ -226,6 +253,7 @@ app.options('/', (req, res) => {
 
 // app.use(express.json()); // Uncomment if expecting Requests with a JSON body http://expressjs.com/en/5x/api.html#express.json
 
+// Start the recognition of specific URL paths
 
 app.get('/echo', (req, res) => {
   res.status(200).json(req.headers);
@@ -258,9 +286,11 @@ app.get('/config.json',
   });
   res.status(200).json(config);
 });
+// This /debug can be rewritten to help debug stuff, nothing should rely on what it does
 app.get('/debug', (req, res) => {
   res.status(200).json(mqttLogger.reportNodes());
 });
+// Stick this as middleware to debug
 function debugRoutes(req, res, next) {
   console.log(req.url);
   next();
@@ -294,7 +324,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
       next();
     })
 
-
+    console.log("Doing OTA updates at /ota_update from", otadir);
     app.get('/ota_update/:org/:project/:node/:attribs', (req, res) => {
       const version = req.headers['x-esp8266-version'] || req.headers['x-esp32-version'];
       const currentMD5 = req.headers['x-esp8266-sketch-md5'] || req.headers['x-esp32-sketch-md5'];
@@ -325,22 +355,19 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     });
 
     // Serve Node modules at /node_modules but configure where to get them.
+    console.log("Serving /node_modules from", nodemodulesdir);
     const routerNM = express.Router();
     app.use('/node_modules', routerNM);
     //routerData.use('/', (req, res, next) => { console.log("NM:", req.url); next(); });
     routerNM.use(express.static(nodemodulesdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
     // Serve frugal-iot-logger data at /data but configure where to get them.
+    console.log("Serving /data from", datadir);
     const routerData = express.Router();
     app.use('/data', routerData);
     // Important that these aren't cached, or the data will not be updated.
-    //routerData.use('/', (req, res, next) => { console.log("D:", req.url); next(); });
     routerData.use(express.static(datadir, {immutable: false}));
 
-    // Server HTML files from a configurable location
-    // Use a 1 day cache to keep traffic down
-    // Its important that frugaliot.css is cached, or the UX will flash while checking it hasn't changed.
-    console.log("Serving from", htmldir);
     // TODO-89 should have db creation separate.
     openOrCreateDatabase((err, db) => {
       if (err) {
@@ -373,20 +400,14 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             return cb(null, user);
           });
         });
-        console.log("Setting up passport for login and register")
         //https://www.passportjs.org/howtos/password/
+
+        // Check if have a session, and if so store in req.user
         app.use(passport.authenticate('session')); // Add user to req.user
-        app.get('/dashboard',    // Permissions flow (see notes at top): Security Step A
-          (req,res,next) => {
-            console.log("/dashboard handler", !req.user ? "not" : "", "authenticated:", req.user ? req.user : ""); next(); },
-          isLoggedIn,
-          (req,res,next) => {
-            res.status(200).sendFile(process.cwd() + '/dashboard.html');
-          }
-        );
+
         app.post('/login',
           (req,res,next) => {
-            console.log("Trying to login");
+            console.log("Trying to login with redirect to",req.body.url);
             // This is ugly, but I cannot see how to pass the URL to passport.authenticate options
             passport.authenticate('local', {
               session: true,
@@ -425,25 +446,41 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             }
           });
         });
+
+        const routerDashboard = express.Router();
+        app.use('/dashboard', routerDashboard);
+        routerDashboard.use(
+          (req,res,next) => {
+            console.log("/dashboard handler for", req.url);
+            next(); },
+          shouldIBeLoggedIn, // redirect to ./login.html if not logged in then back here
+          express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+
         const routerPrivate = express.Router();
         app.use('/private', routerPrivate);
         routerPrivate.use(
           (req,res,next) => {
             console.log("/private handler for", req.url);
             next(); },
-          passport.authenticate('session'),
+          isLoggedIn,
           (req,res,next) => {
             console.log("/private handler authenticated by session for", req.url); next(); },
           // TODO-89 should configure where /private is - maybe in frugal-iot-client
-          express.static("./private", {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+          express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
-          // function(req, res, next)
+        // Serve HTML files from a configurable location
+        // Use a 1 day cache to keep traffic down
+        // Its important that frugaliot.css is cached, or the UX will flash while checking it hasn't changed.
+        // This has to come AFTER all the more specific paths like /data etc
         // Default catches rest (especially "/" so should be last)
         app.use(
           (req,res,next) => {
             console.log("Default handler for", req.url); next(); },
           express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+
+        // Now start the server
         startServer();
+        // And logger
         //mqttLogger.start(); //TODO-89 uncomment
       }
     });
