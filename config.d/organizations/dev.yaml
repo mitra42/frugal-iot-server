@@ -41,6 +41,8 @@ projects:
             type: bool
           ledbuiltin:
             type: bool
+          loadcell:
+            type: float
   magi:
     name: Magi Farm
     nodes:
