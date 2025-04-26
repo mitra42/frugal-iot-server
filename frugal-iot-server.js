@@ -4,33 +4,42 @@
  * It has a few key functions
  * - Static server of UI files (frugal-iot-client) - intentionally agnostic about those files.
  * - Spawn the frugal-iot-logger which listens to MQTT and logs to disk
- *
- * Serves up following ....
- * /      Static serve frugal-iot-client (will move to dashboard and put static HTML here).
- * /config.json Return configuration info - depends on user's org (TODO-89)
- * /data  Back files from logger for graphing
- * /dashboard  Currently just for testing, but eventually will serve current dashboard (frugal-iot-client)
+
+  Serves up following ....
+ * = available to all
+ A must be authenticated to see this, but not checking permissions at this point (effectively done through config.json)
+ O available only if authenticated in the right organization should be 403 if wrong org
+ P Tighter permissions than just being in the organization
+ X not currently implemented
+ *O means currently * should be O
+
+ * /  Static serve frugal-iot-client (TODO-89 will move to dashboard and put static HTML here).
+ O /config.json Return configuration info - depends on user's org
+ O /data  Back files from logger for graphing
+ A /dashboard serves dashboard via frugal-iot-client
  * /debug repurposed for development
  * /echo  Send back headers etc
+ * /login (get) servered under default handler - which might go away TODO-89 make sure not hidden under dashboards Authentication
  * /login (post) login a user, & redirect (to dashboard typically)
- * /register (post) register a new user
  * /node_modules  Javascript libraries (from frugal-iot-client)
- * /oto_update OTA updates
- * /ota (post) TODO-89 protected place to upload new binaries
- * /private Serve up private files under authentication - currently unused
- *
+ * /oto_update OTA updates - this is what nodes call
+ XP /ota (post) TODO-89 protected place to upload new binaries
+ O  /private Serve up private files under authentication - currently unused
+ * /register (post) register a new user
  */
  /*
-  How permissions work
+  How permissions work TODO-89 rewrite
   Look for e.g. "Security Step A" in code below
   A: /dashboard => authenticate => ( server htmldir OR 303:login?tab=signin )
   - /login => form.
   - post/login => check and set session => 303:dashboard || 303:login?tab=register
   - post/register => create user => 303:/dashboard || 303:login?tab=register
   - "/dashboard" should be protected (replaces "/")
-  === DONE TO HERE TODO-89====
   - /config => authenticate => serve config.json || 401:fail || 403:wrong org
+  - /config needs place to ask what orgs have permissions for - see below for making that real but add hook here
   - GET/ota NOT protected (as accessed by devices)
+  - /data/xxx should depend on orgs have permissions for.
+  === DONE TO HERE TODO-89====
   - POST/ota protected
   - add CSS to login.html
   - dont collect picture, but get Name and email and org
@@ -42,7 +51,10 @@
   - /index-template.html figure out how to authenticate in an embedded context
   - restart the logger ....
   - remove unneccesary logging
+  - add a /index that has dashboard as a link but also info.
   - see if can remove default "/" handler
+  - remove unneccessary console.logging
+  - can remove this step-by-step
   */
 
 
@@ -68,8 +80,8 @@ const htmldir = process.cwd() + "/../frugal-iot-client";  // Serves "/"
 const nodemodulesdir = htmldir + "/node_modules"; // Serves "/node_modules"
 
 // Currently same on both production and development
-const datadir = process.cwd() + "/data"; // Serves "/data"
-const otadir = process.cwd() + "/ota"; // Hierarchy of bin files for OTA updates
+const datadir = process.cwd() + "/data"; // Serves "/data" //TODO move to config
+const otadir = process.cwd() + "/ota"; // Hierarchy of bin files for OTA updates //TODO move to config
 
 // Imports needed for Authentication
 import passport from 'passport';
@@ -195,9 +207,9 @@ passport.use(new LocalStrategy(function verify(username, password, cb) {
   });
 }));
 
-// Helper function - use as middleware for get, put and use
+// Helper functions - use as middleware for get, put and use
 // TODO-89 this might go away, replaced by shouldIBeLoggedIn - note that /login will be served from default handler which might go away
-function isLoggedIn(req, res, next) {
+function loggedInOrRedirect(req, res, next) {
   if (req.isAuthenticated()) {
     next();
   } else {
@@ -205,15 +217,26 @@ function isLoggedIn(req, res, next) {
     res.redirect(307, '/login.html?register=false&message=Please%20login&url=' + req.originalUrl);
   }
 }
+function loggedInOrFail(req, res, next) {
+  if (req.isAuthenticated()) {
+    next();
+  } else {
+    res.sendStatus(401); // Just fail - this shouldnt happen as Dashboard should be protected
+  }
+}
 // While serving from frugal-iot-client its only the dashboard we want to protect
 // as need user to be logged in to access config etc
+// Note if originalUrl is /dashboard/index.html then req.url is just /index.html
 function shouldIBeLoggedIn(req, res, next) {
   if ((['/','/index.html'].includes(req.url)) && !req.isAuthenticated()) {
-    res.redirect(307, './login.html?register=false&message=Please%20login&url=' + req.originalUrl);
+    console.log("XXX223");
+    res.redirect(307, '../login.html?register=false&message=Please%20login&url=' + req.originalUrl);
   } else {
     next();
   }
 }
+
+
 // TODO check on size of fields hashed_password and salt
 const sqlstart = `
 CREATE TABLE IF NOT EXISTS \`users\` (
@@ -225,7 +248,46 @@ CREATE TABLE IF NOT EXISTS \`users\` (
 );
 `;
 
-
+function addLoggedNodesToConfig() {
+  // TODO-89 TODO-90 this should strip out any sensitive information like passwords
+  let configPlusNodes = config; // pointer to, not copy of
+  let nodes = mqttLogger.reportNodes(); // { orgid, { projid, { nodeid: lastseen } }
+  let oo = configPlusNodes.organizations; // pointer into it
+  Object.entries(nodes).forEach(([orgid, projects]) => {
+    if (!oo[orgid]) {
+      oo[orgid] = { projects: {}};
+    }
+    let pp = oo[orgid].projects;
+    Object.entries(projects).forEach(([projectid, nodes]) => {
+      if (!pp[projectid]) {
+        pp[projectid] = { nodes: {}};
+      }
+      let nn = pp[projectid].nodes;
+      Object.entries(nodes).forEach(([nodeid, lastseen]) => {
+        if (!nn[nodeid]) {
+          nn[nodeid] = {};
+        }
+        nn[nodeid].lastseen = lastseen;
+      });
+    });
+  });
+}
+// Produce an "unsafe" copy of config, i.e. its a subset of config but points to objects rather than copying. Don't change the result!
+function unsafeCopyConfigFor(user) {
+  let oo = { organizations: {} };
+  Object.entries(config).forEach(([key, value]) => {
+    if (key === 'organizations') {
+      Object.entries(value).forEach(([orgid, org]) => {
+        if (orgid === user.organization) { // TODO-89 should check if user is allowed to see this org
+          oo.organizations[orgid] = org;
+        }
+      });
+    } else {
+      oo[key] = value;
+    }
+  });
+  return oo;
+}
 // ============ End Helper functions ============
 
 const app = express();
@@ -258,35 +320,7 @@ app.options('/', (req, res) => {
 app.get('/echo', (req, res) => {
   res.status(200).json(req.headers);
 });
-// TODO-89 - this should authenticate
-app.get('/config.json',
-
-  (req, res) => {
-  // TODO-89 TODO-90 this should strip out any sensitive information like passwords
-  let configPlusNodes = config;
-  let nodes = mqttLogger.reportNodes(); // { orgid, { projid, { nodeid: lastseen } }
-  let oo = configPlusNodes.organizations;
-  Object.entries(nodes).forEach(([orgid, projects]) => {
-    if (!oo[orgid]) {
-      oo[orgid] = { projects: {}};
-    }
-    let pp = oo[orgid].projects;
-    Object.entries(projects).forEach(([projectid, nodes]) => {
-      if (!pp[projectid]) {
-        pp[projectid] = { nodes: {}};
-      }
-      let nn = pp[projectid].nodes;
-      Object.entries(nodes).forEach(([nodeid, lastseen]) => {
-        if (!nn[nodeid]) {
-          nn[nodeid] = {};
-        }
-        nn[nodeid].lastseen = lastseen;
-      });
-    });
-  });
-  res.status(200).json(config);
-});
-// This /debug can be rewritten to help debug stuff, nothing should rely on what it does
+// This /debug can be freeely rewritten to help debug stuff, nothing should rely on what it does remaining constant
 app.get('/debug', (req, res) => {
   res.status(200).json(mqttLogger.reportNodes());
 });
@@ -300,7 +334,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
   if (err) {
     console.error(err);
   } else {
-    config = configobj;
+    /* global */ config = configobj;
     console.log("Config=", config);
     // Could genericize config defaults
     if (!config.morgan) {
@@ -326,6 +360,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
 
     console.log("Doing OTA updates at /ota_update from", otadir);
     app.get('/ota_update/:org/:project/:node/:attribs', (req, res) => {
+      //Intentionally no login
       const version = req.headers['x-esp8266-version'] || req.headers['x-esp32-version'];
       const currentMD5 = req.headers['x-esp8266-sketch-md5'] || req.headers['x-esp32-sketch-md5'];
       console.log("GET: parms=", req.params, "version:", version, "md5", currentMD5);
@@ -361,13 +396,6 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     //routerData.use('/', (req, res, next) => { console.log("NM:", req.url); next(); });
     routerNM.use(express.static(nodemodulesdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
-    // Serve frugal-iot-logger data at /data but configure where to get them.
-    console.log("Serving /data from", datadir);
-    const routerData = express.Router();
-    app.use('/data', routerData);
-    // Important that these aren't cached, or the data will not be updated.
-    routerData.use(express.static(datadir, {immutable: false}));
-
     // TODO-89 should have db creation separate.
     openOrCreateDatabase((err, db) => {
       if (err) {
@@ -390,7 +418,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             return cb(null, {
               id: user.id,
               username: user.username,
-              picture: user.organization,
+              organization: user.organization,
             });
           });
         });
@@ -447,6 +475,16 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           });
         });
 
+        app.get('/config.json',
+          loggedInOrFail,
+          (req,res,next) => {
+            addLoggedNodesToConfig();
+            let oo = unsafeCopyConfigFor(req.user);
+            // TODO-89 should check which orgs approved
+            res.status(200).json(oo);
+          },
+        );
+
         const routerDashboard = express.Router();
         app.use('/dashboard', routerDashboard);
         routerDashboard.use(
@@ -456,15 +494,29 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           shouldIBeLoggedIn, // redirect to ./login.html if not logged in then back here
           express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
+        // Serve frugal-iot-logger data at /data but configure where to get them.
+        console.log("Serving /data from", datadir);
+        //TODO-89 should be authenticated to correct org
+        const routerData = express.Router();
+        app.use('/data', routerData);
+        // Important that these aren't cached, or the data will not be updated.
+        routerData.use(
+          loggedInOrRedirect,
+          (req,res,next) => { console.log("/data handler authenticated by session for", req.url); next(); },
+          (req,res,next) => {
+            if (req.url.startsWith(`/${req.user.organization}/`)) {
+              next();
+            } else {
+              res.sendStatus(403);
+            }
+          },
+          express.static(datadir, {immutable: false}));
+
         const routerPrivate = express.Router();
         app.use('/private', routerPrivate);
         routerPrivate.use(
-          (req,res,next) => {
-            console.log("/private handler for", req.url);
-            next(); },
-          isLoggedIn,
-          (req,res,next) => {
-            console.log("/private handler authenticated by session for", req.url); next(); },
+          loggedInOrRedirect,
+          //(req,res,next) => { console.log("/private handler authenticated by session for", req.url); next(); },
           // TODO-89 should configure where /private is - maybe in frugal-iot-client
           express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
