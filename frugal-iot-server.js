@@ -117,7 +117,8 @@ function findMostSpecificFile(topdir, org, project, node, attribs, cb) {
     `/${node}`,
     `${project}/${attribs}`,
     `${attribs}`
-    ].map(x => `${topdir}/${org}/${x}/frugal-iot.ino.bin`);
+    ].map(x => [`${topdir}/${org}/${x}/frugal-iot.ino.bin`,`${topdir}/${org}/${x}/firmware.bin`])
+    .flat();
   detectSeries(possfiles, (path, cb1) => {
       access(path, constants.R_OK, (err) => { cb1(null, !err); })},
     cb);
