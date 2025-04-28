@@ -39,12 +39,12 @@
   - /config needs place to ask what orgs have permissions for - see below for making that real but add hook here
   - GET/ota NOT protected (as accessed by devices)
   - /data/xxx should depend on orgs have permissions for.
-  === DONE TO HERE TODO-89====
-  - POST/ota protected
   - add CSS to login.html
+  === DONE TO HERE TODO-89====
   - dont collect picture, but get Name and email and org
   - Only connect to mqtt with credentials from /config\
   - Add permissions, not just authentication
+  - POST/ota protected
   - Add email and email verification
   - Add process for approving permissions (esp membership of "org")
   - /logout
