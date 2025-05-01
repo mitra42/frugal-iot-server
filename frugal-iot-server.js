@@ -64,24 +64,12 @@ import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http requ
 
 // Production
 // import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
-// Development
+// Development of Logger
 import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
 import { access, constants, createReadStream } from 'fs'; // https://nodejs.org/api/fs.html
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
-
-// Production - when client and logger installed by "npm install" on frugal-iot-server
-//const nodemodulesdir = process.cwd() + "/node_modules"; // Serves "/node_modules"
-//const htmldir = nodemodulesdir + "/frugal-iot-client";  // Serves "/"
-
-// Development - This is an alternative when developing client and server together
-const htmldir = process.cwd() + "/../frugal-iot-client";  // Serves "/"
-const nodemodulesdir = htmldir + "/node_modules"; // Serves "/node_modules"
-
-// Currently same on both production and development
-const datadir = process.cwd() + "/data"; // Serves "/data" //TODO move to config
-const otadir = process.cwd() + "/ota"; // Hierarchy of bin files for OTA updates //TODO move to config
 
 // Imports needed for Authentication
 import passport from 'passport';
@@ -359,13 +347,13 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
       next();
     })
 
-    console.log("Doing OTA updates at /ota_update from", otadir);
+    console.log("Doing OTA updates at /ota_update from", config.server.otadir);
     app.get('/ota_update/:org/:project/:node/:attribs', (req, res) => {
       //Intentionally no login
       const version = req.headers['x-esp8266-version'] || req.headers['x-esp32-version'];
       const currentMD5 = req.headers['x-esp8266-sketch-md5'] || req.headers['x-esp32-sketch-md5'];
       console.log("GET: parms=", req.params, "version:", version, "md5", currentMD5);
-      findMostSpecificFile(otadir, req.params.org, req.params.project, req.params.node, req.params.attribs,
+      findMostSpecificFile(config.server.otadir, req.params.org, req.params.project, req.params.node, req.params.attribs,
         (err, path) => {
           if (err) {
             console.error(err);
@@ -391,11 +379,11 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     });
 
     // Serve Node modules at /node_modules but configure where to get them.
-    console.log("Serving /node_modules from", nodemodulesdir);
+    console.log("Serving /node_modules from", config.server.nodemodulesdir);
     const routerNM = express.Router();
     app.use('/node_modules', routerNM);
     //routerData.use('/', (req, res, next) => { console.log("NM:", req.url); next(); });
-    routerNM.use(express.static(nodemodulesdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+    routerNM.use(express.static(config.server.nodemodulesdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
     // TODO-89 should have db creation separate.
     openOrCreateDatabase((err, db) => {
@@ -493,10 +481,10 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             console.log("/dashboard handler for", req.url);
             next(); },
           shouldIBeLoggedIn, // redirect to ./login.html if not logged in then back here
-          express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+          express.static(config.server.htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
         // Serve frugal-iot-logger data at /data but configure where to get them.
-        console.log("Serving /data from", datadir);
+        console.log("Serving /data from", config.server.datadir);
         //TODO-89 should be authenticated to correct org
         const routerData = express.Router();
         app.use('/data', routerData);
@@ -511,7 +499,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
               res.sendStatus(403);
             }
           },
-          express.static(datadir, {immutable: false}));
+          express.static(config.server.datadir, {immutable: false}));
 
         const routerPrivate = express.Router();
         app.use('/private', routerPrivate);
@@ -519,7 +507,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           loggedInOrRedirect,
           //(req,res,next) => { console.log("/private handler authenticated by session for", req.url); next(); },
           // TODO-89 should configure where /private is - maybe in frugal-iot-client
-          express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+          express.static(config.server.privatedir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
         // Serve HTML files from a configurable location
         // Use a 1 day cache to keep traffic down
@@ -527,10 +515,8 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         // This has to come AFTER all the more specific paths like /data etc
         // Default catches rest (especially "/" so should be last)
         app.use(
-          (req,res,next) => {
-            console.log("Default handler for", req.url); next(); },
-          express.static(htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
-
+          express.static(config.server.publicdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24})
+        );
         // Now start the server
         startServer();
         // And logger

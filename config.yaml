@@ -1,3 +1,0 @@
-# Configuration for FrugalIoT server
-server:
-  port: 8080
