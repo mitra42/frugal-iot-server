@@ -83,6 +83,7 @@ import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, valid
 
 let config;
 let mqttLogger = new MqttLogger();
+const loginUrl = '/dashboard/login.html';
 
 const optionsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -144,8 +145,7 @@ function startServer() {
 }
 // ============ Authentication related =========
 let db; // For storing users
-const dbpath = "/Users/mitra/temp/frugal-iot.db"; // TODO-89 where should this live - make sure not somewhere the server will serve it.
-
+const dbpath = "./frugal-iot.db"; // TODO-89 where should this live - make sure not somewhere the server will serve it.
 function openOrCreateDatabase(cb) {
   access(dbpath, (constants.W_OK | constants.R_OK), (err) => {
     if (err) {
@@ -203,7 +203,7 @@ function loggedInOrRedirect(req, res, next) {
     next();
   } else {
     // If originalUrl is /private/index.html then req.url is just /index.html
-    res.redirect(307, '/login.html?register=false&message=Please%20login&url=' + req.originalUrl);
+    res.redirect(307, `${loginUrl}?register=false&message=Please%20login&url=` + req.originalUrl);
   }
 }
 function loggedInOrFail(req, res, next) {
@@ -219,7 +219,7 @@ function loggedInOrFail(req, res, next) {
 function shouldIBeLoggedIn(req, res, next) {
   if ((['/','/index.html'].includes(req.url)) && !req.isAuthenticated()) {
     console.log("XXX223");
-    res.redirect(307, '../login.html?register=false&message=Please%20login&url=' + req.originalUrl);
+    res.redirect(307, `${loginUrl}?register=false&message=Please%20login&url=` + req.originalUrl);
   } else {
     next();
   }
@@ -390,7 +390,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
       if (err) {
         console.error("Error opening or creating database", err);
       } else {
-        ///app.use(express.json()); // Not needed
+        // app.use(express.json()); // Not needed
         app.use(express.urlencoded({ extended: true })); // Passport wont function without this
         app.set('trust proxy', 1); // trust first proxy - see note in https://www.npmjs.com/package/express-session
         // TODO-89 note need to setup session store, defaults to memory store which is not good for production
@@ -429,10 +429,10 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             passport.authenticate('local', {
               session: true,
               //failWithError: true,
-              failureRedirect: `/login.html?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
+              failureRedirect: `${loginUrl}?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
               successRedirect: req.body.url,
               // In failure case will also be messages in the session which need clearing out TODO-89
-              //failureRedirect: `/login.html?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
+              //failureRedirect: `${loginUrl}?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
             })(req, res, next);
           }
         );
@@ -453,9 +453,9 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                   db.run('INSERT INTO users (username, hashed_password, salt, organization) VALUES (?, ?, ?, ?)',
                     [username, hashedPassword, salt, organization], (err) => {
                       if (err) {
-                        res.redirect(`/login.html?register=true&message=Registration%20failed&url=${req.body.url}`);
+                        res.redirect(`${loginUrl}?register=true&message=Registration%20failed&url=${req.body.url}`);
                       } else {
-                        res.redirect(`/login.html?register=false&message=Registration%20successful%20-%20please%20login&url=${req.body.url}`);
+                        res.redirect(`${loginUrl}?register=false&message=Registration%20successful%20-%20please%20login&url=${req.body.url}`);
                       }
                     });
                 }
@@ -520,7 +520,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         // Now start the server
         startServer();
         // And logger
-        //mqttLogger.start(); //TODO-89 uncomment
+        mqttLogger.start();
       }
     });
   }
