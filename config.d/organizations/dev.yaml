@@ -6,6 +6,19 @@ projects:
     name: Lotus Ponds
     nodes:
       +:
+        sub:
+          +:
+            topics:
+              humidity:
+                type: float
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              temperature:
+                type: float
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
         topics:
           humidity:
             type: float
