@@ -40,8 +40,9 @@
   - GET/ota NOT protected (as accessed by devices)
   - /data/xxx should depend on orgs have permissions for.
   - add CSS to login.html
-  === DONE TO HERE TODO-89====
   - dont collect picture, but get Name and email and org
+  === DONE TO HERE TODO-89====
+  - organization on login.html should be a dropdown
   - Only connect to mqtt with credentials from /config\
   - Add permissions, not just authentication
   - POST/ota protected
@@ -191,7 +192,8 @@ passport.use(new LocalStrategy(function verify(username, password, cb) {
       if (!crypto.timingSafeEqual(user.hashed_password, hashedPassword)) {
         return cb(null, false, { message: 'Incorrect username or password*' });
       }
-      return cb(null, {id: user.id, username: user.username, organization: user.organization});
+      return cb(null, {id: user.id, username: user.username, organization: user.organization,
+        name: user.name, email: user.email, phone: user.phone}); // TO-ADD-REGISTRATION-FIELD
     });
   });
 }));
@@ -227,6 +229,7 @@ function shouldIBeLoggedIn(req, res, next) {
 
 
 // TODO check on size of fields hashed_password and salt
+// TO-ADD-REGISTRATION-FIELD
 const sqlstart = `
 CREATE TABLE IF NOT EXISTS \`users\` (
   \`id\` INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -234,6 +237,9 @@ CREATE TABLE IF NOT EXISTS \`users\` (
   \`hashed_password\` BLOB,
   \`salt\` BLOB '',
   \`organization\` varchar(20) NOT NULL DEFAULT ''
+  \`name\` TEXT,
+  \`email\` TEXT,
+  \`phone\` TEXT,
 );
 `;
 
@@ -404,10 +410,14 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         passport.serializeUser(function(user, cb) {
           process.nextTick(function() {
             console.log("Serializing");
+            // TO-ADD-REGISTRATION-FIELD
             return cb(null, {
               id: user.id,
               username: user.username,
               organization: user.organization,
+              name: user.name,
+              email: user.email,
+              phone: user.phone,
             });
           });
         });
@@ -438,7 +448,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         );
         app.post('/register', (req, res) => {
           console.log("username=", req.body.username); // may want to log registrations
-          console.log("password=", req.body.password); //TODO-89 remove !
+          //console.log("password=", req.body.password);
           const username = req.body.username;
           const password = req.body.password;
           const organization = req.body.organization; //TODO-89 should be validated and can only be "dev" without approval
@@ -450,8 +460,9 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                 if (err) {
                   res.status(500).json({ message: 'Internal error' });
                 } else {
-                  db.run('INSERT INTO users (username, hashed_password, salt, organization) VALUES (?, ?, ?, ?)',
-                    [username, hashedPassword, salt, organization], (err) => {
+                  // TO-ADD-REGISTRATION-FIELD
+                  db.run('INSERT INTO users (username, hashed_password, salt, organization, name, email, phone) VALUES (?, ?, ?, ?)',
+                    [username, hashedPassword, salt, organization, req.body.name, req.body.email, req.body.phone], (err) => {
                       if (err) {
                         res.redirect(`${loginUrl}?register=true&message=Registration%20failed&url=${req.body.url}`);
                       } else {
