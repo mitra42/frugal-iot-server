@@ -461,9 +461,10 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                   res.status(500).json({ message: 'Internal error' });
                 } else {
                   // TO-ADD-REGISTRATION-FIELD
-                  db.run('INSERT INTO users (username, hashed_password, salt, organization, name, email, phone) VALUES (?, ?, ?, ?)',
+                  db.run('INSERT INTO users (username, hashed_password, salt, organization, name, email, phone) VALUES (?, ?, ?, ?, ?, ?, ?)',
                     [username, hashedPassword, salt, organization, req.body.name, req.body.email, req.body.phone], (err) => {
                       if (err) {
+                        console.log(err);
                         res.redirect(`${loginUrl}?register=true&message=Registration%20failed&url=${req.body.url}`);
                       } else {
                         res.redirect(`${loginUrl}?register=false&message=Registration%20successful%20-%20please%20login&url=${req.body.url}`);
