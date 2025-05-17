@@ -1,0 +1,10 @@
+# URL client should use to find logger
+# "/data" would mean to get from same server,
+# "https://frugal.naturalinnovation.org/data" will get from main production server
+# BUT this doesnt work yet - since there are permissions issues if login ot local server then get from production
+# url:  https://frugaliot.naturalinnovation.org/data
+url: /data
+#TODO add info that server should use when launching logger
+#TODO add info that logger uses for its own configuraton
+#TODO see https://github.com/mitra42/frugal-iot-server/issues/7 and
+#TODO see https://github.com/mitra42/frugal-iot/wiki/Moving-Server,-Broker,-Client,-Logger,-Node-independently-%E2%80%90-how-they-find-each-other

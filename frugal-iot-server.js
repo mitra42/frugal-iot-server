@@ -56,6 +56,8 @@
   - see if can remove default "/" handler
   - remove unneccessary console.logging
   - can remove this step-by-step
+  - tools for managing users - listing, approving etc
+  - fix issues with accessing html from localhost and logger on frugaliot.naturalinnovation.org
   */
 
 
