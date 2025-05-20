@@ -82,3 +82,23 @@ projects:
                 duplicates:
                   significantdate: 900000
                   significantvalue: 100
+              aqi:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              aqi500:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              tvoc:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              eco2:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
