@@ -363,7 +363,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
       console.log("GET: parms=", req.params, "version:", version, "md5", currentMD5);
       // sendFile insists on absolute file names or root-ed
       if (config.server.otadir.startsWith("./")) {
-        config.server.otadir = __dirname + config.server.otadir.substring(1);
+        config.server.otadir = process.cwd() + config.server.otadir.substring(1);
       }
       findMostSpecificFile(config.server.otadir, req.params.org, req.params.project, req.params.node, req.params.attribs,
         (err, path) => {
