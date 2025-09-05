@@ -361,6 +361,10 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
       const version = req.headers['x-esp8266-version'] || req.headers['x-esp32-version'];
       const currentMD5 = req.headers['x-esp8266-sketch-md5'] || req.headers['x-esp32-sketch-md5'];
       console.log("GET: parms=", req.params, "version:", version, "md5", currentMD5);
+      // sendFile insists on absolute file names or root-ed
+      if (config.server.otadir.startsWith("./")) {
+        config.server.otadir = __dirname + config.server.otadir.substring(1);
+      }
       findMostSpecificFile(config.server.otadir, req.params.org, req.params.project, req.params.node, req.params.attribs,
         (err, path) => {
           if (err) {
