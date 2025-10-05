@@ -9,7 +9,8 @@
  * = available to all
  A must be authenticated to see this, but not checking permissions at this point (effectively done through config.json)
  O available only if authenticated in the right organization should be 403 if wrong org
- P Tighter permissions than just being in the organization
+ Δ changed depending on authentication or permissions or organization
+ * P Tighter permissions than just being in the organization
  X not currently implemented
  *O means currently * should be O
 
@@ -22,29 +23,44 @@
  * /login (get) servered under default handler - which might go away TODO-89 make sure not hidden under dashboards Authentication
  * /login (post) login a user, & redirect (to dashboard typically)
  * /node_modules  Javascript libraries (from frugal-iot-client)
- * /oto_update OTA updates - this is what nodes call
- XP /ota (post) TODO-89 protected place to upload new binaries
+ * /ota_update/:org/:project/:node/:attribs  OTA updates - this is what nodes call
+ X*Δ /admin (get) TODO-14 admin forms (including for adding new binaries)
+ XP /ota_update (post) TODO-89 protected place to upload new binaries
  O  /private Serve up private files under authentication - currently unused
  * /register (post) register a new user
  */
  /*
   How permissions work TODO-89 rewrite
-  Look for e.g. "Security Step A" in code below
-  A: /dashboard => authenticate => ( server htmldir OR 303:login?tab=signin )
+
+ Permissions from the user flow perspective
+  - /dashboard => authenticate => ( server htmldir OR 303:login?tab=signin )
   - /login => form.
-  - post/login => check and set session => 303:dashboard || 303:login?tab=register
-  - post/register => create user => 303:/dashboard || 303:login?tab=register
+  - post/login => check and set session => ✔︎ 303:dashboard ╳ 303:login?tab=register
+  - post/register => create user => ︎✔︎ 303:/dashboard ╳ 303:login?tab=register
   - "/dashboard" should be protected (replaces "/")
   - /config => authenticate => serve config.json || 401:fail || 403:wrong org
   - /config needs place to ask what orgs have permissions for - see below for making that real but add hook here
   - GET/ota NOT protected (as accessed by devices)
-  - /data/xxx should depend on orgs have permissions for.
-  - add CSS to login.html
-  - dont collect picture, but get Name and email and org
+  - /data/xxx should depend on orgs have permissions for. TODO
+
+  Permissions from code perspective -
+  Half the calls to passport set things up, the others use them. The flow is ...
+  POST /login -> 'local' which uses 'LocalService'
+  TODO-14 add permissions as array of strings from LocalStrategy so ends up in service
+  LocalStrategy is defined with three outcomes: error;  ✔︎ { id..phone}  ╳ "incorrect"
+  Because LocalStrategy specifies session, it uses SerializeUser to store session, and redirects to dashboard
+  Other calls checks session - (app.use 'passport.authenticate('session')
+  which uses DeserializeUser to access {id...phone} and adds to req.user
+  then
+    /config.json checks req.user and uses it to filter config
+    /dashboard uses req.isAuthenticated() to check if logged in, if not redirects to /login
+    /data checks loggedInOrRedirect ╳ 307->/login and req.user.organization ╳ 403 ✔︎ serve static
+    /private uses loggedInOrRedirect ╳ 307->/login, ✔︎ serve static
+
   === DONE TO HERE TODO-89====
-  - organization on login.html should be a dropdown
+  - organization on login.html (for register) should be a dropdown
+  - organization on dashboard should be a dropdown based on permissions
   - Only connect to mqtt with credentials from /config\
-  - Add permissions, not just authentication
   - POST/ota protected
   - Add email and email verification
   - Add process for approving permissions (esp membership of "org")
@@ -152,7 +168,7 @@ const dbpath = "./frugal-iot.db"; // TODO-89 where should this live - make sure 
 function openOrCreateDatabase(cb) {
   access(dbpath, (constants.W_OK | constants.R_OK), (err) => {
     if (err) {
-      console.log("Creating user database");
+      console.log("Opening user database");
 
       db = new sqlite3.Database(dbpath, sqlite3.OPEN_CREATE | sqlite3.OPEN_READWRITE, (err) => {
         if (err) {
@@ -183,9 +199,11 @@ function openOrCreateDatabase(cb) {
   });
 }
 
+// This verifies the user, and if successfull returns a data structure via cb
+// see passport.authenticate('local'... for where it gets used
 passport.use(new LocalStrategy(function verify(username, password, cb) {
   db.get('SELECT * FROM users WHERE username = ?', [ username ], function(err, user) {
-    console.log("XXX129");
+    console.log("XXX204");
     if (err) { return cb(err); }
     if (!user) { return cb(null, false, { message: 'Incorrect username or password+' }); }
     // TODO- - maybe just import pbkdf2 and timingSafeEqual ?
@@ -194,8 +212,17 @@ passport.use(new LocalStrategy(function verify(username, password, cb) {
       if (!crypto.timingSafeEqual(user.hashed_password, hashedPassword)) {
         return cb(null, false, { message: 'Incorrect username or password*' });
       }
-      return cb(null, {id: user.id, username: user.username, organization: user.organization,
-        name: user.name, email: user.email, phone: user.phone}); // TO-ADD-REGISTRATION-FIELD
+      db.all('SELECT * FROM permissions WHERE id = ? or id = 0', [ user.id ], function(err, permissions) {
+        // permissions is [{ id, capability, org }]
+        console.log("XXX214", user.id, permissions);
+        if (err) {
+          return cb(err);
+        }
+        return cb(null, {
+          id: user.id, username: user.username, organization: user.organization,
+          name: user.name, email: user.email, phone: user.phone, permissions
+        }); // TO-ADD-REGISTRATION-FIELD
+      });
     });
   });
 }));
@@ -221,8 +248,8 @@ function loggedInOrFail(req, res, next) {
 // as need user to be logged in to access config etc
 // Note if originalUrl is /dashboard/index.html then req.url is just /index.html
 function shouldIBeLoggedIn(req, res, next) {
-  if ((['/','/index.html'].includes(req.url)) && !req.isAuthenticated()) {
-    console.log("XXX223");
+  if ((['/','/index.html','/admin.html'].includes(req.url)) && !req.isAuthenticated()) {
+    console.log("Not authenticated redirecting for login");
     res.redirect(307, `${loginUrl}?register=false&message=Please%20login&url=` + req.originalUrl);
   } else {
     next();
@@ -243,7 +270,13 @@ CREATE TABLE IF NOT EXISTS \`users\` (
   \`email\` TEXT,
   \`phone\` TEXT
 );
-`;
+CREATE TABLE IF NOT EXISTS \`permissions\` (
+  \`id\` INTEGER PRIMARY KEY,
+  \`capability\` TEXT NOT NULL,
+  \`org\` TEXT NOT NULL
+);
+`; // TODO-42 add {*, xxx, dev } for permissions everyone has
+
 
 function addLoggedNodesToConfig() {
   // TODO-89 TODO-90 this should strip out any sensitive information like passwords
@@ -397,7 +430,6 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     //routerData.use('/', (req, res, next) => { console.log("NM:", req.url); next(); });
     routerNM.use(express.static(config.server.nodemodulesdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
-    // TODO-89 should have db creation separate.
     openOrCreateDatabase((err, db) => {
       if (err) {
         console.error("Error opening or creating database", err);
@@ -413,6 +445,8 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           saveUninitialized: false,
           cookie: { secure: 'auto' }  // TODO-89 cant be secure: true while testing on HTTP
         }));
+        // This turns the registered data returned in "user" by
+        // TODO-14-XXX
         passport.serializeUser(function(user, cb) {
           process.nextTick(function() {
             console.log("Serializing");
@@ -424,18 +458,21 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
               name: user.name,
               email: user.email,
               phone: user.phone,
+              permissions: user.permissions,
             });
           });
         });
+        // TODO-14-XXX
         passport.deserializeUser(function(user, cb) {
           process.nextTick(function() {
-            console.log("Deserializing");
+            console.log("XXX14 Deserializing");
             return cb(null, user);
           });
         });
         //https://www.passportjs.org/howtos/password/
 
         // Check if have a session, and if so store in req.user
+        // TODO-14-XXX
         app.use(passport.authenticate('session')); // Add user to req.user
 
         app.post('/login',
@@ -517,8 +554,10 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
               res.sendStatus(403);
             }
           },
-          express.static(config.server.datadir, {immutable: false}));
+          express.static(config.server.datadir, {immutable: false})
+        );
 
+        // Serve private files under /private - needs authentication
         const routerPrivate = express.Router();
         app.use('/private', routerPrivate);
         routerPrivate.use(
