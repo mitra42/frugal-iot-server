@@ -6,7 +6,6 @@
   },
   "bugs": "https://github.com/mitra42/frugal-iot-server/issues",
   "dependencies": {
-    "async": "^3.2.6",
     "cookie-parser": "^1.4.7",
     "express": "^5.0.1",
     "express-session": "^1.18.1",
@@ -16,7 +15,6 @@
     "morgan": "^1.10.0",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
-    "sqlite-express-package": "^0.0.2",
     "sqlite3": "^5.1.7"
   },
   "description": "Frugal IoT client and server",
