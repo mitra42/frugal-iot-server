@@ -1,3 +1,5 @@
+// noinspection NodeCoreCodingAssistance,JSUnresolvedReference
+
 /*
  * Simple server for FrugalIoT
  *
@@ -20,7 +22,7 @@
  A /dashboard serves dashboard via frugal-iot-client
  * /debug repurposed for development
  * /echo  Send back headers etc
- * /login (get) servered under default handler - which might go away TODO-89 make sure not hidden under dashboards Authentication
+ * /login (get) served under default handler - which might go away TODO-89 make sure not hidden under dashboards Authentication
  * /login (post) login a user, & redirect (to dashboard typically)
  * /node_modules  Javascript libraries (from frugal-iot-client)
  * /ota_update/:org/:project/:node/:attribs  OTA updates - this is what nodes call
@@ -41,7 +43,7 @@
   - /config => authenticate => serve config.json || 401:fail || 403:wrong org
   - /config needs place to ask what orgs have permissions for - see below for making that real but add hook here
   - GET/ota NOT protected (as accessed by devices)
-  - /data/xxx should depend on orgs have permissions for. TODO
+  - /data/xxx should depend on orgs have permissions for. TODO-14
 
   Permissions from code perspective -
   Half the calls to passport set things up, the others use them. The flow is ...
@@ -67,10 +69,10 @@
   - /logout
   - /index-template.html figure out how to authenticate in an embedded context
   - restart the logger ....
-  - remove unneccesary logging
+  - remove unnecessary logging
   - add a /index that has dashboard as a link but also info.
   - see if can remove default "/" handler
-  - remove unneccessary console.logging
+  - remove unnecessary console.logging
   - can remove this step-by-step
   - tools for managing users - listing, approving etc
   - fix issues with accessing html from localhost and logger on frugaliot.naturalinnovation.org
@@ -97,8 +99,8 @@ import session from 'express-session'; // https://www.npmjs.com/package/express-
 import sqlite3 from 'sqlite3'; // https://www.npmjs.com/package/sqlite3
 import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
 // import cookieParser from 'cookie-parser'; // https://www.npmjs.com/package/cookie-parser (note comment on https://www.npmjs.com/package/express-session that not needed and conflicts with session)
-import {waterfall} from 'async';
-import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
+// import {waterfall} from 'async';
+// import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
 
 let config;
 let mqttLogger = new MqttLogger();
@@ -119,12 +121,14 @@ const responseHeaders = {
   'Keep-Alive': 'timeout=5, max=1000', // Up to 5 seconds idle, 1000 requests max
 };
 // ============ Helper functions ============
+// Note attribs is the otakey e.g. sht30_d1_mini
 function findMostSpecificFile(topdir, org, project, node, attribs, cb) {
   let possfiles = [
-    `${project}/${node}`,
+    `${project}/${node}`, // Unlikely - if specify node, should be at the org level
     `/${node}`,
     `${project}/${attribs}`,
     `${attribs}`
+    //TODO-C14 might want to accept other variants on Arduino like sht30.ini.bin
     ].map(x => [`${topdir}/${org}/${x}/frugal-iot.ino.bin`,`${topdir}/${org}/${x}/firmware.bin`])
     .flat();
   detectSeries(possfiles, (path, cb1) => {
@@ -199,22 +203,22 @@ function openOrCreateDatabase(cb) {
   });
 }
 
-// This verifies the user, and if successfull returns a data structure via cb
+// This verifies the user, and if successful returns a data structure via cb
 // see passport.authenticate('local'... for where it gets used
 passport.use(new LocalStrategy(function verify(username, password, cb) {
   db.get('SELECT * FROM users WHERE username = ?', [ username ], function(err, user) {
-    console.log("XXX204");
     if (err) { return cb(err); }
     if (!user) { return cb(null, false, { message: 'Incorrect username or password+' }); }
     // TODO- - maybe just import pbkdf2 and timingSafeEqual ?
     crypto.pbkdf2(password, user.salt, 310000, 32, 'sha256', function(err, hashedPassword) {
       if (err) { return cb(err); }
+      // noinspection JSUnresolvedReference
       if (!crypto.timingSafeEqual(user.hashed_password, hashedPassword)) {
         return cb(null, false, { message: 'Incorrect username or password*' });
       }
       db.all('SELECT * FROM permissions WHERE id = ? or id = 0', [ user.id ], function(err, permissions) {
         // permissions is [{ id, capability, org }]
-        console.log("XXX214", user.id, permissions);
+        console.log("User",user.id, "with permissions", permissions.map(x => x.capability + " " +x.org).join(","));
         if (err) {
           return cb(err);
         }
@@ -241,10 +245,10 @@ function loggedInOrFail(req, res, next) {
   if (req.isAuthenticated()) {
     next();
   } else {
-    res.sendStatus(401); // Just fail - this shouldnt happen as Dashboard should be protected
+    res.sendStatus(401); // Just fail - this should not happen as Dashboard should be protected
   }
 }
-// While serving from frugal-iot-client its only the dashboard we want to protect
+// While serving from frugal-iot-client it is only the dashboard we want to protect
 // as need user to be logged in to access config etc
 // Note if originalUrl is /dashboard/index.html then req.url is just /index.html
 function shouldIBeLoggedIn(req, res, next) {
@@ -275,24 +279,26 @@ CREATE TABLE IF NOT EXISTS \`permissions\` (
   \`capability\` TEXT NOT NULL,
   \`org\` TEXT NOT NULL
 );
-`; // TODO-42 add {*, xxx, dev } for permissions everyone has
+`; // TODO-42 TODO-14 add {*, xxx, dev } for permissions everyone has
 
 
 function addLoggedNodesToConfig() {
   // TODO-89 TODO-90 this should strip out any sensitive information like passwords
   let configPlusNodes = config; // pointer to, not copy of
-  let nodes = mqttLogger.reportNodes(); // { orgid, { projid, { nodeid: lastseen } }
+  let nodes = mqttLogger.reportNodes(); // { orgid, { projectid, { nodeid: lastseen } }
   let oo = configPlusNodes.organizations; // pointer into it
   Object.entries(nodes).forEach(([orgid, projects]) => {
     if (!oo[orgid]) {
       oo[orgid] = { projects: {}};
     }
     let pp = oo[orgid].projects;
+    // noinspection JSCheckFunctionSignatures
     Object.entries(projects).forEach(([projectid, nodes]) => {
       if (!pp[projectid]) {
         pp[projectid] = { nodes: {}};
       }
       let nn = pp[projectid].nodes;
+      // noinspection JSCheckFunctionSignatures
       Object.entries(nodes).forEach(([nodeid, lastseen]) => {
         if (!nn[nodeid]) {
           nn[nodeid] = {};
@@ -302,13 +308,17 @@ function addLoggedNodesToConfig() {
     });
   });
 }
-// Produce an "unsafe" copy of config, i.e. its a subset of config but points to objects rather than copying. Don't change the result!
+// Produce an "unsafe" copy of config, i.e. it is a subset of config but points to objects rather than copying. Don't change the result!
 function unsafeCopyConfigFor(user) {
-  let oo = { organizations: {} };
+  let oo = {
+    organizations: {},
+    user: user, // All data in user and permissions is visible to the user
+  };
   Object.entries(config).forEach(([key, value]) => {
     if (key === 'organizations') {
+      // noinspection JSCheckFunctionSignatures
       Object.entries(value).forEach(([orgid, org]) => {
-        if (orgid === user.organization) { // TODO-89 should check if user is allowed to see this org
+        if (orgid === user.organization) { // TODO-89 TODO-14 should check if user is allowed to see this org
           oo.organizations[orgid] = org;
         }
       });
@@ -350,11 +360,12 @@ app.options('/', (req, res) => {
 app.get('/echo', (req, res) => {
   res.status(200).json(req.headers);
 });
-// This /debug can be freeely rewritten to help debug stuff, nothing should rely on what it does remaining constant
+// This /debug can be freely rewritten to help debug stuff, nothing should rely on what it does remaining constant
 app.get('/debug', (req, res) => {
   res.status(200).json(mqttLogger.reportNodes());
 });
 // Stick this as middleware to debug
+// noinspection JSUnusedLocalSymbols
 function debugRoutes(req, res, next) {
   console.log(req.url);
   next();
@@ -383,6 +394,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
      */
 
     // Just log the request for now
+    // noinspection JSCheckFunctionSignatures
     app.use('/', (req, res, next) => {
       console.log(req.url);
       next();
@@ -435,7 +447,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         console.error("Error opening or creating database", err);
       } else {
         // app.use(express.json()); // Not needed
-        app.use(express.urlencoded({ extended: true })); // Passport wont function without this
+        app.use(express.urlencoded({ extended: true })); // Passport will not function without this
         app.set('trust proxy', 1); // trust first proxy - see note in https://www.npmjs.com/package/express-session
         // TODO-89 note need to setup session store, defaults to memory store which is not good for production
         // TODO-89 think about cookie timeout and add "keep me logged in on this device" option that controls it
@@ -521,7 +533,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
 
         app.get('/config.json',
           loggedInOrFail,
-          (req,res,next) => {
+          (req,res) => {
             addLoggedNodesToConfig();
             let oo = unsafeCopyConfigFor(req.user);
             // TODO-89 should check which orgs approved
@@ -567,7 +579,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           express.static(config.server.privatedir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
 
         // Serve HTML files from a configurable location
-        // Use a 1 day cache to keep traffic down
+        // Use a 1-day cache to keep traffic down
         // Its important that frugaliot.css is cached, or the UX will flash while checking it hasn't changed.
         // This has to come AFTER all the more specific paths like /data etc
         // Default catches rest (especially "/" so should be last)
