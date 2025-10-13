@@ -10,7 +10,7 @@
     "express": "^5.0.1",
     "express-session": "^1.18.1",
     "frugal-iot-client": "git://github.com/mitra42/frugal-iot-client.git",
-    "frugal-iot-logger": "^1.1.1",
+    "frugal-iot-logger": "^1.1.2",
     "hash-wasm": "^4.12.0",
     "morgan": "^1.10.0",
     "passport": "^0.7.0",
@@ -32,5 +32,5 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "type": "module",
-  "version": "0.1.13"
+  "version": "0.1.14"
 }
