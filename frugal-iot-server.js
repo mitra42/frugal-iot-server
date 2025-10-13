@@ -84,9 +84,9 @@ import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http requ
 
 
 // Production
-import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
+//import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
 // Development of Logger
-// import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
+import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
 import { access, constants, createReadStream } from 'fs'; // https://nodejs.org/api/fs.html
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
