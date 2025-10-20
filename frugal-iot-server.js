@@ -82,7 +82,7 @@
 import express from 'express'; // http://expressjs.com/
 import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http request logging
 
-
+// If you are developing comment out the Production line, and uncomment the Development line
 // Production
 import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
 // Development of Logger
