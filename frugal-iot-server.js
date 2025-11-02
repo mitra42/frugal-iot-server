@@ -26,8 +26,8 @@
  * /login (post) login a user, & redirect (to dashboard typically)
  * /node_modules  Javascript libraries (from frugal-iot-client)
  * /ota_update/:org/:project/:node/:attribs  OTA updates - this is what nodes call
- X*Δ /admin (get) TODO-14 admin forms (including for adding new binaries)
- XP /ota_update (post) TODO-89 protected place to upload new binaries
+ X*Δ /admin (get) dashboard for administrators - includes OTA and will include permission management
+ XP /ota_update (post) protected place to upload new binaries
  O  /private Serve up private files under authentication - currently unused
  * /register (post) register a new user
  */
@@ -43,21 +43,28 @@
   - /config => authenticate => serve config.json || 401:fail || 403:wrong org
   - /config needs place to ask what orgs have permissions for - see below for making that real but add hook here
   - GET/ota NOT protected (as accessed by devices)
-  - /data/xxx should depend on orgs have permissions for. TODO-14
+  - /data/xxx should depend on orgs have permissions for. TODO-S16
 
   Permissions from code perspective -
   Half the calls to passport set things up, the others use them. The flow is ...
-  POST /login -> 'local' which uses 'LocalService'
-  TODO-14 add permissions as array of strings from LocalStrategy so ends up in service
+  POST /login -> 'local' which uses 'LocalStrategy'
   LocalStrategy is defined with three outcomes: error;  ✔︎ { id..phone}  ╳ "incorrect"
-  Because LocalStrategy specifies session, it uses SerializeUser to store session, and redirects to dashboard
+    LocalStrategy looks up data in permissions table and adds to user
+    Because LocalStrategy specifies session, it uses SerializeUser to store session, and redirects to dashboard
   Other calls checks session - (app.use 'passport.authenticate('session')
-  which uses DeserializeUser to access {id...phone} and adds to req.user
+  which uses DeserializeUser to access {id...permissions} and adds to req.user
   then
     /config.json checks req.user and uses it to filter config
     /dashboard uses req.isAuthenticated() to check if logged in, if not redirects to /login
     /data checks loggedInOrRedirect ╳ 307->/login and req.user.organization ╳ 403 ✔︎ serve static
     /private uses loggedInOrRedirect ╳ 307->/login, ✔︎ serve static
+
+  OTA and permissions
+  - user goes to admin.html which redirects to login, and creates session
+  - displays tabs including OTA
+  - data filled in "Submit" goes to POST /ota_update
+  - Code in post /ota_update
+  - It creates directory and uploads file and sends back message
 
   === DONE TO HERE TODO-89====
   - organization on login.html (for register) should be a dropdown
@@ -88,9 +95,10 @@ import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http requ
 // Development of Logger
 import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
-import { access, constants, createReadStream } from 'fs'; // https://nodejs.org/api/fs.html
+import { access, constants, createReadStream, mkdir } from 'fs'; // https://nodejs.org/api/fs.html
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
+import multer from 'multer'; // https://www.npmjs.com/package/multer
 
 // Imports needed for Authentication
 import passport from 'passport';
@@ -127,10 +135,9 @@ function findMostSpecificFile(topdir, org, project, node, attribs, cb) {
     `${project}/${node}`, // Unlikely - if specify node, should be at the org level
     `/${node}`,
     `${project}/${attribs}`,
-    `${attribs}`
+    `+/${attribs}`
     //TODO-C14 might want to accept other variants on Arduino like sht30.ini.bin
-    ].map(x => [`${topdir}/${org}/${x}/frugal-iot.ino.bin`,`${topdir}/${org}/${x}/firmware.bin`])
-    .flat();
+    ].map(x => `${topdir}/${org}/${x}/firmware.bin`);
   detectSeries(possfiles, (path, cb1) => {
       access(path, constants.R_OK, (err) => { cb1(null, !err); })},
     cb);
@@ -165,6 +172,28 @@ function startServer() {
       throw (err); // Will be uncaught exception
     }
   });
+}
+function isUnsafe(arr) {
+  return arr.some( x => x && x.includes("/"))
+}
+
+function adminUrl(req, message, lang) {
+  return `${req.body.url || "/dashboard/admin.html"}?message=${encodeURIComponent(message)}&lang=${lang || req.body.lang || "EN"}`;
+}
+function clientErrorHandler(err, req, res, next) {
+  console.log("ERROR", err);
+  // How to handle errors ....
+  if (req.xhr) {
+    // Already sent headers, probably unrecoverable
+    res.status(500).send({ error: 'Something failed!' })
+  } else {
+    // Switch based on where error came from
+    if (req.url === "/ota_update") {
+      // If use this in contexts where no req.body.url
+      res.redirect(adminUrl(req, err.message));
+    }
+    //next(err); // Default handler - as now
+  }
 }
 // ============ Authentication related =========
 let db; // For storing users
@@ -241,6 +270,17 @@ function loggedInOrRedirect(req, res, next) {
     res.redirect(307, `${loginUrl}?register=false&message=Please%20login&url=` + req.originalUrl);
   }
 }
+function hasPermissions(user, org, permission) {
+  return user.permissions.some(x => x.capability == permission && x.org == org);
+}
+// Not used as check direct in Multer storage, (since Multer fills the body) but use as template for other permissions (and then delete this comment)
+function can_OTAUPDATE(req, res, next) {
+  if (req.isAuthenticated() && hasPermissions(req.user, req.body.organization, "OTAUPDATE")) {
+    next();
+  } else {
+    res.sendStatus(401); // Just fail - shouldnt happen and anyway lost the file by now
+  }
+}
 function loggedInOrFail(req, res, next) {
   if (req.isAuthenticated()) {
     next();
@@ -279,7 +319,7 @@ CREATE TABLE IF NOT EXISTS \`permissions\` (
   \`capability\` TEXT NOT NULL,
   \`org\` TEXT NOT NULL
 );
-`; // TODO-42 TODO-14 add {*, xxx, dev } for permissions everyone has
+`;
 
 
 function addLoggedNodesToConfig() {
@@ -318,7 +358,7 @@ function unsafeCopyConfigFor(user) {
     if (key === 'organizations') {
       // noinspection JSCheckFunctionSignatures
       Object.entries(value).forEach(([orgid, org]) => {
-        if (orgid === user.organization) { // TODO-89 TODO-14 should check if user is allowed to see this org
+        if (orgid === user.organization) { // TODO-89 TODO-S17 should check if user is allowed to see this org
           oo.organizations[orgid] = org;
         }
       });
@@ -331,6 +371,7 @@ function unsafeCopyConfigFor(user) {
 // ============ End Helper functions ============
 
 const app = express();
+
 
 // Things done on any query
 app.use((req, res, next) => {
@@ -384,6 +425,10 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     // Seems to be writing to syslog which is being cycled.
     app.use(morgan(config.morgan)); // see https://www.npmjs.com/package/morgan )
 
+    if (config.server.otadir.startsWith("./")) {
+      config.server.otadir = process.cwd() + config.server.otadir.substring(1);
+    }
+
     /* Example headers note chip-id.hex is the last 3 bytes of the mac address
     ["Host", "192.168.1.178:8080", "User-Agent", "ESP8266-http-Update", "Connection", "close",
     "+-ESP8266-Chip-ID", "9807700", "+-ESP8266-STA-MAC", "48:3F:DA:95:A7:54", "+-ESP8266-AP-MAC", "4A:3F:DA:95:A7:54",
@@ -407,9 +452,6 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
       const currentMD5 = req.headers['x-esp8266-sketch-md5'] || req.headers['x-esp32-sketch-md5'];
       console.log("GET: parms=", req.params, "version:", version, "md5", currentMD5);
       // sendFile insists on absolute file names or root-ed
-      if (config.server.otadir.startsWith("./")) {
-        config.server.otadir = process.cwd() + config.server.otadir.substring(1);
-      }
       findMostSpecificFile(config.server.otadir, req.params.org, req.params.project, req.params.node, req.params.attribs,
         (err, path) => {
           if (err) {
@@ -452,13 +494,12 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         // TODO-89 note need to setup session store, defaults to memory store which is not good for production
         // TODO-89 think about cookie timeout and add "keep me logged in on this device" option that controls it
         app.use(session({
-          secret: 'keyboard cat', // TODO-89 probably change
+          secret: 'keyboard cat', // TODO-89 probably change, try changing this, hopefully should just require re-login
           resave: false,
           saveUninitialized: false,
           cookie: { secure: 'auto' }  // TODO-89 cant be secure: true while testing on HTTP
         }));
-        // This turns the registered data returned in "user" by
-        // TODO-14-XXX
+        // This defines he function that will be used to turn user data returned from database into object for the session
         passport.serializeUser(function(user, cb) {
           process.nextTick(function() {
             console.log("Serializing");
@@ -474,17 +515,17 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             });
           });
         });
-        // TODO-14-XXX
+        // Define a function that turns data extracted from the session into an object
+        // This is called in call to passport.authenticate below
         passport.deserializeUser(function(user, cb) {
           process.nextTick(function() {
-            console.log("XXX14 Deserializing");
+            //console.log("XXX14 Deserializing");
             return cb(null, user);
           });
         });
         //https://www.passportjs.org/howtos/password/
 
-        // Check if have a session, and if so store in req.user
-        // TODO-14-XXX
+        // Check if have a session, and if so store in req.user, uses function defined in deserializeUser above
         app.use(passport.authenticate('session')); // Add user to req.user
 
         app.post('/login',
@@ -532,7 +573,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         });
 
         app.get('/config.json',
-          loggedInOrFail,
+          loggedInOrFail,  // Config is only returned if user is logged in.
           (req,res) => {
             addLoggedNodesToConfig();
             let oo = unsafeCopyConfigFor(req.user);
@@ -541,14 +582,14 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           },
         );
 
+        //  /dashboard is served statically, to logged in users //TODO-89 restrict orgs to those have permissions for (maybe handled via /config.org )
         const routerDashboard = express.Router();
         app.use('/dashboard', routerDashboard);
         routerDashboard.use(
-          (req,res,next) => {
-            console.log("/dashboard handler for", req.url);
-            next(); },
+          (req,res,next) => {console.log("/dashboard handler for", req.url); next(); }, // Log attempt
           shouldIBeLoggedIn, // redirect to ./login.html if not logged in then back here
-          express.static(config.server.htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+          express.static(config.server.htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}) // Serve static
+        );
 
         // Serve frugal-iot-logger data at /data but configure where to get them.
         console.log("Serving /data from", config.server.datadir);
@@ -569,6 +610,53 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           express.static(config.server.datadir, {immutable: false})
         );
 
+        // OTA Uploads are multipart (multipart/form-data) from a form handled by multer
+        const storage = multer.diskStorage({
+          destination: function (req, file, cb) {
+            if (isUnsafe([req.body.organization, req.body.project, req.body.deviceid, req.body.otakey])) {
+              return cb(new Error("Parameters may not contain '/'"));
+            }
+            // Shouldnt actually happen, as dashboard should only show compliant orgs, so this would be a hack (or bad timing)
+            if (!hasPermissions(req.user, req.body.organization, "OTAUPDATE")) {
+              return cb(new Error("Permission denied to OTAUPDATE"));
+            }
+            let dir;
+            if (!req.body.otakey) {
+              return cb(new Error("must specify either OTA key or Device ID"));
+            } else if (req.body.project) {
+              dir = `${config.server.otadir}/${req.body.organization}/${req.body.project}/${req.body.otakey}`;
+            } else {
+              dir = `${config.server.otadir}/${req.body.organization}/+/${req.body.otakey}`;
+            }
+            mkdir(dir, {recursive: true}, (err, unusedpath) => {
+              if (err) {
+                if (err) console.error("Error creating directory should not happen", dir);
+                return cb(err);
+              } else {
+                cb(null, dir); // Pass the full dir, not the directory returned from mkdir
+              }
+            });
+          },
+          filename: function (req, file, cb) {
+            if ((file.originalname !== "firmware.bin") && (!file.originalname.endsWith(".ino.bin"))) {
+              // TODO-S18 not sure what case of filenames is in Windows
+              return cb(new Error("Filename should be 'firmware.bin' or end in '.ino.bin'"));
+            }
+            //const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
+            cb(null, "firmware.bin");
+          }
+        })
+        const multerupload = multer({ storage: storage });
+        console.log("XXX END OF ELEVATABLE");
+        app.post('/ota_update',
+          loggedInOrFail,
+          multerupload.single('file'), // Put file details in req.file
+          (req,res,next) => {
+            console.log("OTA update posted", req.file.size, "to", req.file.path);
+            res.redirect(adminUrl(req,"OTA binary uploaded"));
+          },
+        );
+
         // Serve private files under /private - needs authentication
         const routerPrivate = express.Router();
         app.use('/private', routerPrivate);
@@ -586,6 +674,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.use(
           express.static(config.server.publicdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24})
         );
+        app.use(clientErrorHandler);
         // Now start the server
         startServer();
         // And logger
