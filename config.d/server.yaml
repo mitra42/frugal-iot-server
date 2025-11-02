@@ -1,10 +1,11 @@
 port: 8080
 #Production mode
-nodemodulesdir: ./node_modules
-htmldir: ./node_modules/frugal-iot-client
+# nodemodulesdir: ./node_modules
+# htmldir: ./node_modules/frugal-iot-client
+
 # Development mode
-#htmldir: ../frugal-iot-client
-#nodemodulesdir: ../frugal-iot-client/node_modules
+htmldir: ../frugal-iot-client
+nodemodulesdir: ../frugal-iot-client/node_modules
 # The path to the private directory is relative to the server's working directory.
 privatedir: ./private
 publicdir: ./public

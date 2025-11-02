@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Frugal IoT  Demo</title>
+    <link href="./frugaliot.css" rel="stylesheet" type="text/css">
+    <!-- this maps files that webcomponents uses, -->
+    <script type="importmap">
+        {
+        "imports": {
+            "@kurkle/color": "https://frugaliot.naturalinnovation.org/node_modules/@kurkle/color/dist/color.esm.js",
+            "chart.js": "https://frugaliot.naturalinnovation.org/node_modules/chart.js/dist/Chart.js",
+            "dial-gauge": "/node_modules/dial-gauge/dial-gauge.js",
+            "luxon": "https://frugaliot.naturalinnovation.org/node_modules/luxon/src/luxon.js",
+            "chartjs-adapter-luxon": "https://frugaliot.naturalinnovation.org/node_modules/chartjs-adapter-luxon/dist/chartjs-adapter-luxon.esm.js",
+            "csv-parse": "https://frugaliot.naturalinnovation.org/node_modules/csv-parse/dist/esm/index.js"
+            }
+        }
+    </script>
+    <!-- load webcomponents.js either from local server, or from frugaliot.naturalinnovation.org -->
+    <script src="./webcomponents.js" type="module"></script>
+    <!--<script src="./webcomponents.js" type="module"></script>-->
+</head>
+<body>
+<h1>This is an example of embedding a widget in a page</h1>
+<div style="display:none">
+    <!-- every embedded page needs a mqtt-client, it sets up the MQTT connection to the broker -->
+    <mqtt-client server="wss://frugaliot.naturalinnovation.org/wss"></mqtt-client>
+</div>
+<div style="float:right;border:2px,solid,blue;width:50%">
+    <!-- this is a simple display widget - in this case a meter bar -->
+    <mqtt-bar max="45" min="0" topic="dev/lotus/esp8266-fb94bb/sht/temperature" label="Temperature" type="float" color="red"></mqtt-bar>
+    <!--<mqtt-bar max="45" min="0" topic="dev/lotus/esp32-70c376/soil" label="Soil" type="float" color="brown"></mqtt-bar>-->
+</div>
+<div style="float:left;border:2px,solid,blue;width:10%">
+    <!-- this is a simple control widget - in this case toggles an LED on a device at my office -->
+    <mqtt-toggle topic="dev/lotus/esp8266-fb94bb/ledbuiltin/on" label="LED" type="bool" color="blue"></mqtt-toggle>
+</div>
+<p>
+    This is a demo of a custom web page with a bar widget; a graph; and a control.
+    These all go to the same device which may or may not always be turned on!
+</p>
+<p>
+    <!-- And a pretty simple graph - in this case its displaying the same value from above, but it can
+    <!-- display any topic -->
+    <!-- Note - I think there is an issue with back button if loaded from a different server, will fix -->
+    <mqtt-graph>
+        <mqtt-graphdataset topic="dev/lotus/esp8266-fb94bb/sht/temperature" color="red" label="Office Temperature" min=0 max=50 type="float"></mqtt-graphdataset>
+        <mqtt-graphdataset topic="dev/lotus/esp8266-fb94bb/sht/humidity" color="blue" label="Office Humidity" min=0 max=100 type="float"></mqtt-graphdataset>
+        <mqtt-graphdataset topic="dev/lotus/esp8266-fb94bb/ledbuiltin/on" color="orange" label="LED" type="bool"></mqtt-graphdataset>
+    </mqtt-graph>
+</p>
+</body>
+</html>
