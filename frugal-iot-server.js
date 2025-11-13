@@ -133,7 +133,7 @@ const responseHeaders = {
 function findMostSpecificFile(topdir, org, project, node, attribs, cb) {
   let possfiles = [
     `${project}/${node}`, // Unlikely - if specify node, should be at the org level
-    `/${node}`,
+    `+/${node}`,
     `${project}/${attribs}`,
     `+/${attribs}`
     //TODO-C14 might want to accept other variants on Arduino like sht30.ini.bin
