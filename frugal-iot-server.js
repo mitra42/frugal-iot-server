@@ -86,6 +86,13 @@
   */
 
 
+// This is a workaround for NodeJS DNS resolution order that is causing issues on frugaliot.naturalinnovation.org if tries to use IPv6
+import dns from 'dns';
+// Put this at the very top of your `index.js` (before any network/fetch/firebase imports)
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
+
 import express from 'express'; // http://expressjs.com/
 import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http request logging
 
