@@ -91,6 +91,11 @@ projects:
                   significantvalue: 1
               on:
                 type: bool
+              ds18b20:
+                type: float
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
   magi:
     name: Magi Farm
     nodes:
@@ -193,3 +198,8 @@ projects:
                   significantvalue: 1
               on:
                 type: bool
+              ds18b20:
+                type: float
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
