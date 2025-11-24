@@ -1,0 +1,98 @@
+# Configuration for FrugalIoT server for organization=dev
+mqtt_password: notverysecret
+name: Graam Disha Trust - Varta
+# Firebase configuration
+firebase:
+  # Path to your Firebase service account JSON file (LOCAL file path, downloaded from Firebase Console)
+  # Download from: Firebase Console → Project Settings → Service Accounts → Generate New Private Key
+  serviceAccount: ./firebase-service-account.json
+  # Your Firebase Realtime Database URL (found in Firebase Console → Realtime Database)
+  databaseURL: "https://varta-gdt-default-rtdb.asia-southeast1.firebasedatabase.app"
+  # Optional: log each write operation
+  verbose: true
+  # Optional: maintain a "latest" value for each topic for quick access
+  trackLatest: true
+  # Optional: How often to save history snapshots (in seconds, default: 60)
+  historyIntervalSeconds: 60
+  # Optional: Only save data from specific nodes (leave empty or remove to allow all nodes)
+  allowedNodes:
+    - esp32-6c5e0e
+    - esp32-3c7ab8
+gsheets:
+  - url: https://script.google.com/macros/s/AKfycbzlLfnR4tPgkoAmPZW-Z6F_J5PpTOG_U8Ip59qlo6OVYdIEOB3yvlF7GIJz1bANFW4/exec
+    spreadsheet: https://docs.google.com/spreadsheets/d/1mPHvPFW4YwRvxtTQXP4fKKDjWbYN8JpeaIAVgeFIfgA
+    intervalSeconds: 900
+    topics:
+      - dev/lotus/esp8266-fb94bb/sht/humidity
+      - dev/lotus/esp8266-fb94bb/sht/temperature
+projects:
+  developers:
+    name: Developers
+    nodes:
+      +:
+        sub:
+          +:
+            topics:
+              humidity:
+                type: float
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              temperature:
+                type: float
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              soil:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              soil2:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              soil3:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              battery:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 100
+              relay:
+                type: bool
+              ledbuiltin:
+                type: bool
+              loadcell:
+                type: float
+              aqi:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              aqi500:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              tvoc:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              eco2:
+                type: int
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
+              on:
+                type: bool
+              ds18b20:
+                type: float
+                duplicates:
+                  significantdate: 900000
+                  significantvalue: 1
