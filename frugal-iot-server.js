@@ -103,7 +103,7 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 // Development of Logger
 // import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
-import { access, constants, createReadStream, mkdir } from 'fs'; // https://nodejs.org/api/fs.html
+import { access, constants, createReadStream, mkdir, readdir, rm } from 'fs'; // https://nodejs.org/api/fs.html
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
 import multer from 'multer'; // https://www.npmjs.com/package/multer
@@ -420,7 +420,7 @@ function unsafeCopyConfigFor(user) {
     if (key === 'organizations') {
       // noinspection JSCheckFunctionSignatures
       Object.entries(value).forEach(([orgid, org]) => {
-        if (orgid === user.organization) { // TODO-89 TODO-S17 should check if user is allowed to see this org
+        if (hasPermissions(user, orgid, 'READ')) {
           oo.organizations[orgid] = org;
         }
       });
