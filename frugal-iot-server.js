@@ -12,7 +12,7 @@
  A must be authenticated to see this, but not checking permissions at this point (effectively done through config.json)
  O available only if authenticated in the right organization should be 403 if wrong org
  Δ changed depending on authentication or permissions or organization
- * P Tighter permissions than just being in the organization
+ P Tighter permissions than just being in the organization
  X not currently implemented
  *O means currently * should be O
 
@@ -26,8 +26,9 @@
  * /login (post) login a user, & redirect (to dashboard typically)
  * /node_modules  Javascript libraries (from frugal-iot-client)
  * /ota_update/:org/:project/:node/:attribs  OTA updates - this is what nodes call
- X*Δ /admin (get) dashboard for administrators - includes OTA and will include permission management
- XP /ota_update (post) protected place to upload new binaries
+ *Δ /admin (get) dashboard for administrators - includes OTA and will include permission management
+ P /ota_update (post) protected place to upload new binaries (OTAUPDATE)
+ XP /ota/:org list all ota files for an organization
  O  /private Serve up private files under authentication - currently unused
  * /register (post) register a new user
  */
@@ -106,6 +107,7 @@ import { access, constants, createReadStream, mkdir } from 'fs'; // https://node
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
 import multer from 'multer'; // https://www.npmjs.com/package/multer
+import path from 'path';
 
 // Imports needed for Authentication
 import passport from 'passport';
@@ -183,6 +185,10 @@ function startServer() {
 function isUnsafe(arr) {
   return arr.some( x => x && x.includes("/"))
 }
+// Dont let client supplied filepath go up directorey tree
+function sanitize(filepath) {
+  return filepath.replace(/[.][.]\//g, '/');
+}
 
 function adminUrl(req, message, lang) {
   return `${req.body.url || "/dashboard/admin.html"}?message=${encodeURIComponent(message)}&lang=${lang || req.body.lang || "EN"}`;
@@ -201,6 +207,55 @@ function clientErrorHandler(err, req, res, next) {
     }
     //next(err); // Default handler - as now
   }
+}
+
+// Recursively walk a directory, callback with a list of files that pass matches(filename)
+function readFilesRecursively(dir, matches, callback) {
+  let results = [];
+
+  function walk(relativeDir, done) {
+    readdir(`${dir}/${relativeDir}`, { withFileTypes: true }, (err, entries) => {
+      if (err) return done(err);
+
+      let pending = entries.length;
+      if (!pending) return done(null);
+
+      entries.forEach(entry => {
+        const relativePath = path.join(relativeDir, entry.name);
+
+        if (entry.isDirectory()) {
+          walk(relativePath, err => {
+            if (err) return done(err);
+            if (!--pending) done(null);
+          });
+        } else {
+          if (matches(entry.name)) {
+            results.push(relativePath);
+          }
+          if (!--pending) done(null);
+        }
+      });
+    });
+  }
+
+  walk("", err => {
+    if (err) return callback(err);
+    callback(null, results);
+  });
+}
+function match_firmware( filepath) {
+  return filepath.endsWith('firmware.bin');
+}
+function get_ota_dirs(org, cb) {
+  let dir = `${config.server.otadir}/${org}`;
+  readFilesRecursively(dir, match_firmware, (err, files) => {
+    if (err) {
+      console.error("Error reading ota files:", org, err);
+      cb(err);
+    } else {
+      cb(null, files.map(x => x.slice(0, -13)));
+    }
+  });
 }
 // ============ Authentication related =========
 let db; // For storing users
@@ -282,7 +337,7 @@ function hasPermissions(user, org, permission) {
 }
 // Not used as check direct in Multer storage, (since Multer fills the body) but use as template for other permissions (and then delete this comment)
 function can_OTAUPDATE(req, res, next) {
-  if (req.isAuthenticated() && hasPermissions(req.user, req.body.organization, "OTAUPDATE")) {
+  if (req.isAuthenticated() && hasPermissions(req.user, req.params.org, "OTAUPDATE")) {
     next();
   } else {
     res.sendStatus(401); // Just fail - shouldnt happen and anyway lost the file by now
@@ -588,7 +643,44 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             res.status(200).json(oo);
           },
         );
-
+        app.get('/ota_list/:org',
+          loggedInOrFail,
+          can_OTAUPDATE,
+          (req,res) => {
+            // TODO-89 list all OTA files for an organization
+            get_ota_dirs(req.params.org, (err, dirs) => {
+              if (err) {
+                res.status(500).json({message: err.message});
+              } else {
+                res.status(200).json(dirs); // Strip off /firmware.bin
+              }
+            });
+          }
+        );
+        // Delete an OTA file
+        app.get('/ota_delete/:org/*remainingpath',
+          loggedInOrFail,
+          can_OTAUPDATE,
+          (req,res) => {
+            let remainingpath = req.params.remainingpath.join('/');
+            let dirpath = `${config.server.otadir}/${req.params.org}/${sanitize(remainingpath)}`;
+            console.log("Deleting OTA file", dirpath);
+            rm(dirpath, { recursive: true, force: true }, (err, unused) => {
+              if (err) {
+                console.error("Error deleting ota files:", dirpath, err);
+                res.status(500).json({message: err.message});
+              } else {
+                get_ota_dirs(req.params.org, (err, dirs) => {
+                  if (err) {
+                    res.status(500).json({message: err.message});
+                  } else {
+                    res.status(200).json(dirs); // Strip off /firmware.bin
+                  }
+                });
+              }
+            });
+          }
+        );
         //  /dashboard is served statically, to logged in users //TODO-89 restrict orgs to those have permissions for (maybe handled via /config.org )
         const routerDashboard = express.Router();
         app.use('/dashboard', routerDashboard);
@@ -616,6 +708,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           },
           express.static(config.server.datadir, {immutable: false})
         );
+
 
         // OTA Uploads are multipart (multipart/form-data) from a form handled by multer
         const storage = multer.diskStorage({
@@ -653,13 +746,15 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             cb(null, "firmware.bin");
           }
         })
+        //console.log("XXX END OF ELEVATABLE"); // No idea what this line meant !
         const multerupload = multer({ storage: storage });
-        console.log("XXX END OF ELEVATABLE");
         app.post('/ota_update',
           loggedInOrFail,
+          // can_OTAUPDATE, // Dont need as multerupload -> storage checks specifically
           multerupload.single('file'), // Put file details in req.file
           (req,res,next) => {
             console.log("OTA update posted", req.file.size, "to", req.file.path);
+            // /dashboard/admin.html?message=OTA binary uploaded&lang=XX
             res.redirect(adminUrl(req,"OTA binary uploaded"));
           },
         );
