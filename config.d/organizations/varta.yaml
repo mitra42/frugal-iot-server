@@ -15,9 +15,10 @@ firebase:
   # Optional: How often to save history snapshots (in seconds, default: 60)
   intervalSeconds: 60
   # Optional: Only save data from specific nodes (leave empty or remove to allow all nodes)
-  allowedNodes:
-    - esp32-6c5e0e
-    - esp32-3c7ab8
+  # No allowedNodes filter - allow ALL nodes from this organization
+  #allowedNodes:
+    #- esp32-6c5e0e
+    #- esp32-3c7ab8
 gsheets:
   - url: https://script.google.com/macros/s/AKfycbzlLfnR4tPgkoAmPZW-Z6F_J5PpTOG_U8Ip59qlo6OVYdIEOB3yvlF7GIJz1bANFW4/exec
     spreadsheet: https://docs.google.com/spreadsheets/d/1mPHvPFW4YwRvxtTQXP4fKKDjWbYN8JpeaIAVgeFIfgA
