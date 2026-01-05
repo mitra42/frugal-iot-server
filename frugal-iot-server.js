@@ -375,7 +375,7 @@ function loggedInOrFail(req, res, next) {
 // Note if originalUrl is /dashboard/index.html then req.url is just /index.html
 function shouldIBeLoggedIn(req, res, next) {
   if ((['/','/index.html','/admin.html'].includes(req.url)) && !req.isAuthenticated()) {
-    console.log("Not authenticated redirecting for login");
+    console.log(`Not authenticated redirecting ${req.url} for login`);
     res.redirect(307, `${loginUrl}?register=false&message=Please%20login&url=` + req.originalUrl);
   } else {
     next();
