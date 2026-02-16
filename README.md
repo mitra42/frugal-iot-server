@@ -22,6 +22,9 @@ node frugal-iot-server.js
 ```
 If its working correctly you should see something like
 ```
+readYamlConfigFile ./config.yaml
+... and then reading each of the other files
+
 Config= {
   server: { port: 8080 },
   mqtt: { broker: 'wss://frugaliot.naturalinnovation.org/wss' },
@@ -29,7 +32,13 @@ Config= {
     dev: { mqtt_password: 'public', projects: [Array] } 
   }
 }
-Serving from /Users/mitra/git/github_mitra42/frugal-iot-server/node_modules/frugal-iot-client
+Doing OTA updates at /ota_update from ...some path.../frugal-iot-server/ota
+Serving /node_modules from ../frugal-iot-client/node_modules
+User Database exists
+Opened user database
+Serving /data from ./data
+Server starting on port 8080
+Serving from ...some path.../frugal-iot-server/node_modules/frugal-iot-client
 Server starting on port 8080
 mqtt dev connecting
 mqtt dev connect
@@ -50,7 +59,7 @@ you'll need to change the user and the place where its cloned and possibly the l
 You can run`service frugaliot start` to start it
 and `systemctl enable frugaliot` to make sure it starts at boot. 
 
-Note that this will give you a http server, and OTA on ESP32 requires HTTPS.
+Note that this will give you a HTTP server, but OTA on ESP32 requires HTTPS.
 
 The easiest way to do this is to put it behind a reverse proxy like nginx or apache.
 Feel free to reach out if you do not know how to do this.

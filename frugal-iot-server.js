@@ -116,7 +116,7 @@ import session from 'express-session'; // https://www.npmjs.com/package/express-
 import sqlite3 from 'sqlite3'; // https://www.npmjs.com/package/sqlite3
 import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
 // import cookieParser from 'cookie-parser'; // https://www.npmjs.com/package/cookie-parser (note comment on https://www.npmjs.com/package/express-session that not needed and conflicts with session)
-// import {waterfall} from 'async';
+import {waterfall} from 'async';
 // import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
 
 let config;
@@ -191,14 +191,14 @@ function sanitize(filepath) {
 }
 
 function adminUrl(req, message, lang) {
-  return `${req.body.url || "/dashboard/admin.html"}?message=${encodeURIComponent(message)}&lang=${lang || req.body.lang || "EN"}`;
+  return `${(req.body && req.body.url) || "/dashboard/admin.html"}?message=${encodeURIComponent(message)}&lang=${lang || (req.body && req.body.lang) || "EN"}`;
 }
 function clientErrorHandler(err, req, res, next) {
   console.log("ERROR", err);
   // How to handle errors ....
   if (req.xhr) {
     // Already sent headers, probably unrecoverable
-    res.status(500).send({ error: 'Something failed!' })
+    res.status(500).send('Something failed!')
   } else {
     // Switch based on where error came from
     if (req.url === "/ota_update") {
@@ -208,19 +208,70 @@ function clientErrorHandler(err, req, res, next) {
     //next(err); // Default handler - as now
   }
 }
-const sqlPeopleList = `
+const sqlPeoplePermList = `
   SELECT u.id, u.name, p.capability
   FROM users u
   INNER JOIN permissions p ON u.id = p.id AND p.org = ?
 ;`;
+const sqlPeopleList = `
+    SELECT u.id, u.name
+    FROM users u
+;`;
+const sqlAddPermission = `
+  INSERT INTO permissions (id, capability, org) VALUES (?, ?, ?)
+;`;
 function get_people_list(org, cb) {
-  db.all(sqlPeopleList, [org], (err, rows) => {
+  db.all(sqlPeoplePermList, [org], (err, rows1) => {
     if (err) {
       cb(err);
     } else {
-      cb(null, rows); // [{ id, name, capability }]
+      db.all(sqlPeopleList, [], (err, rows2) => {
+        if (err) {
+          cb(err);
+        } else {
+          cb(null, { peopleperms: rows1, people: rows2 });  //{peopleperms: [{ id, name, capability }], people: [{id, name}]}
+        }
+      })
     }});
 }
+function send_people_list(req, res) {
+  // TODO-89 list all People for an organization
+  get_people_list(req.params.org, (err, people) => {
+    if (err) {
+      res.status(500).send(err.message); // Errors are internal, unexpected
+    } else {
+      res.status(200).json(people);
+    }
+  });
+}
+
+function add_permission(id, capability, org, cb) {
+  if ((id === undefined)
+    || (capability === undefined) || (capability.length < 2)
+    || (org === undefined) || (org.length < 2)) {
+    cb(new Error("Invalid parameters"));
+  } else {
+    waterfall([
+      (cb) => db.get('SELECT COUNT(id) FROM users WHERE id = ?', [id], cb),
+      (n_users, cb) => { if (n_users["COUNT(id)"] != 1) { cb(new Error("User not found")); } else { cb(null); }},
+      (cb) => db.get('SELECT COUNT(id) FROM permissions WHERE id = ? AND capability = ? AND org = ?', [id, capability, org], cb),
+      (n_perms, cb) => { if (n_perms["COUNT(id)"] != 0) { cb(new Error("Duplicate permission")); } else { cb(null); }},
+      (cb) => db.run(sqlAddPermission, [id, capability, org], cb),
+    ], cb);
+  }
+}
+function permissions_delete(id, capability, org, cb) {
+  if ((id === undefined)
+    || (capability === undefined) || (capability.length < 2)
+    || (org === undefined) || (org.length < 2)) {
+    cb(new Error("Invalid parameters"));
+  } else {
+    waterfall([
+      (cb) => db.get('DELETE FROM permissions WHERE id = ? AND capability = ? AND org = ?', [id,capability,org], cb),
+    ], cb);
+  }
+}
+
 // Recursively walk a directory, callback with a list of files that pass matches(filename)
 function readFilesRecursively(dir, matches, callback) {
   let results = [];
@@ -360,13 +411,15 @@ function can_ADMIN(req, res, next) {
   if (req.isAuthenticated() && hasPermissions(req.user, req.params.org, "ADMIN")) {
     next();
   } else {
-    res.sendStatus(401); // Just fail - shouldnt happen and anyway lost the file by now
+    console.log("Failing permission to Admin", req.user, req.params.org);
+    res.sendStatus(401);
   }
 }
 function loggedInOrFail(req, res, next) {
   if (req.isAuthenticated()) {
     next();
   } else {
+    console.log("Not logged in, generally should not happen");
     res.sendStatus(401); // Just fail - this should not happen as Dashboard should be protected
   }
 }
@@ -632,11 +685,11 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           const organization = req.body.organization; //TODO-89 should be validated and can only be "dev" without approval
           crypto.randomBytes(16, (err, salt) => {
             if (err) {
-              res.status(500).json({ message: 'Internal error' });
+              res.status(500).send('Internal error 688' );
             } else {
               crypto.pbkdf2(password, salt, 310000, 32, 'sha256', (err, hashedPassword) => {
                 if (err) {
-                  res.status(500).json({ message: 'Internal error' });
+                  res.status(500).send('Internal error 692' );
                 } else {
                   // TO-ADD-REGISTRATION-FIELD
                   db.run('INSERT INTO users (username, hashed_password, salt, organization, name, email, phone) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -670,7 +723,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             // TODO-89 list all OTA files for an organization
             get_ota_dirs(req.params.org, (err, dirs) => {
               if (err) {
-                res.status(500).json({message: err.message});
+                res.status(500).send(err.message);
               } else {
                 res.status(200).json(dirs); // Strip off /firmware.bin
               }
@@ -688,11 +741,11 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             rm(dirpath, { recursive: true, force: true }, (err, unused) => {
               if (err) {
                 console.error("Error deleting ota files:", dirpath, err);
-                res.status(500).json({message: err.message});
+                res.status(500).send(err.message);
               } else {
                 get_ota_dirs(req.params.org, (err, dirs) => {
                   if (err) {
-                    res.status(500).json({message: err.message});
+                    res.status(500).send(err.message);
                   } else {
                     res.status(200).json(dirs);
                   }
@@ -703,17 +756,36 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         );
         app.get('/people_list/:org',
           loggedInOrFail,
-          can_ADMIN,
-          (req,res) => {
-            // TODO-89 list all People for an organization
-            get_people_list(req.params.org, (err, people) => {
+          can_ADMIN, // Gets org from URL
+          send_people_list,
+        );
+        app.get('/add_permission/:org',
+          loggedInOrFail,
+          can_ADMIN,  // Gets org from URL
+          (req,res, next) => {
+            add_permission(req.query.id, req.query.capability,req.params.org, (err) => {
               if (err) {
-                res.status(500).json({message: err.message});
+                res.status(400).send(err.message);
               } else {
-                res.status(200).json(people);
+                next();
               }
             });
-          }
+          },
+          send_people_list,
+        );
+        app.get('/permissions_delete/:org',
+          loggedInOrFail,
+          can_ADMIN,  // Gets org from URL
+          (req,res, next) => {
+            permissions_delete(req.query.id, req.query.capability,req.params.org, (err) => {
+              if (err) {
+                res.status(400).send(err.message);
+              } else {
+                next();
+              }
+            });
+          },
+          send_people_list,
         );
         //  /dashboard is served statically, to logged in users //TODO-89 restrict orgs to those have permissions for (maybe handled via /config.org )
         const routerDashboard = express.Router();
@@ -806,6 +878,13 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.get('/service-worker.js', (req, res) => {
           res.set('Cache-Control', 'no-cache');
           res.sendFile(path.resolve(config.server.publicdir, 'service-worker.js'));
+        });
+
+        // Serve favicon with caching
+        app.get('/favicon.ico', (req, res) => {
+          res.set('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
+          res.set('Content-Type', 'image/x-icon');
+          res.sendFile(path.resolve(config.server.publicdir, 'favicon.ico'));
         });
 
         // Serve HTML files from a configurable location
