@@ -72,6 +72,8 @@ projects:
                 duplicates:
                   significantdate: 900000
                   significantvalue: 1
+              manual:
+                type: bool
               on:
                 type: bool
               ds18b20:
@@ -154,6 +156,8 @@ projects:
                   significantdate: 900000
                   significantvalue: 100
               relay:
+                type: bool
+              manual:
                 type: bool
               ledbuiltin:
                 type: bool
