@@ -10,25 +10,156 @@
     <link rel="apple-touch-icon" href="./images/icon-192x192.png">
     <title>Frugal IoT - home</title>
     <link rel="manifest" href="./manifest.json">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 40px;
+            max-width: 1200px;
+        }
+        .header img {
+            width: 80px;
+            height: 80px;
+            margin-right: 20px;
+            flex-shrink: 0;
+        }
+        .header-text h1 {
+            margin-bottom: 10px;
+        }
+        .nav-section {
+            max-width: 1200px;
+            margin-bottom: 50px;
+        }
+        .nav-section h2 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        .box-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .nav-box {
+            position: relative;
+            overflow: hidden;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            height: 200px;
+        }
+        .nav-box:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+        .nav-box-background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-size: cover;
+            background-position: center;
+            opacity: 0.7;
+            z-index: 1;
+        }
+        .nav-box-content {
+            position: relative;
+            z-index: 2;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(46, 204, 113, 0.3), rgba(39, 174, 96, 0.3));
+        }
+        .nav-box-content a {
+            color: white;
+            text-decoration: none;
+            font-size: 18px;
+            font-weight: 600;
+            display: block;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.7), 0 0 8px rgba(0, 0, 0, 0.5);
+        }
+        .nav-box-content a:hover {
+            text-decoration: underline;
+        }
+    </style>
 </head>
 <body>
-<h1>Frugal IoT project</h1>
-<p>Frugal IoT is an open-source project to make sensors affordable and accessible to a wide range of
-projects in resource-constrained situations.</p>
-<p>This is a place holder while the page is developed - but there is plenty already online.</p>
-<h4>See:</h4>
-<nav>
-    <ul>
-    <li><a href="/dashboard">Live dashboard</a> for Dev projects - you will need to register to access it.</li>
-    <li><a href="https://github.com/mitra42/frugal-iot/wiki">Documentation wiki</a></li>
-    <li>Github repos for:<ul>
-        <li><a href="https://github.com/mitra42/frugal-iot-server">Server</a>,</li>
-        <li><a href="https://github.com/mitra42/frugal-iot-client">Browser or Mobile Client</a>,</li>
-        <li><a href="https://github.com/mitra42/frugal-iot-logger">MQTT logger</a>,</li>
-        <li><a href="https://github.com/mitra42/frugal-iot">Sensor Nodes</a></li>
-    </ul></li>
-    </ul>
-</nav>
+<div class="header">
+    <img alt="Frugal IoT image" src="/images/icon-192x192.png">
+    <div class="header-text">
+        <h1>Frugal IoT project</h1>
+        <p>An open-source project to make sensors affordable and accessible to a wide range of projects in resource-constrained situations.</p>
+    </div>
+</div>
+
+<div class="nav-section">
+    <div class="box-grid">
+        <div class="nav-box">
+            <div class="nav-box-background" style="background-image: url('/images/icon-dashboard.png')"></div>
+            <div class="nav-box-content">
+                <a href="/dashboard">Dashboard</a>
+            </div>
+        </div>
+        <div class="nav-box">
+            <div class="nav-box-background" style="background-image: url('/images/icon-wiki.png')"></div>
+            <div class="nav-box-content">
+                <a href="https://github.com/mitra42/frugal-iot/wiki">Wiki</a>
+            </div>
+        </div>
+        <div class="nav-box">
+            <div class="nav-box-background" style="background-image: url('/images/icon-about.png')"></div>
+            <div class="nav-box-content">
+                <a href="/about">About</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="nav-section">
+    <h2>Github Repos</h2>
+    <div class="box-grid">
+        <div class="nav-box">
+            <div class="nav-box-background" style="background-image: url('/images/icon-server.png')"></div>
+            <div class="nav-box-content">
+                <a href="https://github.com/mitra42/frugal-iot-server">Server</a>
+            </div>
+        </div>
+        <div class="nav-box">
+            <div class="nav-box-background" style="background-image: url('/images/icon-client.png')"></div>
+            <div class="nav-box-content">
+                <a href="https://github.com/mitra42/frugal-iot-client">Client</a>
+            </div>
+        </div>
+        <div class="nav-box">
+            <div class="nav-box-background" style="background-image: url('/images/icon-logger.png')"></div>
+            <div class="nav-box-content">
+                <a href="https://github.com/mitra42/frugal-iot-logger">Logger</a>
+            </div>
+        </div>
+        <div class="nav-box">
+            <div class="nav-box-background" style="background-image: url('/images/icon-nodes.png')"></div>
+            <div class="nav-box-content">
+                <a href="https://github.com/mitra42/frugal-iot">Nodes</a>
+            </div>
+        </div>
+    </div>
+</div>
     <script>
       if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
             navigator.serviceWorker.register('/service-worker.js')
