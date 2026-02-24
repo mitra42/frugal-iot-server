@@ -473,6 +473,9 @@ function addLoggedNodesToConfig() {
         pp[projectid] = { nodes: {}};
       }
       let nn = pp[projectid].nodes;
+      if (!nn) {
+        nn = pp[projectid].nodes = {}
+      }
       // noinspection JSCheckFunctionSignatures
       Object.entries(nodes).forEach(([nodeid, lastseen]) => {
         if (!nn[nodeid]) {
