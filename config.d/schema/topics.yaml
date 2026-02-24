@@ -25,6 +25,7 @@ analog:
   display:  bar
   rw:       r
   graphable:  true
+  log:      true
 aqi:
   leaf:     aqi
   name:     AQI
@@ -35,6 +36,10 @@ aqi:
   color:    purple
   rw:       r
   graphable:  true
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
 aqi500:
   leaf:     aqi500
   name:     AQI500
@@ -45,6 +50,10 @@ aqi500:
   color:    brown
   rw:       r
   graphable:  true
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 10
 battery:
   leaf:     battery
   name:     Voltage
@@ -55,6 +64,10 @@ battery:
   color:    green
   rw:       r
   graphable:  true
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 50
 brightness:
   leaf:     brightness
   name:     Brightness
@@ -125,6 +138,10 @@ eco2:
   min:      300
   max:      900
   color:    brown
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 5
   rw:       r
   graphable:  true
 humidity:
@@ -135,6 +152,10 @@ humidity:
   min:      0
   max:      100
   color:    blue
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
   rw:       r
   graphable:  true
 id:
@@ -165,6 +186,10 @@ loadcell:
   min:      0
   max:      65000
   color:    yellow
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 100
   rw:       r
   calibrate:  true
   graphable:  true
@@ -176,7 +201,11 @@ lux:
   min:      0
   max:      65000
   color:    yellow
+  log:      true
   rw:       r
+  duplicates:
+    significantdate: 900000
+    significantvalue: 100
   graphable:  true
 manual:
   leaf:     manual
@@ -185,7 +214,11 @@ manual:
   display:  toggle
   color:    black
   rw:       w
+  log:      true
   graphable:  true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
 name:
   leaf:     name
   slot:     name
@@ -201,6 +234,10 @@ on:
   display:  toggle
   color:    black
   rw:       w
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
   graphable:  true
 out:
   leaf:     out
@@ -209,8 +246,12 @@ out:
   display:  toggle
   color:    black
   rw:       r
+  log:      true
   wireable: true
   graphable:  true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
 pressure:
   leaf:     pressure
   name:     Pressure
@@ -220,6 +261,10 @@ pressure:
   max:      99
   color:    blue
   rw:       r
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
   graphable:  true
 soil:
   leaf:     soil
@@ -230,6 +275,10 @@ soil:
   max:      100
   color:    brown
   rw:       r
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
   graphable:  true
   calibrate:  true
 temperature:
@@ -242,6 +291,10 @@ temperature:
   max:      50
   color:    red
   wireable: false
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 0.1
   graphable:  true
 timeoff:
   leaf:     timeoff
@@ -272,6 +325,10 @@ tvoc:
   max:      99
   color:    green
   rw:       r
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
   graphable:  true
 wifibars:
   leaf:     wifibars

@@ -548,6 +548,7 @@ function debugRoutes(req, res, next) {
 }
 // Main for server
 mqttLogger.readYamlConfig('.', (err, configobj) => {
+  // Note side effect leaves copy of config in the mqttLogger
   if (err) {
     console.error(err);
   } else {

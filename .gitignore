@@ -57,5 +57,8 @@ data/
 *.sqlite
 *.sqlite3
 
+# do not upload configs for organizations as not secure
+config.d/organizations/
+
 # Access keys and credentials
 firebase-service-account.json
