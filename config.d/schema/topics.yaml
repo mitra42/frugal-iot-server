@@ -219,6 +219,7 @@ manual:
   duplicates:
     significantdate: 900000
     significantvalue: 1
+  wireable: true
 name:
   leaf:     name
   slot:     name
