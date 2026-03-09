@@ -213,7 +213,7 @@ manual:
   type:     bool
   display:  toggle
   color:    black
-  rw:       w
+  rw:       r
   log:      true
   graphable:  true
   duplicates:
