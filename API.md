@@ -39,20 +39,21 @@ open farm data interoperability.
 
 1. [Introduction](#1-introduction)
 2. [Terminology](#2-terminology)
-3. [Layer 1a — Command Structure](#3-layer-1a--command-structure)
-4. [Layer 1b — Packet Format](#4-layer-1b--packet-format)
-5. [Layer 1c — Data Schema](#5-layer-1c--data-schema)
-6. [Section 2 — Farm-Platform to Device-Platform](#6-section-2--farm-platform-to-device-platform)
-7. [Section 3 — Device-Platform to Farm-Platform](#7-section-3--device-platform-to-farm-platform)
+3. [Command Structure](#3-command-structure)
+4. [Packet Format](#4-packet-format)
+5. [Data Schema](#5-data-schema)
+6. [Farm-Platform to Device-Platform](#6-farm-platform-to-device-platform)
+7. [Device-Platform to Farm-Platform](#7-device-platform-to-farm-platform)
 8. [Security Considerations](#8-security-considerations)
 9. [Privacy Considerations](#9-privacy-considerations)
 10. [References](#10-references)
+11. [Known Limitations and Future Work](#11-known-limitations-and-future-work)
 
 Annexes:
-- [Annex A — Data Schema Reference](#annex-a--data-schema-reference)
-- [Annex B — [Title]](#annex-b)
-- [Annex C — [Title]](#annex-c)
-- [Annex D — [Title]](#annex-d)
+- [Annex A — Device Schema Field Definitions](#annex-a--device-schema-field-definitions)
+- [Annex B — Example Device Schema](#annex-b--example-device-schema)
+- [Annex C — User Stories](#annex-c--user-stories)
+- [Annex D — Why This Is Not a Device-to-Backend API](#annex-d--why-this-is-not-a-device-to-backend-api)
 - [Annex E — [Title]](#annex-e)
 
 ---
@@ -125,53 +126,199 @@ interpreted as described in [RFC 2119].
 
 ---
 
-## 3. Layer 1a — Command Structure
+## 3. Command Structure
 
 ### 3.1 Overview
 
-This layer defines the structure of commands used in both directions of
+This section defines the structure of commands used in both directions of
 communication between Device-Platform and Farm-Platform. Commands defined
-here are referenced by Section 2 (Farm-Platform requests) and Section 3
+here are referenced by Section 6 (Farm-Platform requests) and Section 7
 (Device-Platform notifications and push).
 
 ### 3.2 Command Format
 
-[Define the general structure of a command — e.g. method, endpoint pattern,
-required headers, authentication tokens.]
+All commands between Device-Platform and Farm-Platform use HTTP, with the
+exception of Data Push and Notification commands which MAY also use MQTT
+(see Section 7).
+
+Requests MUST be made over HTTPS. HTTP (unencrypted) MUST NOT be used in
+production deployments.
+
+The base URL of the API endpoint is determined by the receiving platform and
+communicated out-of-band during registration. No versioning prefix is included
+in the path.
+
+All requests MUST include the following HTTP headers:
+
+| Header | Value |
+|---|---|
+| `Content-Type` | `application/json` for JSON request bodies; `application/senml+json` for SenML packets |
+| `Accept` | `application/json` or `application/senml+json` as appropriate |
+| `Cookie` | Authentication token agreed during platform registration — see Sections 3.4 and 3.6 |
+
+Request and response bodies MUST be encoded as UTF-8.
 
 ### 3.3 Command Types
 
-| Command Type | Direction | Description |
-|---|---|---|
-| Data Request | Farm-Platform → Device-Platform | Request sensor data for a device over a time period |
-| User Registration | Farm-Platform → Device-Platform | Register a user with the Device-Platform |
-| Device Registration | Farm-Platform → Device-Platform | Register a device to a user |
-| Device Command | Farm-Platform → Device-Platform | Send a command to a Device (e.g. Actuation) |
-| Data Push | Device-Platform → Farm-Platform | Push sensor data to Farm-Platform |
-| Notification | Device-Platform → Farm-Platform | Send an event or alert notification |
+| Command Type | Direction | Description | Defined In |
+|---|---|---|---|
+| Data Request | Farm-Platform → Device-Platform | Request sensor data for a device over a time period | [Section 6.2](#62-request-data-for-a-device) |
+| User Registration | Farm-Platform → Device-Platform | Register a user with the Device-Platform | [Section 6.3](#63-register-a-user) |
+| Device Registration | Farm-Platform → Device-Platform | Register a device to a user | [Section 6.4](#64-register-a-device-to-a-user) |
+| Device Command | Farm-Platform → Device-Platform | Send a command or setpoint change to a Device | [Section 6.5](#65-send-a-command-to-a-device) |
+| Data Push | Device-Platform → Farm-Platform | Push sensor data to the Farm-Platform | [Section 7.2](#72-push-sensor-data) |
+| Notification | Device-Platform → Farm-Platform | Send an event or alert notification | [Section 7.3](#73-send-a-notification) |
 
 ### 3.4 Authentication and Authorisation
 
-[Define how commands are authenticated — e.g. bearer tokens, API keys, OAuth2.]
+Authentication between platforms is based on a token exchanged during the
+platform registration process (see Section 3.6). The token MUST be presented
+in all requests as an HTTP cookie. The cookie name and token value are agreed
+during platform registration.
+
+The process by which a token is obtained — i.e. the login or credential
+exchange mechanism — is outside the scope of this standard at this time.
+
+**Authorisation model**
+
+For the purposes of this standard, the Device-Platform treats the Farm-Platform
+as a single trusted actor. The Farm-Platform is assumed to have authenticated
+its own users and to have determined what data and commands each user is
+permitted to access. The Device-Platform does not perform per-user authorisation
+— it authorises at the platform level and trusts the Farm-Platform to enforce
+appropriate access controls for its users.
+
+This model is intentionally simple and is expected to evolve. In particular,
+finer-grained authorisation — for example, restricting a Farm-Platform to
+accessing only specific devices — may be needed as implementations mature.
+Implementors are encouraged to raise requirements arising from prototype
+experience so they can be incorporated into a future version of this standard.
 
 ### 3.5 Error Handling
 
-[Define common error codes and response structures for failed commands.]
+Where a command fails, the responding platform MUST return an appropriate HTTP
+error status code. Response bodies for errors MUST be JSON and SHOULD include
+a machine-readable `error` code and a human-readable `message`. For example:
+
+```json
+{
+  "error": "device_not_found",
+  "message": "No device found with the specified identifier."
+}
+```
+
+The following error cases apply across multiple commands. Individual command
+definitions in Sections 6 and 7 may define additional error cases specific to
+that command.
+
+| HTTP Status | Error Code | Meaning |
+|---|---|---|
+| `400 Bad Request` | `invalid_request` | The request is malformed, missing required fields, or contains invalid values |
+| `401 Unauthorized` | `not_authenticated` | No valid authentication credential was provided (see Section 3.4) |
+| `403 Forbidden` | `not_allowed` | The authenticated platform does not have permission to perform this action |
+| `404 Not Found` | `device_not_found` | The specified device does not exist on this platform |
+| `404 Not Found` | `user_not_found` | The specified user does not exist on this platform |
+| `409 Conflict` | `already_exists` | The resource being created (user, device registration) already exists |
+| `422 Unprocessable Entity` | `invalid_value` | The request is well-formed but a field value fails validation (e.g. out of range, wrong type) |
+| `422 Unprocessable Entity` | `field_read_only` | The targeted field exists in the Device Schema but is not writable (`rw` is `r`) |
+| `503 Service Unavailable` | `device_unavailable` | The target device is offline or unreachable |
+| `500 Internal Server Error` | `server_error` | An unexpected error occurred on the receiving platform |
+
+Platforms MUST NOT return a `200 OK` response for a failed command. Platforms
+SHOULD NOT expose internal implementation details in error messages returned
+to the caller.
+
+### 3.6 Platform Registration
+
+Before any commands can be exchanged, a Farm-Platform and a Device-Platform
+MUST establish a bilateral registration. This is a one-time setup process
+performed out-of-band between the operators of the two platforms, and is not
+itself defined by this standard. However, the following information MUST be
+agreed and recorded by both parties as part of registration:
+
+| Item | Description |
+|---|---|
+| **Device-Platform base URL** | The base URL against which all Farm-Platform → Device-Platform command paths are resolved (e.g. `https://frugaliot.naturalinnovation.org/api`) |
+| **Farm-Platform base URL** | The base URL against which all Device-Platform → Farm-Platform command paths are resolved |
+| **Authentication token (Farm-Platform → Device-Platform)** | The token the Farm-Platform presents to authenticate requests to the Device-Platform |
+| **Authentication token (Device-Platform → Farm-Platform)** | The token the Device-Platform presents to authenticate push and notification requests to the Farm-Platform |
+| **Token delivery mechanism** | Agreed cookie name(s) for token presentation, per Section 3.4 |
+
+The exact process for establishing registration — including how operators
+exchange tokens securely — is outside the scope of this standard. Implementors
+are encouraged to document their registration process and share experience
+during prototype implementation, so that a future version of this standard may
+define a more formal registration protocol.
 
 ---
 
-## 4. Layer 1b — Packet Format
+## 4. Packet Format
 
 ### 4.1 Overview
 
-This layer defines the format of data packets exchanged between platforms,
+This section defines the format of data packets exchanged between platforms,
 regardless of transport method. All data packets in this standard MUST conform
 to SenML as defined in [RFC 8428].
 
 ### 4.2 SenML Conformance
 
-[Describe the required SenML fields, any constraints or profiles applied to
-the base RFC 8428 specification, and any extensions used.]
+This standard uses SenML [RFC 8428] as its packet format. Implementations
+MUST conform to RFC 8428 except where this section defines a narrower profile.
+
+**Required fields**
+
+Each SenML pack MUST contain at least one record. Every record MUST contain
+exactly one value field — one of `v` (numeric), `vs` (string), `vb` (boolean),
+or `vd` (data). Records without a value field are not permitted in this standard.
+
+**Naming**
+
+The `bn` (base name) field MUST be present in the first record of every pack
+and MUST identify the device using the device identifier as defined in the
+Device Schema (Section 5). The `n` (name) field in each subsequent record
+MUST be a relative field specifier in `module/field` form (e.g.
+`sht/temperature`), resolved against `bn` to form the fully qualified name.
+
+**Time**
+
+The `bt` (base time) field MUST be present in the first record of every pack
+and MUST express an absolute Unix timestamp (a value ≥ 2^28 per RFC 8428).
+Individual records MAY carry a `t` field to express a per-record timestamp
+where readings in a batch were taken at different times. The `t` field MAY
+be a relative value (i.e. an offset in seconds from `bt`), which is useful
+for compactly expressing a sequence of readings within a batch. Relative `t`
+values MUST be interpreted with respect to the `bt` of the same pack.
+
+**Base name and base time separation**
+
+Whilst RFC 8428 permits `bn` and `bt` to appear in the same record as data
+fields, this standard REQUIRES that `bn` and `bt` are placed in a dedicated
+first record containing no value fields. This makes packs easier to parse and
+the device identity unambiguous. See the example in Section 4.4.
+
+**Units**
+
+Where a unit of measurement applies, the `u` (unit) field SHOULD be included
+in each record. Units MUST conform to the SenML Units Registry defined in
+RFC 8428. Where a Device Schema (Section 5) has been exchanged, the `u` field
+MAY be omitted, as the receiving platform can resolve units from the schema.
+Where `u` is present, it MUST be consistent with the unit defined in the
+Device Schema.
+
+**Batching**
+
+A single pack MAY contain records from multiple fields of the same device,
+representing a batch of measurements taken at the same or different times.
+A pack MUST NOT contain records from more than one device (i.e. more than
+one distinct `bn` value). This restriction may be revisited in a future
+version of this standard if commands are introduced that explicitly retrieve
+or push data across multiple devices in a single request.
+
+**Unused RFC 8428 features**
+
+The following RFC 8428 features are not used in this standard and
+implementations are not required to support them: CBOR encoding, XML encoding,
+EXI encoding, CoAP transport, and the `s` (sum) field.
 
 ### 4.3 Encoding
 
@@ -197,13 +344,13 @@ numeric value, and `u` is the unit of measurement per [RFC 8428].
 
 ---
 
-## 5. Layer 1c — Data Schema
+## 5. Data Schema
 
 ### 5.1 Overview
 
-This layer defines the semantic meaning of the data communicated within
-packets conforming to Layer 1b. Rather than specifying a single fixed schema
-for the standard, this layer defines a mechanism by which a Device-Platform
+This section defines the semantic meaning of the data communicated within
+packets conforming to Section 4. Rather than specifying a single fixed schema
+for the standard, this section defines a mechanism by which a Device-Platform
 can advertise the meaning of the fields its devices produce.
 
 ### 5.2 Device Schema
@@ -214,8 +361,15 @@ see Section 4.4) to their semantic meaning, enabling a Farm-Platform to
 correctly interpret received data.
 
 The Device Schema is not a fixed schema defined by this standard — it is a
-per-device or per-platform document. [An example Device Schema is provided in
-Annex A.]
+per-device or per-platform document expressed in JSON. The permitted fields
+and their definitions are specified in [Annex A](#annex-a--device-schema-field-definitions).
+A worked example of a complete Device Schema is provided in
+[Annex B](#annex-b--example-device-schema).
+
+Fields are grouped into **modules** within the schema, where a module name
+corresponds to the prefix used in the `n` field of SenML packets. For example,
+a module named `sht` contains the definitions for fields communicated as
+`sht/temperature`, `sht/humidity`, etc.
 
 A Farm-Platform MAY fetch the Device Schema for a given device using:
 
@@ -223,7 +377,7 @@ A Farm-Platform MAY fetch the Device Schema for a given device using:
 GET /devices/schema?device={device-id}
 ```
 
-The response format for Device Schemas is [TBD].
+The response MUST be a JSON object conforming to the structure defined in Annex A.
 
 ### 5.3 Field Conformance
 
@@ -238,18 +392,32 @@ indicate which fields were accepted and which were ignored.
 
 ### 5.4 Extensibility
 
-[Define how implementations may extend the schema for proprietary or
-experimental data fields, e.g. use of vendor-prefixed field names.]
+Implementations MAY add fields to the Device Schema beyond those defined in
+Annex A. A receiving platform that encounters a schema field it does not
+recognise MUST ignore it, consistent with the field conformance rules in
+Section 5.3. Similarly, data fields in SenML packets that are not present
+in the Device Schema MUST be ignored by the receiving platform.
+
+Vendor-defined schema fields introduce a risk of naming conflicts between
+independent implementations. To reduce this risk, vendors adding proprietary
+fields SHOULD prefix them with a vendor-specific identifier, for example
+`litefarm-` or `frugaliot-`. This does not eliminate the possibility of
+conflict but makes it significantly less likely.
+
+Vendors are encouraged to treat proprietary fields as temporary. Once a
+vendor-defined field has been tested in practice and found to be of general
+utility, the vendor SHOULD request its inclusion in this standard so that it
+becomes available to all implementations without a vendor prefix.
 
 ---
 
-## 6. Section 2 — Farm-Platform to Device-Platform
+## 6. Farm-Platform to Device-Platform
 
 ### 6.1 Overview
 
 This section defines the requests and commands a Farm-Platform MAY issue to
 a Device-Platform. All requests use HTTP. Commands MUST be authenticated as
-defined in Layer 1a (Section 3.4).
+defined in Section 3.4.
 
 ### 6.2 Request Data for a Device
 
@@ -272,15 +440,24 @@ GET /data?device={device-id}&from={timestamp}&to={timestamp}
 
 #### 6.2.3 Response
 
-A SenML packet (Layer 1b) containing data conforming to the Device Schema
-(Layer 1c). The response MAY include data points outside the requested time
-period (e.g. the most recent reading before `from`). Implementations SHOULD
-document their behaviour in this regard.
+A SenML packet (Section 4) containing data conforming to the Device Schema
+(Section 5). The response MAY include data points outside the requested time
+period — it is the requester's responsibility to filter out any records that
+fall outside the requested range. Implementations SHOULD document their
+behaviour in this regard.
+
+If no data exists within the requested time period, the Device-Platform MUST
+return `200 OK` with an empty SenML pack (`[]`). This is not an error
+condition.
 
 #### 6.2.4 Error Cases
 
-[Define relevant error responses — e.g. device not found, unauthorised, no data
-in range.]
+See Section 3.5 for common error codes. The following error case is specific
+to this command:
+
+| HTTP Status | Error Code | Notes |
+|---|---|---|
+| `404 Not Found` | `device_not_found` | The Device-Platform does not recognise the specified device identifier |
 
 ---
 
@@ -315,7 +492,12 @@ POST /users/register
 
 #### 6.3.4 Error Cases
 
-[Define relevant error responses — e.g. user already exists, invalid credentials.]
+See Section 3.5 for common error codes. The following error case is specific
+to this command:
+
+| HTTP Status | Error Code | Notes |
+|---|---|---|
+| `409 Conflict` | `already_exists` | A user with the specified identifier is already registered on this Device-Platform |
 
 ---
 
@@ -323,7 +505,10 @@ POST /users/register
 
 #### 6.4.1 Purpose
 
-Associate a Device with a registered user on the Device-Platform.
+Associate a Device with a registered user on the Device-Platform. The
+Device-Platform MUST already know the device — `device_not_found` in this
+context means the Device-Platform has no record of a device with the given
+identifier, not that the physical device is unreachable.
 
 #### 6.4.2 Request
 
@@ -334,7 +519,7 @@ POST /devices/register
 ```json
 {
   "user-id": "[device-platform-user-id]",
-  "device-id": "[device-identifier]",
+  "farm-platform-device-id": "[farm-platform-device-identifier]",
   "metadata": { "[TBD]" }
 }
 ```
@@ -350,8 +535,14 @@ POST /devices/register
 
 #### 6.4.4 Error Cases
 
-[Define relevant error responses — e.g. device not found, already registered,
-user not found.]
+See Section 3.5 for common error codes. The following error cases are specific
+to this command:
+
+| HTTP Status | Error Code | Notes |
+|---|---|---|
+| `404 Not Found` | `device_not_found` | The Device-Platform does not recognise the specified device identifier — the device must be known to the Device-Platform before it can be registered to a user |
+| `404 Not Found` | `user_not_found` | The specified user is not registered on this Device-Platform |
+| `409 Conflict` | `already_exists` | The device is already registered to a user on this Device-Platform |
 
 ---
 
@@ -359,9 +550,20 @@ user not found.]
 
 #### 6.5.1 Purpose
 
-Send an actuation command or setpoint change to a Device via the
-Device-Platform. This is the primary mechanism for Actuation as defined in
-the Terminology (Section 2).
+Send a command to a Device via the Device-Platform. This is the primary
+mechanism for Actuation and setpoint control as defined in the Terminology
+(Section 2).
+
+Any field defined in the Device Schema (Annex A) with an `rw` value of `w`
+or `rw` is an acceptable target for a device command. The `command` field in
+the request MUST be the fully qualified field specifier, combining the module
+name and field name in the same form used in the `n` field of SenML packets.
+The `value` parameter MUST conform to the type defined for that field in the
+Device Schema (Section 5).
+
+For example, a text field such as `main/description` would be set with a
+string value, while a boolean field such as `relay/on` would be set with a
+boolean value.
 
 #### 6.5.2 Request
 
@@ -372,8 +574,32 @@ POST /devices/command
 ```json
 {
   "device-id": "[device-identifier]",
-  "command": "[command-name]",
-  "parameters": { "[TBD]" }
+  "command": "[module/field]",
+  "parameters": {
+    "value": "[value conforming to field type]"
+  }
+}
+```
+
+Examples:
+
+```json
+{
+  "device-id": "dev/developers/esp32-e4d5f6",
+  "command": "main/description",
+  "parameters": {
+    "value": "Sensor by the apple tree"
+  }
+}
+```
+
+```json
+{
+  "device-id": "dev/developers/esp32-e4d5f6",
+  "command": "relay/on",
+  "parameters": {
+    "value": true
+  }
 }
 ```
 
@@ -388,12 +614,19 @@ POST /devices/command
 
 #### 6.5.4 Error Cases
 
-[Define relevant error responses — e.g. device offline, command not supported,
-unauthorised.]
+See Section 3.5 for common error codes. The following error cases are specific
+to this command:
+
+| HTTP Status | Error Code | Notes |
+|---|---|---|
+| `404 Not Found` | `device_not_found` | The Device-Platform does not recognise the specified device identifier |
+| `422 Unprocessable Entity` | `field_read_only` | The specified field exists in the Device Schema but is not writable (`rw` is `r`) |
+| `422 Unprocessable Entity` | `invalid_value` | The supplied value does not conform to the field type or falls outside the `min`/`max` range defined in the Device Schema |
+| `503 Service Unavailable` | `device_unavailable` | The Device-Platform recognises the device but it is currently offline or unreachable |
 
 ---
 
-## 7. Section 3 — Device-Platform to Farm-Platform
+## 7. Device-Platform to Farm-Platform
 
 ### 7.1 Overview
 
@@ -415,18 +648,36 @@ an explicit request from the Farm-Platform.
 POST /data
 ```
 
-The request body MUST be a SenML packet (Layer 1b) which already encodes the
+The request body MUST be a SenML packet (Section 4) which already encodes the
 device identifier (via `bn`) and timestamps (via `bt` or `t`). No device
 identifier is required in the URL.
 
 #### 7.2.3 Response
 
-[TBD — likely an acknowledgement including which fields were accepted/ignored
-per Section 5.3.]
+On success the Farm-Platform MUST return `200 OK`. The response SHOULD include
+a JSON body indicating which fields were accepted and which were ignored (per
+Section 5.3). For example:
+
+```json
+{
+  "status": "ok",
+  "accepted": ["sht/temperature", "sht/humidity"],
+  "ignored": ["main/rssi"]
+}
+```
+
+Where the JSON body is included, the `ignored` array MUST be present but MAY
+be empty, and the `accepted` array MUST be present but MAY be empty.
 
 #### 7.2.4 Error Cases
 
-[TBD]
+See Section 3.5 for common error codes. The following error case is specific
+to this command:
+
+| HTTP Status | Error Code | Notes |
+|---|---|---|
+| `404 Not Found` | `device_not_found` | The `bn` value in the SenML pack does not match any device known to this Farm-Platform |
+| `400 Bad Request` | `invalid_request` | The request body is not a valid SenML pack per Section 4 |
 
 ---
 
@@ -436,7 +687,9 @@ per Section 5.3.]
 
 Send an event or alert notification from the Device-Platform to the
 Farm-Platform — for example, to alert a farmer that a threshold has been
-exceeded.
+exceeded. Note that this standard does not yet define a command for a
+Farm-Platform to register or configure notification rules on a Device-Platform;
+that mechanism is reserved for a future version.
 
 #### 7.3.2 Request
 
@@ -444,7 +697,7 @@ exceeded.
 POST /notification
 ```
 
-The request body MUST be a SenML packet (Layer 1b). Notifications SHOULD use
+The request body MUST be a SenML packet (Section 4). Notifications SHOULD use
 a string value field (`vs`) to carry a human-readable message. For example:
 
 ```json
@@ -454,16 +707,30 @@ a string value field (`vs`) to carry a human-readable message. For example:
 ]
 ```
 
-Additional structured fields MAY be included alongside the message to provide
-machine-readable context.
+Additional structured fields MAY be included in the same pack to provide
+machine-readable context alongside the human-readable message. For example,
+a current sensor reading that triggered the notification:
+
+```json
+[
+  {"bn": "dev/lotus/esp32-123456/", "bt": 1.276020076001e+09},
+  {"n": "message", "vs": "Your paddock is too dry"},
+  {"n": "sht/humidity", "v": 0, "u": "%RH"}
+]
+```
 
 #### 7.3.3 Response
 
-[TBD]
+On success the Farm-Platform MUST return `200 OK` with no required response body.
 
 #### 7.3.4 Error Cases
 
-[TBD]
+See Section 3.5 for common error codes. The following error case is specific
+to this command:
+
+| HTTP Status | Error Code | Notes |
+|---|---|---|
+| `404 Not Found` | `device_not_found` | The `bn` value in the SenML pack does not match any device known to this Farm-Platform |
 
 ### 7.4 [Further commands TBD]
 
@@ -498,38 +765,517 @@ minimisation requirements, obligations on platform implementors.]
 
 ---
 
-## Annex A — Data Schema Reference
+## 11. Known Limitations and Future Work
 
-**(Normative)**
+This standard is at an early stage. The following areas are known to be
+incomplete or unaddressed, and are identified here so that implementors and
+readers understand the current boundaries of the specification.
 
-[Example Device Schema to be added. The schema maps field names as used in the
-`n` field of SenML packets to their semantic meaning — including units,
-descriptions, and valid value ranges. This is a per-device or per-platform
-schema, not a fixed schema defined by this standard.]
+### 11.1 User-Device Relationships
+
+This standard defines commands for registering a user with a Device-Platform
+(Section 6.3) and registering a device to a user (Section 6.4), but does not
+yet fully specify the relationship model between users, devices, and farms.
+Open questions include: how a Farm-Platform discovers which devices are
+associated with a given user; how ownership or access rights are transferred
+between users; and how a device is deregistered or disassociated from a user.
+
+### 11.2 Notification Configuration
+
+Section 7.3 defines how a Device-Platform sends a notification to a
+Farm-Platform, but this standard does not yet define how a Farm-Platform
+registers interest in notifications, configures thresholds, or subscribes to
+specific event types on a Device-Platform. A mechanism for notification setup
+is needed and is reserved for a future version.
+
+### 11.3 MQTT Transport
+
+Section 7 notes that Device-Platform to Farm-Platform communication MAY use
+MQTT, but the details of MQTT topic structure, QoS levels, authentication,
+and session management are not yet specified.
+
+### 11.4 Multi-Device Data Requests
+
+Section 4 restricts a single SenML pack to data from one device. A future
+version may introduce commands that allow a Farm-Platform to request or receive
+data from multiple devices in a single operation, at which point the
+single-device-per-pack restriction may be revisited (see Section 4.2).
+
+### 11.5 Authentication and Authorisation
+
+Section 3.4 identifies authentication as a required mechanism but does not
+yet specify the authentication scheme. Decisions on bearer tokens, API keys,
+OAuth2, or other mechanisms are deferred to a future version.
+
+### 11.6 Device Schema Discovery
+
+This standard defines how a Farm-Platform fetches the Device Schema for a
+known device (Section 5.2), but does not define how a Farm-Platform discovers
+which devices are available on a Device-Platform, or how it learns that a new
+device has been added.
+
+### 11.7 Diagnostics and Device Status
+
+This standard does not yet define any mechanism for querying the status or
+health of devices at scale. In practice, a Farm-Platform such as LiteFarm
+may need to determine — in a single operation — which of its registered
+devices are online, offline, or reporting errors. Similar needs exist at the
+level of a specific platform user, for example retrieving the last-seen time
+and connection status of all devices belonging to a particular farmer.
+
+A future version of this standard should define a diagnostic query command
+that supports filtering by Farm-Platform, by platform user, or by device
+group, and returns status information such as connectivity state, last
+reported timestamp, and any active error conditions.
 
 ---
 
-## Annex B — [Title]
+## Annex A — Device Schema Field Definitions
 
-**(Normative | Informative)**
+**(Normative for structure, Informative for content)**
 
-[TBD]
+This annex defines the permitted fields in a Device Schema document. A Device
+Schema MUST be a valid JSON object. The top-level structure is as follows:
+
+```
+{
+  "device-platform-device-id": <string>,
+  "farm-platform-device-id": <string>,
+  "modules": {
+    "<module-name>": {
+      "name": <string>,          // optional
+      "fields": [ <field>, ... ]
+    },
+    ...
+  }
+}
+```
+
+### A.1 Top-Level Fields
+
+| Field | Required | Type | Description |
+|---|---|---|---|
+| `device-platform-device-id` | MUST | string | The device identifier as used by the Device-Platform, and as used in the `bn` field of SenML packets |
+| `farm-platform-device-id` | SHOULD | string | The device identifier as used by the Farm-Platform |
+| `modules` | MUST | object | A map of module names to module objects (see A.2) |
+
+### A.2 Module Object
+
+A module groups related fields. The module name forms the prefix of the `n`
+field in SenML packets (e.g. module `sht` covers fields `sht/temperature`,
+`sht/humidity`, etc.).
+
+| Field | Required | Type | Description |
+|---|---|---|---|
+| `name` | MAY | string | Human-readable name for the module |
+| `fields` | MUST | array | Array of field definition objects (see A.3) |
+
+### A.3 Field Definition Object
+
+Each entry in a `fields` array defines one measurable or controllable quantity
+produced or consumed by the device.
+
+| Field | Required | Type | Description |
+|---|---|---|---|
+| `field` | MUST | string | The field name, used as the suffix of the `n` field in SenML packets (e.g. `temperature`) |
+| `name` | MUST | string | Human-readable label for the field (e.g. `"Temperature"`) |
+| `type` | MUST | string | Data type of the value. One of: `float`, `int`, `exponential`, `boolean`, `text`, `color` |
+| `units` | SHOULD | string | Unit of measurement, conforming to RFC 8428 / UCUM notation (e.g. `"Cel"`, `"%RH"`) |
+| `rw` | MAY | string | Read/write access. One of: `r` (read-only), `w` (write-only), `rw` (read-write). If omitted, access is unspecified. |
+| `min` | MAY | number | Minimum valid value (numeric fields only) |
+| `max` | MAY | number | Maximum valid value (numeric fields only) |
+| `slot` | MAY | string | Binds the field to a named platform concept (e.g. `"lastseen"`). Platform-defined. |
+| `retain` | MAY | boolean | If `true`, the last known value persists across device reboots or reconnections |
+| `log` | MAY | boolean | If `true`, the Device-Platform records a time-series history of this field |
+| `duplicates` | MAY | object | Controls when a new reading is considered significant (see A.4) |
+| `display` | MAY | string | Hint for how to render the field. One of: `bar`, `text`, `gauge`, `map`, `color`, `slider`, `toggle` |
+| `color` | MAY | string | Display colour for the field, as a CSS colour name or hex value |
+| `graphable` | MAY | boolean | If `true`, the field is suitable for time-series graphing |
+| `wireable` | MAY | boolean | If `true`, the field may be connected to other fields for display or control purposes |
+
+Fields marked MAY are optional. A Farm-Platform MUST NOT reject a schema
+that omits optional fields, and MUST NOT reject a schema that includes
+additional fields not defined in this annex (see Section 5.3).
+
+### A.4 Duplicates Object
+
+The `duplicates` object controls deduplication of readings. A new reading is
+only considered significant — and therefore stored or forwarded — if it
+differs from the previous reading by more than the defined threshold.
+
+| Field | Required | Type | Description |
+|---|---|---|---|
+| `significantdate` | MAY | number | Minimum time interval between stored readings, in milliseconds |
+| `significantvalue` | MAY | number or string | Minimum change in value required for a reading to be stored. A plain number is an absolute delta; a string ending in `%` denotes a relative change (e.g. `"2%"`) |
 
 ---
 
-## Annex C — [Title]
+## Annex B — Example Device Schema
 
-**(Normative | Informative)**
+**(Informative)**
 
-[TBD]
+The following is an example Device Schema for an ESP32-based device with an
+SHT temperature/humidity sensor module and a `main` module exposing device
+metadata fields. This example is provided for illustration only and does not
+constitute a normative definition.
+
+```json
+{
+  "device-platform-device-id": "dev/developers/esp32-e4d5f6",
+  "farm-platform-device-id": "joesfarm/device1",
+  "modules": {
+    "sht": {
+      "name": "SHT",
+      "fields": [
+        {
+          "field": "temperature",
+          "name": "Temperature",
+          "type": "float",
+          "units": "Cel",
+          "rw": "r",
+          "min": 0,
+          "max": 50,
+          "log": true,
+          "duplicates": {
+            "significantdate": 900000,
+            "significantvalue": "2%"
+          },
+          "display": "bar",
+          "color": "red",
+          "graphable": true,
+          "wireable": false
+        },
+        {
+          "field": "humidity",
+          "name": "Humidity",
+          "type": "float",
+          "units": "%RH",
+          "rw": "r",
+          "min": 0,
+          "max": 100,
+          "log": true,
+          "duplicates": {
+            "significantdate": 900000,
+            "significantvalue": 1
+          },
+          "display": "bar",
+          "color": "blue",
+          "graphable": true
+        }
+      ]
+    },
+    "main": {
+      "fields": [
+        {
+          "field": "id",
+          "name": "Node ID",
+          "type": "text",
+          "rw": "r",
+          "display": "text"
+        },
+        {
+          "field": "name",
+          "name": "Node Name",
+          "type": "text",
+          "rw": "w",
+          "retain": true,
+          "display": "text"
+        },
+        {
+          "field": "description",
+          "name": "Description",
+          "type": "text",
+          "rw": "w",
+          "retain": true,
+          "display": "text"
+        },
+        {
+          "field": "lastseen",
+          "name": "Last Seen",
+          "type": "text",
+          "rw": "r",
+          "slot": "lastseen",
+          "display": "text"
+        }
+      ]
+    }
+  }
+}
+```
 
 ---
 
-## Annex D — [Title]
+## Annex C — User Stories
 
-**(Normative | Informative)**
+**(Informative)**
 
-[TBD]
+This annex illustrates how the commands defined in this standard fit together
+in practice, through a series of user stories. Each step references the
+relevant command or section. These stories are illustrative only and do not
+constitute normative requirements.
+
+---
+
+### C.1 A Farmer Adds a New Device to Their Farm Platform
+
+**Actors:** A farmer already using a Farm-Platform (e.g. LiteFarm); a
+Device-Platform (e.g. Frugal IoT) that manages the farmer's device.
+
+**Precondition:** The Farm-Platform and Device-Platform have completed
+platform registration ([Section 3.6](#36-platform-registration)), including
+exchange of base URLs and authentication tokens.
+
+**Story:**
+
+1. The farmer navigates to an "Add Device" screen within their Farm-Platform
+   (e.g. LiteFarm). This is internal to the Farm-Platform and outside the
+   scope of this standard.
+
+2. The farmer enters the device identifier as provided by their device supplier
+   (e.g. printed on the device or in accompanying documentation).
+
+3. The farmer enters the physical location of the device — either by typing a
+   GPS coordinate or placing a marker on a map. This step is manual, as most
+   low-cost devices do not include a GPS chip. This is internal to the
+   Farm-Platform and outside the scope of this standard.
+
+4. The Farm-Platform registers the farmer as a user on the Device-Platform, if
+   not already registered.
+   → [Section 6.3 — Register a User](#63-register-a-user)
+
+5. The Farm-Platform registers the device to the farmer's account on the
+   Device-Platform, providing its own identifier for the device alongside the
+   device identifier supplied by the farmer.
+   → [Section 6.4 — Register a Device to a User](#64-register-a-device-to-a-user)
+
+6. The Device-Platform records that data for this device should be forwarded
+   to the Farm-Platform, and stores the Farm-Platform's device identifier for
+   future use (as `farm-platform-device-id` in the Device Schema).
+
+7. The Farm-Platform fetches the Device Schema for the newly registered device,
+   learning what fields the device produces, their types, units, and any
+   display hints.
+   → [Section 5.2 — Device Schema](#52-device-schema)
+
+8. The Farm-Platform uses the Device Schema to configure its user interface for
+   this device — for example, creating a dashboard widget for each field. It
+   MAY use the display hints in the schema (such as `display: "bar"` for
+   temperature) to inform how each field is presented, but is not required to
+   do so.
+   → [Annex A.3 — Field Definition Object](#a3-field-definition-object)
+
+9. Periodically, the Farm-Platform requests recent sensor data for the device
+   and updates its display. It filters any records outside the requested time
+   range client-side.
+   → [Section 6.2 — Request Data for a Device](#62-request-data-for-a-device)
+
+---
+
+### C.2 A Farmer Views Historical Sensor Data
+
+**Actors:** A farmer using a Farm-Platform (e.g. LiteFarm); a Device-Platform
+(e.g. Frugal IoT) that manages the farmer's device.
+
+**Precondition:** The farmer has already added the device to their Farm-Platform
+as described in [Annex C.1](#c1-a-farmer-adds-a-new-device-to-their-farm-platform).
+The Farm-Platform already has the Device Schema for this device and knows what
+fields it produces (e.g. `sht/temperature` and `sht/humidity`).
+
+**Story:**
+
+1. The farmer navigates to a historical view or graph for one of their devices
+   within the Farm-Platform. This is internal to the Farm-Platform and outside
+   the scope of this standard.
+
+2. The Farm-Platform requests data for the device over the relevant time range
+   — for example, the past 7 days.
+   → [Section 6.2 — Request Data for a Device](#62-request-data-for-a-device)
+
+3. The Device-Platform returns a SenML packet containing the historical
+   readings for the requested period. The response may include data points
+   slightly outside the requested range; the Farm-Platform filters these
+   client-side.
+   → [Section 6.2.3 — Response](#623-response)
+   → [Section 4 — Packet Format](#4-packet-format)
+
+4. Because the Farm-Platform already retrieved the Device Schema during
+   registration ([Annex C.1, step 7](#c1-a-farmer-adds-a-new-device-to-their-farm-platform)),
+   it already understands the meaning, units, and display hints for each field
+   in the returned data. No additional schema lookup is required.
+
+5. The Farm-Platform displays the data — for example, as a time-series graph
+   of temperature and humidity. It MAY use the display hints from the Device
+   Schema (e.g. `color`, `graphable`) to style the presentation, but is not
+   required to do so.
+   → [Annex A.3 — Field Definition Object](#a3-field-definition-object)
+
+6. If the farmer scrolls or pages to an earlier time period, the Farm-Platform
+   issues a further data request for the new time range. Each request is
+   independent and follows the same pattern as step 2. The Farm-Platform MAY
+   cache previously retrieved data to avoid redundant requests.
+   → [Section 6.2 — Request Data for a Device](#62-request-data-for-a-device)
+
+---
+
+### C.3 A User Submits Point-Source Sensor Data via a Survey Tool
+
+*Note: This section is a placeholder and may be edited by Greg Austic.*
+
+**Actors:** A farmer or field technician using a Farm-Platform (e.g. LiteFarm);
+a survey and data collection tool (e.g. SurveyStack) acting as a Device-Platform.
+
+**Precondition:** The Farm-Platform and SurveyStack have completed platform
+registration ([Section 3.6](#36-platform-registration)). The farmer has
+identified SurveyStack as a device source within LiteFarm, following a process
+similar to [Annex C.1](#c1-a-farmer-adds-a-new-device-to-their-farm-platform).
+
+**Story:**
+
+1. The LiteFarm user identifies a SurveyStack survey instrument (e.g. a soil
+   reflectometer) as a device within LiteFarm. This is internal to LiteFarm
+   and outside the scope of this standard.
+
+2. The user takes a measurement in the field using the reflectometer and enters
+   the resulting data into SurveyStack, including the GPS location of the
+   measurement. This is a point-source, one-off reading rather than a
+   continuous stream — the device does not transmit data autonomously.
+
+3. SurveyStack pushes the measurement data to LiteFarm using the data push
+   command. The SenML packet encodes the device identifier, the timestamp of
+   the measurement, the GPS location, and the measured values.
+   → [Section 7.2 — Push Sensor Data](#72-push-sensor-data)
+   → [Section 4 — Packet Format](#4-packet-format)
+
+4. LiteFarm receives the data, acknowledges it, and records which fields were
+   accepted and which were ignored.
+   → [Section 7.2.3 — Response](#723-response)
+
+5. LiteFarm displays the point-source reading within its interface, for example
+   as a georeferenced data point on a field map.
+
+---
+
+### C.4 A Farmer Turns On Irrigation via Their Farm Platform
+
+**Actors:** A farmer using a Farm-Platform (e.g. LiteFarm); a Device-Platform
+(e.g. Frugal IoT) managing a device with an irrigation relay actuator.
+
+**Precondition:** The farmer has already added the device to their Farm-Platform
+as described in [Annex C.1](#c1-a-farmer-adds-a-new-device-to-their-farm-platform).
+The Device Schema for the device includes a writable field for irrigation
+control (e.g. `relay/on`, type `boolean`, `rw: "w"`).
+
+**Story:**
+
+1. The farmer reviews sensor data on their LiteFarm dashboard — for example,
+   a soil moisture reading indicating the field is too dry. This is internal
+   to LiteFarm and outside the scope of this standard.
+
+2. The farmer decides to turn on irrigation for 50 minutes and enters this
+   instruction via LiteFarm's interface. This is internal to LiteFarm and
+   outside the scope of this standard.
+
+3. LiteFarm sends a command to Frugal IoT to turn the irrigation relay on.
+   → [Section 6.5 — Send a Command to a Device](#65-send-a-command-to-a-device)
+
+   ```json
+   {
+     "device-id": "dev/joesfarm/esp32-e4d5f6",
+     "command": "relay/on",
+     "parameters": { "value": true }
+   }
+   ```
+
+4. Frugal IoT receives the command, forwards it to the device, and returns
+   an `accepted` response to LiteFarm.
+   → [Section 6.5.3 — Response](#653-response)
+
+5. The device activates the irrigation relay.
+
+6. The device activates the irrigation relay. After 50 minutes, LiteFarm
+   sends a further command to Frugal IoT to turn the relay off.
+   → [Section 6.5 — Send a Command to a Device](#65-send-a-command-to-a-device)
+
+   ```json
+   {
+     "device-id": "dev/joesfarm/esp32-e4d5f6",
+     "command": "relay/on",
+     "parameters": { "value": false }
+   }
+   ```
+
+---
+
+### C.5 [Further user stories TBD]
+
+---
+
+## Annex D — Why This Is Not a Device-to-Backend API
+
+**(Informative)**
+
+Legitimate questions have been raised as to why this standard defines a
+platform-to-platform API rather than a device-to-backend API — one that
+would allow devices to speak directly to any Farm-Platform without the
+intermediary of a Device-Platform. This annex explains the reasoning.
+
+The combination of the following factors makes it impractical to assume that
+devices can act as first-class API participants. This standard should not,
+however, preclude a larger or more capable device from speaking the API
+directly where it has the connectivity and capacity to do so.
+
+**Most devices do not have stable IP addresses**
+
+The majority of IoT devices in the agroecology space are not directly
+addressable on the internet. They typically operate under one or more of the
+following conditions: behind a NAT on a temporary WiFi IP address;
+intermittently connected via variable means such as Bluetooth Low Energy
+(BLE) to a phone; or behind a low-bandwidth radio protocol such as LoRa,
+which has no concept of IP addressing at all. A platform-to-platform API
+sidesteps these constraints entirely, as both platforms are persistent,
+addressable internet services.
+
+**Devices are often already fully deployed**
+
+Many devices in the field have firmware blown at manufacture and cannot
+easily be updated. Requiring those devices to implement a new API is
+impractical. A Device-Platform, by contrast, is software running on a server
+and can be updated independently of the physical devices it manages.
+
+**Devices have severe resource constraints**
+
+Typical devices in this space — for example ESP32-based sensors — have
+approximately 4MB of flash storage. Supporting two firmware images for
+over-the-air (OTA) updates, plus data storage, leaves a practical maximum
+application size of around 1.5MB. Many applications already approach this
+limit due to code overhead from the RTOS and communication stacks. Adding
+support for additional protocols such as HTTPS and JSON parsing carries
+significant tradeoffs on a device that do not exist on a server backend.
+
+**Communication protocols are optimised for their specific constraints**
+
+Device-to-platform communication protocols are chosen to suit the physical
+environment — LoRa for long range and low power, BLE for short range,
+MQTT for unreliable connections, and so on. Each involves tradeoffs between
+bandwidth, power consumption, and reliability that are specific to the
+device's situation. A server-to-server API, by contrast, operates over
+reliable, high-bandwidth connections and can use standard HTTP without any
+of these tradeoffs. Keeping device protocols optimised for their environment,
+while standardising at the platform-to-platform layer, gives the best of
+both worlds.
+
+**Device data is often raw and requires off-device processing**
+
+Many devices produce raw data that must be processed before it is meaningful
+to a farmer. For example, a soil reflectometer may produce spectrographic
+readings that require calibration and interpretation to produce actionable
+values such as nitrogen or organic matter content. Due to the resource
+constraints described above, this processing is typically performed off-device
+by the Device-Platform. The presumption in this standard is that the device
+builders — for example OurSci for their Reflectometer — are best placed to
+perform this interpretation, and that it is the processed, meaningful values
+that are communicated to the farmer's platform (e.g. LiteFarm), not the raw
+instrument output.
 
 ---
 
