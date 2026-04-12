@@ -6,6 +6,7 @@
   },
   "bugs": "https://github.com/mitra42/frugal-iot-server/issues",
   "dependencies": {
+    "@gebsl/senml-js": "^1.1.0",
     "array.prototype.tospliced": "^1.1.5",
     "cookie-parser": "^1.4.7",
     "express": "^5.0.1",
@@ -17,8 +18,7 @@
     "multer": "^2.0.2",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
-    "sqlite3": "^5.1.7",
-    "@gebsl/senml-js": "^1.1.0"
+    "sqlite3": "^5.1.7"
   },
   "description": "Frugal IoT client and server",
   "homepage": "https://github.com/mitra42/frugal-iot-server",
@@ -40,6 +40,7 @@
   "version": "0.2.5",
   "devDependencies": {
     "@types/jest": "^30.0.0",
-    "jest": "^30.3.0"
+    "jest": "^30.3.0",
+    "supertest": "^7.2.2"
   }
 }
