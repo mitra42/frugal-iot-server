@@ -6,6 +6,7 @@
   },
   "bugs": "https://github.com/mitra42/frugal-iot-server/issues",
   "dependencies": {
+    "array.prototype.tospliced": "^1.1.5",
     "cookie-parser": "^1.4.7",
     "express": "^5.0.1",
     "express-session": "^1.19.0",
@@ -17,7 +18,7 @@
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
     "sqlite3": "^5.1.7",
-    "array.prototype.tospliced": "^1.1.5"
+    "@gebsl/senml-js": "^1.1.0"
   },
   "description": "Frugal IoT client and server",
   "homepage": "https://github.com/mitra42/frugal-iot-server",
@@ -31,8 +32,14 @@
   "private": true,
   "repository": "https://github.com/mitra42/frugal-iot-server",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "type": "module",
-  "version": "0.2.5"
+  "version": "0.2.5",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.3.0"
+  }
 }
