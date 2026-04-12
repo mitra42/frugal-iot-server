@@ -427,6 +427,7 @@ function loggedInOrFail(req, res, next) {
 // as need user to be logged in to access config etc
 // Note if originalUrl is /dashboard/index.html then req.url is just /index.html
 function shouldIBeLoggedIn(req, res, next) {
+  console.log("XXX shouldIBeLoggedIn", req.user, req.params.org);
   if ((['/','/index.html','/admin.html'].includes(req.url)) && !req.isAuthenticated()) {
     console.log(`Not authenticated redirecting ${req.url} for login`);
     res.redirect(307, `${loginUrl}?register=false&message=Please%20login&url=` + req.originalUrl);
@@ -797,6 +798,8 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         routerDashboard.use(
           (req,res,next) => {console.log("/dashboard handler for", req.url); next(); }, // Log attempt
           shouldIBeLoggedIn, // redirect to ./login.html if not logged in then back here
+          (req,res,next) => {console.log("XXX back to /dashboard handler for", req.url); next(); }, // Log attempt
+          (req,res,next) => {console.log("XXX", config.server.htmldir); next(); }, // Log attempt
           express.static(config.server.htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}) // Serve static
         );
 
