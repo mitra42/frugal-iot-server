@@ -2,6 +2,13 @@
 
 This guide explains how to integrate the Phase 3 API routes into the main `frugal-iot-server.js` file.
 
+## Architecture Note
+
+**IMPORTANT**: The logger (`mqttLogger`) runs in the **same process** as the server. Therefore:
+- ✅ Call logger functions directly (not via HTTP)
+- ❌ Do NOT use HTTP endpoints
+- ✅ Pass the logger instance directly to LoggerClient
+
 ## Quick Integration
 
 ### 1. Add Imports (near top of file, after other imports)
@@ -24,25 +31,27 @@ initializeSchema(db).catch(err => {
 });
 ```
 
-### 3. Create Logger Client (after database initialization)
+### 3. Create Logger Client (IMPORTANT: Pass mqttLogger directly)
 
 ```javascript
-// Create logger client (use env var or default)
-const loggerBaseUrl = process.env.LOGGER_URL || 'http://localhost:3001';
-const loggerClient = createLoggerClient(loggerBaseUrl, null); // null = no HTTP client for now
+// Create logger client with direct reference to mqttLogger (NOT HTTP)
+// The logger runs in the same process, so no HTTP needed
+const loggerClient = createLoggerClient(mqttLogger);
 ```
 
 ### 4. Create Push Manager (after logger client)
 
 ```javascript
 // Create push manager for Farm-Platform data delivery
-const pushManager = createPushManager(db, null); // null = no HTTP client for now
+const pushManager = createPushManager(db, null);
 ```
 
-### 5. Mount API Router (before other routes, recommend near line 650-700)
+### 5. Mount API Router (before other routes)
+
+**Key placement**: After passport setup but before other static routes
 
 ```javascript
-// Add this after passport initialization and before app.use(express.json())
+// Add this in openOrCreateDatabase callback, after passport initialization
 // Mount API routes (new interoperability standard endpoints)
 app.use(express.json()); // IMPORTANT: Required for API POST endpoints
 
@@ -53,10 +62,11 @@ app.use('/api', apiRouter);
 app.use(createAPIErrorHandler());
 ```
 
-### 6. Start Push Queue Processor (in main server loop)
+### 6. Start Push Queue Processor
 
 ```javascript
-// After app.listen(), start periodic push queue processing
+// Start periodic push queue processing
+// Can be in main loop or after app.listen()
 setInterval(async () => {
   try {
     const result = await pushManager.processPushQueue();

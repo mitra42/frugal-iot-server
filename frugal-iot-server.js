@@ -103,6 +103,12 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 // Development of Logger
 // import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
+// API Integration - Farm IoT Interoperability Standard
+import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
+import { createLoggerClient } from './lib/logger-client.js';
+import { createPushManager } from './lib/farm-platform-push.js';
+import { initializeSchema } from './lib/database.js';
+
 import { access, constants, createReadStream, mkdir, readdir, rm } from 'fs'; // https://nodejs.org/api/fs.html
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
@@ -666,6 +672,46 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
 
         // Check if have a session, and if so store in req.user, uses function defined in deserializeUser above
         app.use(passport.authenticate('session')); // Add user to req.user
+
+        // ===== API Integration: Farm IoT Interoperability Standard =====
+        // Initialize database schema for API
+        initializeSchema(db).catch(err => {
+          console.error("Error initializing API schema:", err);
+        });
+
+        // Create logger client with direct reference to mqttLogger
+        const loggerClient = createLoggerClient(mqttLogger);
+        console.log("Created logger client for API integration");
+
+        // Create push manager for Farm-Platform data delivery
+        const pushManager = createPushManager(db, null);
+        console.log("Created push manager for Farm-Platform data push");
+
+        // Enable JSON parsing for API POST endpoints
+        app.use(express.json());
+
+        // Mount API routes
+        const apiRouter = createAPIRouter(db, config.server.datadir, loggerClient, pushManager);
+        app.use('/api', apiRouter);
+        console.log("Mounted API routes at /api");
+
+        // Add API error handler
+        app.use(createAPIErrorHandler());
+        console.log("Added API error handler");
+
+        // Start push queue processor (runs every 5 seconds)
+        const pushQueueInterval = setInterval(async () => {
+          try {
+            const result = await pushManager.processPushQueue();
+            if (result.processed > 0 || result.failed > 0) {
+              console.log(`[Push Queue] ${result.message}`);
+            }
+          } catch (err) {
+            console.error('[Push Queue] Error:', err.message);
+          }
+        }, 5000);
+
+        // ===== End API Integration =====
 
         app.post('/login',
           (req,res,next) => {
