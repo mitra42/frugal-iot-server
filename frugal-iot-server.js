@@ -464,25 +464,15 @@ function addLoggedNodesToConfig() {
   let nodes = mqttLogger.reportNodes(); // { orgid, { projectid, { nodeid: lastseen } }
   let oo = configPlusNodes.organizations; // pointer into it
   Object.entries(nodes).forEach(([orgid, projects]) => {
-    if (!oo[orgid]) {
-      oo[orgid] = { projects: {}};
-    }
-    let pp = oo[orgid].projects;
+    let o = (oo[orgid] || (oo[orgid] = {}));
+    let pp = (o.projects || (o.projects = {}));
     // noinspection JSCheckFunctionSignatures
     Object.entries(projects).forEach(([projectid, nodes]) => {
-      if (!pp[projectid]) {
-        pp[projectid] = { nodes: {}};
-      }
-      let nn = pp[projectid].nodes;
-      if (!nn) {
-        nn = pp[projectid].nodes = {}
-      }
+      let p = (pp[projectid] || (pp[projectid] = {}));
+      let nn = (p.nodes || (p.nodes = {}));
       // noinspection JSCheckFunctionSignatures
-      Object.entries(nodes).forEach(([nodeid, lastseen]) => {
-        if (!nn[nodeid]) {
-          nn[nodeid] = {};
-        }
-        nn[nodeid].lastseen = lastseen;
+      Object.entries(nodes).forEach(([nodeid, vals]) => {
+        nn[nodeid] = vals;
       });
     });
   });
