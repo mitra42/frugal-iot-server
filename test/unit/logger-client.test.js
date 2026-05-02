@@ -20,8 +20,32 @@ describe('Phase 3: Logger Integration & Push Manager', () => {
     // Initialize schema
     await initializeSchema(db);
 
-    // Create logger client (without HTTP client for testing)
-    loggerClient = new LoggerClient('http://localhost:3001', null);
+    // Create mock mqtt logger for testing
+    const mockMqttLogger = {
+      getDeviceSchema: async (org, project, deviceId) => {
+        return {
+          'device-platform-device-id': `${org}/${project}/${deviceId}`,
+          'farm-platform-device-id': null,
+          modules: {
+            main: {
+              name: 'Device Info',
+              fields: [
+                {
+                  field: 'id',
+                  name: 'Device ID',
+                  type: 'text',
+                  rw: 'r',
+                  display: 'text'
+                }
+              ]
+            }
+          }
+        };
+      }
+    };
+
+    // Create logger client with mock mqtt logger
+    loggerClient = new LoggerClient(mockMqttLogger);
 
     // Create push manager
     pushManager = createPushManager(db, null);

@@ -153,6 +153,39 @@ Organizations are defined in `config.d/organizations/{org}.yaml` and include:
 - User data deserialized from database on each request
 - Permissions retrieved from database during deserialization
 
+## Coding Style Preferences
+
+### Indentation
+- **Use 2 spaces for indentation** (not tabs or 4 spaces)
+- Apply consistently throughout all JavaScript files
+
+### Asynchronous Code
+- **Prefer callbacks over promises** for backward compatibility and consistency with existing codebase
+- Use the callback pattern: `function(param, callback)` where `callback(err, result)` follows Node.js conventions
+- Error-first callbacks: `callback(error)` on failure, `callback(null, result)` on success
+
+Example:
+```javascript
+function readData(filePath, callback) {
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      callback(err, null);
+    } else {
+      callback(null, data);
+    }
+  });
+}
+
+// Usage
+readData('/path/to/file', (err, result) => {
+  if (err) {
+    console.error('Error:', err);
+  } else {
+    console.log('Success:', result);
+  }
+});
+```
+
 ## Development Notes
 
 ### Starting the Server
