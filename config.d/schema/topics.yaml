@@ -171,6 +171,13 @@ key:
   type:     text
   display:  text
   rw:       r
+languagecode:
+  leaf:     languagecode
+  name:     Language
+  type:     text
+  display:  text
+  color:    black
+  rw:       r
 lastseen:
   leaf:     lastseen
   slot:     lastseen

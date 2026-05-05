@@ -16,6 +16,10 @@ button:
   name: Button
   topics:
     - leaf:     button
+captive:
+  name: Captive
+  topics:
+    - leaf:     language_code
 controlblinken:
   name: "Control Blinken"
   topics:
