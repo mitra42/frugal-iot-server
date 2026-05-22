@@ -81,6 +81,7 @@ button:
   name:     Button
   type:     bool
   display:  toggle
+  color:    black
   rw:       r
 color:
   leaf:     color
