@@ -12,7 +12,7 @@
     "express": "^5.0.1",
     "express-session": "^1.19.0",
     "frugal-iot-client": "git://github.com/mitra42/frugal-iot-client.git",
-    "frugal-iot-logger": "^1.1.13",
+    "frugal-iot-logger": "^1.1.14",
     "hash-wasm": "^4.12.0",
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
@@ -21,6 +21,12 @@
     "sqlite3": "^5.1.7"
   },
   "description": "Frugal IoT client and server",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.3.0",
+    "supertest": "^7.2.2",
+    "vitest": "^1.0.0"
+  },
   "homepage": "https://github.com/mitra42/frugal-iot-server",
   "keywords": [
     "mqtt",
@@ -37,11 +43,5 @@
     "test:coverage": "vitest run --coverage"
   },
   "type": "module",
-  "version": "0.2.6",
-  "devDependencies": {
-    "@types/jest": "^30.0.0",
-    "jest": "^30.3.0",
-    "supertest": "^7.2.2",
-    "vitest": "^1.0.0"
-  }
+  "version": "0.2.7"
 }

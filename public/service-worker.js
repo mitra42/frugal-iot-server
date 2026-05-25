@@ -1,6 +1,6 @@
 // Change this version number if want existing installs of PWA to refresh their cache
 // TODO-28 - probably make this the same as the app version in frugal-iot-client
-const CACHE_NAME = 'frugal-iot-cache-1.3.7';
+const CACHE_NAME = 'frugal-iot-cache-1.3.8';
 const urlsToCache = [
     '/',
     '/index.html',
