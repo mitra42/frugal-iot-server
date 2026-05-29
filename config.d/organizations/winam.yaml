@@ -1,0 +1,8 @@
+# Configuration for FrugalIoT server for organization=dev
+mqtt_password: public
+name: Fablab Winam
+projects:
+  kiya:
+    name: KIYA
+  developers:
+    name: Developers
