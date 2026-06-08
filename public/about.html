@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#007bff">
+    <title>About — Frugal IoT</title>
+    <style>
+        :root {
+            --green-dark:  #1e3a28;
+            --green-mid:   #27ae60;
+            --green-light: #2ecc71;
+            --blue:        #007bff;
+            --bg:          #f5f5f5;
+            --white:       #ffffff;
+            --text:        #1a1a1a;
+            --text-mid:    #444;
+            --text-muted:  #777;
+            --shadow-sm:   0 2px 8px rgba(0,0,0,.10);
+            --shadow-md:   0 4px 16px rgba(0,0,0,.15);
+            --radius:      8px;
+            --max:         1200px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                         Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        /* ── page shell ─────────────────────────────────────── */
+        .page-shell {
+            max-width: var(--max);
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* ── header ─────────────────────────────────────────── */
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .header img {
+            width: 80px;
+            height: 80px;
+            margin-right: 20px;
+            flex-shrink: 0;
+        }
+        .header-text h1 { margin-bottom: 6px; }
+        .header-text p  { color: var(--text-mid); font-size: 15px; }
+
+        /* ── back nav ───────────────────────────────────────── */
+        .back-nav {
+            margin-bottom: 36px;
+        }
+        .back-nav a {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            color: var(--text-mid);
+            text-decoration: none;
+            border: 1px solid #d0d0d0;
+            border-radius: 20px;
+            padding: 5px 14px;
+            transition: background .2s, color .2s, border-color .2s;
+        }
+        .back-nav a:hover {
+            background: var(--white);
+            color: var(--green-mid);
+            border-color: var(--green-mid);
+        }
+
+        /* ── section shared ─────────────────────────────────── */
+        section { margin-bottom: 52px; }
+
+        .section-label {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: .14em;
+            text-transform: uppercase;
+            color: var(--green-mid);
+            margin-bottom: 10px;
+        }
+
+        .section-title {
+            font-size: clamp(22px, 4vw, 32px);
+            font-weight: 700;
+            line-height: 1.2;
+            margin-bottom: 20px;
+        }
+
+        /* ── WHY ─────────────────────────────────────────────── */
+        .why-wrap {
+            background: var(--green-dark);
+            border-radius: var(--radius);
+            padding: clamp(28px, 5vw, 52px);
+            color: var(--white);
+            position: relative;
+            overflow: hidden;
+        }
+        /* subtle diagonal texture */
+        .why-wrap::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: repeating-linear-gradient(
+                135deg,
+                rgba(255,255,255,.02) 0px,
+                rgba(255,255,255,.02) 1px,
+                transparent 1px,
+                transparent 28px
+            );
+            pointer-events: none;
+        }
+
+        .why-wrap .section-label { color: var(--green-light); }
+        .why-wrap .section-title { color: var(--white); margin-bottom: 28px; }
+
+        /* price comparison */
+        .price-compare {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 32px;
+        }
+        .price-card {
+            flex: 1;
+            min-width: 220px;
+            border-radius: var(--radius);
+            padding: 24px 28px;
+            position: relative;
+        }
+        .price-card.today {
+            background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12);
+        }
+        .price-card.target {
+            background: rgba(46,204,113,.18);
+            border: 1px solid rgba(46,204,113,.4);
+        }
+        .price-card .pc-label {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            opacity: .7;
+            margin-bottom: 8px;
+        }
+        .price-card .pc-range {
+            font-size: clamp(28px, 5vw, 44px);
+            font-weight: 800;
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+        .price-card.today .pc-range {
+            text-decoration: line-through;
+            text-decoration-color: rgba(255,80,80,.7);
+            opacity: .65;
+        }
+        .price-card.target .pc-range { color: var(--green-light); }
+        .price-card .pc-sub {
+            font-size: 13px;
+            opacity: .6;
+        }
+        /* big arrow between cards */
+        .price-arrow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: var(--green-light);
+            opacity: .6;
+            align-self: center;
+            flex-shrink: 0;
+        }
+
+        .why-body {
+            font-size: 16px;
+            line-height: 1.75;
+            color: rgba(255,255,255,.82);
+            max-width: 720px;
+        }
+
+        /* ── HOW ─────────────────────────────────────────────── */
+        .how-intro {
+            font-size: 16px;
+            color: var(--text-mid);
+            max-width: 680px;
+            margin-bottom: 28px;
+        }
+
+        .stack-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+        }
+
+        .stack-card {
+            background: var(--white);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+            transition: transform .3s ease, box-shadow .3s ease;
+        }
+        .stack-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-md);
+        }
+        .stack-card-thumb {
+            height: 120px;
+            background-size: cover;
+            background-position: center;
+            position: relative;
+        }
+        .stack-card-thumb::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg,
+                rgba(46,204,113,.35), rgba(39,174,96,.35));
+        }
+        .stack-card-body {
+            padding: 18px 20px 20px;
+        }
+        .stack-card-body h3 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--text);
+        }
+        .stack-card-body p {
+            font-size: 14px;
+            color: var(--text-mid);
+            line-height: 1.55;
+        }
+
+        /* ── OPEN SOURCE ─────────────────────────────────────── */
+        .os-intro {
+            font-size: 16px;
+            color: var(--text-mid);
+            max-width: 680px;
+            margin-bottom: 28px;
+        }
+
+        /* reuse nav-box pattern from index.html */
+        .box-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+        }
+        .nav-box {
+            position: relative;
+            overflow: hidden;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+            transition: transform .3s ease, box-shadow .3s ease;
+            height: 180px;
+        }
+        .nav-box:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-md);
+        }
+        .nav-box-background {
+            position: absolute;
+            inset: 0;
+            background-size: cover;
+            background-position: center;
+            opacity: .65;
+            z-index: 1;
+        }
+        .nav-box-content {
+            position: relative;
+            z-index: 2;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(135deg,
+                rgba(46,204,113,.3), rgba(39,174,96,.3));
+        }
+        .nav-box-content a {
+            color: var(--white);
+            text-decoration: none;
+            font-size: 17px;
+            font-weight: 600;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            height: 100%;
+            justify-content: center;
+            text-shadow: 0 2px 4px rgba(0,0,0,.7), 0 0 8px rgba(0,0,0,.4);
+        }
+        .nav-box-content a:hover { text-decoration: underline; }
+        .nav-box-content a small {
+            font-size: 12px;
+            font-weight: 400;
+            opacity: .85;
+        }
+
+        /* ── PARTNERS ────────────────────────────────────────── */
+        .partners-intro {
+            font-size: 16px;
+            color: var(--text-mid);
+            max-width: 680px;
+            margin-bottom: 28px;
+        }
+
+        /* CTA cards are taller */
+        .cta-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .cta-grid .nav-box { height: 220px; }
+        .cta-grid .nav-box-content {
+            background: linear-gradient(135deg,
+                rgba(0,123,255,.28), rgba(0,86,179,.28));
+        }
+        .cta-grid .nav-box-content a { font-size: 20px; }
+
+        /* ── FOOTER ──────────────────────────────────────────── */
+        footer {
+            border-top: 1px solid #ddd;
+            padding: 28px 0 20px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        /* ── scroll-reveal ───────────────────────────────────── */
+        .reveal {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity .5s ease, transform .5s ease;
+        }
+        .reveal.visible {
+            opacity: 1;
+            transform: none;
+        }
+    </style>
+</head>
+<body>
+<div class="page-shell">
+
+    <!-- HEADER -->
+    <header class="header">
+        <img alt="Frugal IoT logo" src="/images/icon-192x192.png">
+        <div class="header-text">
+            <h1>Frugal IoT project</h1>
+            <p>An open-source project to make sensors affordable and accessible
+               to a wide range of projects in resource-constrained situations.</p>
+        </div>
+    </header>
+
+    <!-- BACK NAV -->
+    <nav class="back-nav">
+        <a href="/">&#8592; Back to Home</a>
+    </nav>
+
+    <!-- WHY -->
+    <section class="reveal">
+        <div class="why-wrap">
+            <p class="section-label">The Problem</p>
+            <h2 class="section-title">Why Frugal IoT?</h2>
+
+            <div class="price-compare">
+                <div class="price-card today">
+                    <p class="pc-label">Typical IoT sensor</p>
+                    <p class="pc-range">$200–$500</p>
+                    <p class="pc-sub">per sensor node, today</p>
+                </div>
+                <div class="price-arrow">&#8594;</div>
+                <div class="price-card target">
+                    <p class="pc-label">Our target</p>
+                    <p class="pc-range">$20–$50</p>
+                    <p class="pc-sub">per sensor node, with Frugal IoT</p>
+                </div>
+            </div>
+
+            <p class="why-body">
+                At $200–$500 per sensor many critical problems simply cannot be addressed.
+                Monitoring soil moisture across a smallholder farm, tracking water quality
+                in a remote watershed, or measuring air quality in a school — none of these
+                are viable when a single sensor costs as much as a month's wages.
+                We believe the price point of $20–$50 per sensor unlocks a completely
+                different set of solutions.
+            </p>
+        </div>
+    </section>
+
+    <!-- HOW -->
+    <section class="reveal">
+        <p class="section-label">Our Approach</p>
+        <h2 class="section-title">How We're Getting There</h2>
+        <p class="how-intro">
+            We believe that a successful solution at scale comes from developing a core
+            set of technologies that can be repurposed, adapted, and localized to solve
+            specific problems.
+        </p>
+
+        <div class="stack-grid">
+            <article class="stack-card">
+                <div class="stack-card-thumb"
+                     style="background-image: url('/images/icon-nodes.png')"></div>
+                <div class="stack-card-body">
+                    <h3>Hardware</h3>
+                    <p>Open hardware designs for affordable sensor nodes, built for real-world field conditions.</p>
+                </div>
+            </article>
+
+            <article class="stack-card">
+                <div class="stack-card-thumb"
+                     style="background-image: url('/images/icon-nodes.png')"></div>
+                <div class="stack-card-body">
+                    <h3>Firmware</h3>
+                    <p>Libraries supporting a wide range of sensors, actuators, and functionality out of the box.</p>
+                </div>
+            </article>
+
+            <article class="stack-card">
+                <div class="stack-card-thumb"
+                     style="background-image: url('/images/icon-server.png')"></div>
+                <div class="stack-card-body">
+                    <h3>Server &amp; Services</h3>
+                    <p>Scalable backend infrastructure with minimal running costs, deployable on modest hardware.</p>
+                </div>
+            </article>
+
+            <article class="stack-card">
+                <div class="stack-card-thumb"
+                     style="background-image: url('/images/icon-client.png')"></div>
+                <div class="stack-card-body">
+                    <h3>Client</h3>
+                    <p>A browser and laptop client for data access, visualization, and device management.</p>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <!-- OPEN SOURCE -->
+    <section class="reveal">
+        <p class="section-label">Open Source</p>
+        <h2 class="section-title">Fully Open Source</h2>
+        <p class="os-intro">
+            The entire stack is open-sourced, allowing partners to adopt the parts that
+            fit their context and build their own solutions for the rest.
+        </p>
+
+        <div class="box-grid">
+            <div class="nav-box">
+                <div class="nav-box-background"
+                     style="background-image: url('/images/icon-nodes.png')"></div>
+                <div class="nav-box-content">
+                    <a href="https://github.com/mitra42/frugal-iot" target="_blank" rel="noopener">
+                        Nodes
+                        <small>frugal-iot</small>
+                    </a>
+                </div>
+            </div>
+            <div class="nav-box">
+                <div class="nav-box-background"
+                     style="background-image: url('/images/icon-server.png')"></div>
+                <div class="nav-box-content">
+                    <a href="https://github.com/mitra42/frugal-iot-server" target="_blank" rel="noopener">
+                        Server
+                        <small>frugal-iot-server</small>
+                    </a>
+                </div>
+            </div>
+            <div class="nav-box">
+                <div class="nav-box-background"
+                     style="background-image: url('/images/icon-client.png')"></div>
+                <div class="nav-box-content">
+                    <a href="https://github.com/mitra42/frugal-iot-client" target="_blank" rel="noopener">
+                        Client
+                        <small>frugal-iot-client</small>
+                    </a>
+                </div>
+            </div>
+            <div class="nav-box">
+                <div class="nav-box-background"
+                     style="background-image: url('/images/icon-logger.png')"></div>
+                <div class="nav-box-content">
+                    <a href="https://github.com/mitra42/frugal-iot-logger" target="_blank" rel="noopener">
+                        Logger
+                        <small>frugal-iot-logger</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- PARTNERS -->
+    <section class="reveal">
+        <p class="section-label">Get Involved</p>
+        <h2 class="section-title">Looking for Partners</h2>
+        <p class="partners-intro">
+            We are looking to find partners in various parts of the world who want to
+            build solutions for problems they are aware of — or who want to support
+            others who are closer to the problem.
+        </p>
+
+        <div class="cta-grid">
+            <div class="nav-box">
+                <div class="nav-box-background"
+                     style="background-image: url('/images/icon-wiki.png')"></div>
+                <div class="nav-box-content">
+                    <a href="https://github.com/mitra42/frugal-iot/wiki" target="_blank" rel="noopener">
+                        Explore the Wiki
+                    </a>
+                </div>
+            </div>
+            <div class="nav-box">
+                <div class="nav-box-background"
+                     style="background-image: url('/images/icon-nodes.png')"></div>
+                <div class="nav-box-content">
+                    <a href="https://github.com/mitra42/frugal-iot" target="_blank" rel="noopener">
+                        Browse the Repos
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+        <p>Frugal IoT is an open-source project by Natural Innovation.</p>
+    </footer>
+
+</div>
+
+<script>
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(e => {
+            if (e.isIntersecting) {
+                e.target.classList.add('visible');
+                observer.unobserve(e.target);
+            }
+        });
+    }, { threshold: 0.08 });
+
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>
