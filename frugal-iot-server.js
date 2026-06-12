@@ -16,13 +16,13 @@
  X not currently implemented
  *O means currently * should be O
 
- * /  Static serve frugal-iot-client (TODO-89 will move to dashboard and put static HTML here).
+ * /  Static serve frugal-iot-client (TODO-N89 will move to dashboard and put static HTML here).
  O /config.json Return configuration info - depends on user's org
  O /data  Back files from logger for graphing
  A /dashboard serves dashboard via frugal-iot-client
  * /debug repurposed for development
  * /echo  Send back headers etc
- * /login (get) served under default handler - which might go away TODO-89 make sure not hidden under dashboards Authentication
+ * /login (get) served under default handler - which might go away TODO-N89 make sure not hidden under dashboards Authentication
  * /login (post) login a user, & redirect (to dashboard typically)
  * /node_modules  Javascript libraries (from frugal-iot-client)
  * /ota_update/:org/:project/:node/:attribs  OTA updates - this is what nodes call
@@ -33,7 +33,7 @@
  * /register (post) register a new user
  */
  /*
-  How permissions work TODO-89 rewrite
+  How permissions work TODO-N89 rewrite
 
  Permissions from the user flow perspective
   - /dashboard => authenticate => ( server htmldir OR 303:login?tab=signin )
@@ -57,7 +57,7 @@
   then
     /config.json checks req.user and uses it to filter config
     /dashboard uses req.isAuthenticated() to check if logged in, if not redirects to /login
-    /data checks loggedInOrRedirect ╳ 307->/login and req.user.organization ╳ 403 ✔︎ serve static
+    /data checks loggedInOrRedirect ╳ 307->/login and can_READ ╳ 403 ✔︎ serve static
     /private uses loggedInOrRedirect ╳ 307->/login, ✔︎ serve static
 
   OTA and permissions
@@ -67,7 +67,7 @@
   - Code in post /ota_update
   - It creates directory and uploads file and sends back message
 
-  === DONE TO HERE TODO-89====
+  === DONE TO HERE TODO-N89====
   - organization on login.html (for register) should be a dropdown
   - organization on dashboard should be a dropdown based on permissions
   - Only connect to mqtt with credentials from /config\
@@ -241,7 +241,7 @@ function get_people_list(org, cb) {
     }});
 }
 function send_people_list(req, res) {
-  // TODO-89 list all People for an organization
+  // TODO-N89 list all People for an organization
   get_people_list(req.params.org, (err, people) => {
     if (err) {
       res.status(500).send(err.message); // Errors are internal, unexpected
@@ -322,13 +322,13 @@ function get_ota_dirs(org, cb) {
       console.error("Error reading ota files:", org, err);
       cb(err);
     } else {
-      cb(null, files.map(x => x.slice(0, -13)));
+      cb(null, files.map(x => x.slice(0, -13))); // strip trailing "/firmware.bin"
     }
   });
 }
 // ============ Authentication related =========
 let db; // For storing users
-const dbpath = "./frugal-iot.db"; // TODO-89 where should this live - make sure not somewhere the server will serve it.
+const dbpath = "./frugal-iot.db"; // TODO-N89 where should this live - make sure not somewhere the server will serve it.
 function openOrCreateDatabase(cb) {
   access(dbpath, (constants.W_OK | constants.R_OK), (err) => {
     if (err) {
@@ -392,7 +392,7 @@ passport.use(new LocalStrategy(function verify(username, password, cb) {
 }));
 
 // Helper functions - use as middleware for get, put and use
-// TODO-89 this might go away, replaced by shouldIBeLoggedIn - note that /login will be served from default handler which might go away
+// TODO-N89 this might go away, replaced by shouldIBeLoggedIn - note that /login will be served from default handler which might go away
 function loggedInOrRedirect(req, res, next) {
   if (req.isAuthenticated()) {
     next();
@@ -404,12 +404,21 @@ function loggedInOrRedirect(req, res, next) {
 function hasPermissions(user, org, permission) {
   return user.permissions.some(x => x.capability == permission && x.org == org);
 }
-// Not used as check direct in Multer storage, (since Multer fills the body) but use as template for other permissions (and then delete this comment)
+// Note that uploads check directly rather than using this
 function can_OTAUPDATE(req, res, next) {
   if (req.isAuthenticated() && hasPermissions(req.user, req.params.org, "OTAUPDATE")) {
     next();
   } else {
     res.sendStatus(401); // Just fail - shouldnt happen and anyway lost the file by now
+  }
+}
+function can_READ(req, res, next) {
+  const org = req.params.org || res.locals.org;
+  if (req.isAuthenticated() && hasPermissions(req.user, org, "READ")) {
+    next();
+  } else {
+    console.log("Failing permission to Read", req.user, org);
+    res.sendStatus(401);
   }
 }
 // Not used as check direct in Multer storage, (since Multer fills the body) but use as template for other permissions (and then delete this comment)
@@ -465,7 +474,7 @@ CREATE TABLE IF NOT EXISTS \`permissions\` (
 
 
 function addLoggedNodesToConfig() {
-  // TODO-89 TODO-90 this should strip out any sensitive information like passwords
+  // TODO-N89 TODO-90 this should strip out any sensitive information like passwords
   let configPlusNodes = config; // pointer to, not copy of
   let nodes = mqttLogger.reportNodes(); // { orgid, { projectid, { nodeid: lastseen } }
   let oo = configPlusNodes.organizations; // pointer into it
@@ -627,13 +636,13 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         // app.use(express.json()); // Not needed
         app.use(express.urlencoded({ extended: true })); // Passport will not function without this
         app.set('trust proxy', 1); // trust first proxy - see note in https://www.npmjs.com/package/express-session
-        // TODO-89 note need to setup session store, defaults to memory store which is not good for production
-        // TODO-89 think about cookie timeout and add "keep me logged in on this device" option that controls it
+        // TODO-N89 note need to setup session store, defaults to memory store which is not good for production
+        // TODO-N89 think about cookie timeout and add "keep me logged in on this device" option that controls it
         app.use(session({
-          secret: 'keyboard cat', // TODO-89 probably change, try changing this, hopefully should just require re-login
+          secret: 'keyboard cat', // TODO-N89 probably change, try changing this, hopefully should just require re-login
           resave: false,
           saveUninitialized: false,
-          cookie: { secure: 'auto' }  // TODO-89 cant be secure: true while testing on HTTP
+          cookie: { secure: 'auto' }  // TODO-N89 cant be secure: true while testing on HTTP
         }));
         // This defines he function that will be used to turn user data returned from database into object for the session
         passport.serializeUser(function(user, cb) {
@@ -713,7 +722,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
               //failWithError: true,
               failureRedirect: `${loginUrl}?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
               successRedirect: req.body.url,
-              // In failure case will also be messages in the session which need clearing out TODO-89
+              // In failure case will also be messages in the session which need clearing out TODO-N89
               //failureRedirect: `${loginUrl}?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
             })(req, res, next);
           }
@@ -723,7 +732,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           //console.log("password=", req.body.password);
           const username = req.body.username;
           const password = req.body.password;
-          const organization = req.body.organization; //TODO-89 should be validated and can only be "dev" without approval
+          const organization = req.body.organization; //TODO-N89 should be validated and can only be "dev" without approval
           crypto.randomBytes(16, (err, salt) => {
             if (err) {
               res.status(500).send('Internal error 688' );
@@ -753,7 +762,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           (req,res) => {
             addLoggedNodesToConfig();
             let oo = unsafeCopyConfigFor(req.user);
-            // TODO-89 should check which orgs approved
+            // TODO-N89 should check which orgs approved
             res.status(200).json(oo);
           },
         );
@@ -761,7 +770,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           loggedInOrFail,
           can_OTAUPDATE,
           (req,res) => {
-            // TODO-89 list all OTA files for an organization
+            // TODO-N89 list all OTA files for an organization
             get_ota_dirs(req.params.org, (err, dirs) => {
               if (err) {
                 res.status(500).send(err.message);
@@ -828,7 +837,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           },
           send_people_list,
         );
-        //  /dashboard is served statically, to logged in users //TODO-89 restrict orgs to those have permissions for (maybe handled via /config.org )
+        //  /dashboard is served statically, to logged in users //TODO-N89 restrict orgs to those have permissions for (maybe handled via /config.org )
         const routerDashboard = express.Router();
         app.use('/dashboard', routerDashboard);
         routerDashboard.use(
@@ -841,20 +850,17 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
 
         // Serve frugal-iot-logger data at /data but configure where to get them.
         console.log("Serving /data from", config.server.datadir);
-        //TODO-89 should be authenticated to correct org
+        //TODO-N89 should be authenticated to correct org
         const routerData = express.Router();
         app.use('/data', routerData);
         // Important that these aren't cached, or the data will not be updated.
         routerData.use(
           loggedInOrRedirect,
-          (req,res,next) => { console.log("/data handler authenticated by session for", req.url); next(); },
           (req,res,next) => {
-            if (req.url.startsWith(`/${req.user.organization}/`)) {
-              next();
-            } else {
-              res.sendStatus(403);
-            }
-          },
+            res.locals.org = req.url.split("/")[1];
+            next(); }, //
+          can_READ,
+          (req,res,next) => { console.log("/data handler authenticated by session for", req.url); next(); },
           express.static(config.server.datadir, {immutable: false})
         );
 
@@ -914,7 +920,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         routerPrivate.use(
           loggedInOrRedirect,
           //(req,res,next) => { console.log("/private handler authenticated by session for", req.url); next(); },
-          // TODO-89 should configure where /private is - maybe in frugal-iot-client
+          // TODO-N89 should configure where /private is - maybe in frugal-iot-client
           express.static(config.server.privatedir, { immutable: true, maxAge: 1000 * 60 * 60 * 24 }));
 
         // Serve service worker with no-cache to allow updates
