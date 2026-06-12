@@ -65,6 +65,7 @@ battery:
   rw:       r
   graphable:  true
   log:      true
+  units:    mV
   duplicates:
     significantdate: 900000
     significantvalue: 50
@@ -140,6 +141,7 @@ eco2:
   max:      900
   color:    brown
   log:      true
+  units:    ppm
   duplicates:
     significantdate: 900000
     significantvalue: 5
@@ -159,6 +161,7 @@ humidity:
     significantvalue: 1
   rw:       r
   graphable:  true
+  units:    "%RH"
 id:
   leaf:     id
   slot:     id
@@ -215,6 +218,7 @@ lux:
     significantdate: 900000
     significantvalue: 100
   graphable:  true
+  units:    lx
 manual:
   leaf:     manual
   name:     Manual
@@ -290,6 +294,7 @@ soil:
     significantvalue: 1
   graphable:  true
   calibrate:  true
+  units:    "%RH"
 temperature:
   leaf:     temperature
   name:     Temperature
@@ -301,6 +306,7 @@ temperature:
   color:    red
   wireable: false
   log:      true
+  units:    Cel
   duplicates:
     significantdate: 900000
     significantvalue: 0.1
@@ -315,6 +321,7 @@ timeoff:
   color:    black
   rw:       w
   wireable: true
+  units:    s
 timeon:
   leaf:     timeon
   name:     Time On (s)
@@ -325,6 +332,7 @@ timeon:
   color:    black
   rw:       w
   wireable: true
+  units:    s
 tvoc:
   leaf:     tvoc
   name:     TVOC
@@ -335,6 +343,7 @@ tvoc:
   color:    green
   rw:       r
   log:      true
+  units:    ppb
   duplicates:
     significantdate: 900000
     significantvalue: 1
