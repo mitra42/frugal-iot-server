@@ -99,9 +99,9 @@ import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http requ
 
 // If you are developing comment out the Production line, and uncomment the Development line
 // Production
-// import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
+import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
 // Development of Logger
-import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
+// import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
 // API Integration - Farm IoT Interoperability Standard
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
