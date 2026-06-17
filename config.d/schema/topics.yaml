@@ -100,6 +100,16 @@ controlfloat:
   wireable: true
   rw:       w
   retain:   true
+controlint:
+  #[leaf, name] should be overridden
+  min:      0
+  max:      65535
+  type:     int
+  display:  text
+  color:    black
+  wireable: true
+  rw:       w
+  retain:   true
 controltext:
   #[leaf, name] should be overridden
   min:      0
@@ -232,6 +242,17 @@ manual:
     significantdate: 900000
     significantvalue: 1
   wireable: true
+message:
+  leaf:     message
+  name:     Message
+  min:      0
+  max:      100
+  type:     text
+  display:  text
+  color:    black
+  wireable: true
+  rw:       w
+  retain:   true
 name:
   leaf:     name
   slot:     name
