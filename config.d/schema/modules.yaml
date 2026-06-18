@@ -145,6 +145,16 @@ frugal_iot:
     - leaf:     name
     - leaf:     description
     - leaf:     lastseen
+gps:
+  name: GPS
+  topics:
+    - leaf:     latitude
+    - leaf:     longitude
+    - leaf:     altitude
+    - leaf:     course
+    - leaf:     speed
+    - leaf:     satellites
+    - leaf:     hdop
 health:
   name: System
   insidefrugaliot: true

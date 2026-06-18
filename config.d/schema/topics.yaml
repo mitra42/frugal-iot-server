@@ -18,7 +18,21 @@
 # wireable true,false, generally only  controls are wireable
 # wired not valid in this context, it will come from MQTT broker
 # Note battery gets special cased
-
+# See https://www.iana.org/assignments/senml/senml.xhtml for units
+altitude:
+  leaf:     altitude
+  name:     Altitude
+  type:     float
+  display:  text
+  min:      -500
+  max:      9000
+  color:    black
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
+  rw:       r
+  graphable:  true
 analog:
   leaf:     analog
   type:     int
@@ -134,6 +148,21 @@ controlouttoggle:
   color:    black
   rw:       r
   wireable: true
+course:
+  leaf:     course
+  name:     Course
+  type:     float
+  display:  text
+  min:      0
+  max:      360
+  color:    black
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
+  rw:       r
+  graphable:  true
+  units:    deg
 description:
   leaf:     description
   slot:     description
@@ -157,6 +186,20 @@ eco2:
     significantvalue: 5
   rw:       r
   graphable:  true
+hdop:
+  leaf:     hdop
+  name:     HDOP
+  type:     float
+  display:  text
+  min:      0
+  max:      50
+  color:    black
+  log:      false
+  duplicates:
+    significantdate: 900000
+    significantvalue: 0.1
+  rw:       r
+  graphable:  false
 humidity:
   leaf:     humidity
   name:     Humidity
@@ -199,6 +242,21 @@ lastseen:
   type:     text
   display:  text
   rw:       r
+latitude:
+  leaf:     latitude
+  name:     Latitude
+  type:     float
+  display:  text
+  min:      -90
+  max:      +90
+  color:    black
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 0.0001
+  rw:       r
+  graphable:  true
+  units:    lat
 loadcell:
   leaf:     loadcell
   name:     Load Cell
@@ -214,6 +272,21 @@ loadcell:
   rw:       r
   calibrate:  true
   graphable:  true
+longitude:
+  leaf:     longitude
+  name:     Longitude
+  type:     float
+  display:  text
+  min:      -180
+  max:      +180
+  color:    black
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 0.0001
+  rw:       r
+  graphable:  true
+  units:    lon
 lux:
   leaf:     lux
   name:     Lux
@@ -300,6 +373,36 @@ pressure:
     significantdate: 900000
     significantvalue: 1
   graphable:  true
+satellites:
+  leaf:     satellites
+  name:     Satellites
+  type:     float
+  display:  text
+  min:      0
+  max:      32
+  color:    black
+  log:      false
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
+  rw:       r
+  graphable:  false
+  units:    m/s
+speed:
+  leaf:     speed
+  name:     Speed
+  type:     float
+  display:  text
+  min:      0
+  max:      999
+  color:    black
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
+  rw:       r
+  graphable:  true
+  units:    m/s
 soil:
   leaf:     soil
   name:     Soil Moisture
