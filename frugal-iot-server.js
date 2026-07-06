@@ -696,7 +696,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         console.log("Mounted API routes at /api");
 
         // Add API error handler
-        app.use(createAPIErrorHandler());
+        app.use(createAPIErrorHandler()); // createAPIErrorHandler returns a function to use as error handler
         console.log("Added API error handler");
 
         // Start push queue processor (runs every 5 seconds)
