@@ -278,6 +278,44 @@ function permissions_delete(id, capability, org, cb) {
   }
 }
 
+const sqlProjectsList = `
+  SELECT id, name FROM projects WHERE org = ?
+;`;
+const sqlAddProject = `
+  INSERT INTO projects (org, id, name) VALUES (?, ?, ?)
+;`;
+function get_projects_list(org, cb) {
+  db.all(sqlProjectsList, [org], (err, rows) => {
+    if (err) {
+      cb(err);
+    } else {
+      cb(null, rows); // [{id, name}]
+    }
+  });
+}
+function send_projects_list(req, res) {
+  get_projects_list(req.params.org, (err, projects) => {
+    if (err) {
+      res.status(500).send(err.message); // Errors are internal, unexpected
+    } else {
+      res.status(200).json(projects);
+    }
+  });
+}
+function add_project(org, id, name, cb) {
+  if ((org === undefined) || (org.length < 2)
+    || (id === undefined) || (id.length < 1)
+    || (name === undefined) || (name.length < 1)) {
+    cb(new Error("Invalid parameters"));
+  } else {
+    waterfall([
+      (cb) => db.get('SELECT COUNT(id) FROM projects WHERE org = ? AND id = ?', [org, id], cb),
+      (n_projects, cb) => { if (n_projects["COUNT(id)"] != 0) { cb(new Error("Already Exists")); } else { cb(null); }},
+      (cb) => db.run(sqlAddProject, [org, id, name], cb),
+    ], cb);
+  }
+}
+
 // Recursively walk a directory, callback with a list of files that pass matches(filename)
 function readFilesRecursively(dir, matches, callback) {
   let results = [];
@@ -469,6 +507,12 @@ CREATE TABLE IF NOT EXISTS \`permissions\` (
   \`id\` INTEGER PRIMARY KEY,
   \`capability\` TEXT NOT NULL,
   \`org\` TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS \`projects\` (
+  \`org\` TEXT NOT NULL,
+  \`id\` TEXT NOT NULL,
+  \`name\` TEXT NOT NULL,
+  UNIQUE(\`org\`, \`id\`)
 );
 `;
 
@@ -836,6 +880,25 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             });
           },
           send_people_list,
+        );
+        app.get('/projects_list/:org',
+          loggedInOrFail,
+          can_ADMIN, // Gets org from URL
+          send_projects_list,
+        );
+        app.get('/add_project/:org',
+          loggedInOrFail,
+          can_ADMIN,  // Gets org from URL
+          (req,res, next) => {
+            add_project(req.params.org, req.query.id, req.query.name, (err) => {
+              if (err) {
+                res.status(400).send(err.message);
+              } else {
+                next();
+              }
+            });
+          },
+          send_projects_list,
         );
         //  /dashboard is served statically, to logged in users //TODO-N89 restrict orgs to those have permissions for (maybe handled via /config.org )
         const routerDashboard = express.Router();
