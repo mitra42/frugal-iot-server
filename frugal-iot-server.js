@@ -122,7 +122,7 @@ import session from 'express-session'; // https://www.npmjs.com/package/express-
 import sqlite3 from 'sqlite3'; // https://www.npmjs.com/package/sqlite3
 import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
 // import cookieParser from 'cookie-parser'; // https://www.npmjs.com/package/cookie-parser (note comment on https://www.npmjs.com/package/express-session that not needed and conflicts with session)
-import {waterfall} from 'async';
+import {waterfall, each} from 'async';
 // import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
 
 let config;
@@ -302,16 +302,46 @@ function send_projects_list(req, res) {
     }
   });
 }
+// Ensure config.organizations[org].projects[id].name = name, creating intermediate objects as needed
+function addProjectToConfig(org, id, name) {
+  let oo = config.organizations;
+  let o = (oo[org] || (oo[org] = {}));
+  let pp = (o.projects || (o.projects = {}));
+  let p = (pp[id] || (pp[id] = {}));
+  p.name = name;
+}
+// Read the projects table for every configured organization and add them to config.organizations
+function loadProjectsIntoConfig(cb) {
+  each(Object.keys(config.organizations), (org, cb) => {
+    get_projects_list(org, (err, projects) => {
+      if (err) {
+        cb(err);
+      } else {
+        projects.forEach(({id, name}) => addProjectToConfig(org, id, name));
+        cb(null);
+      }
+    });
+  }, cb);
+}
+const projectIdRegex = /^[a-z0-9]+$/;
 function add_project(org, id, name, cb) {
   if ((org === undefined) || (org.length < 2)
-    || (id === undefined) || (id.length < 1)
+    || (id === undefined) || (id.length < 1) || !projectIdRegex.test(id)
     || (name === undefined) || (name.length < 1)) {
-    cb(new Error("Invalid parameters"));
+    cb(new Error("Invalid parameters - id must be lower-case letters and numbers only"));
   } else {
     waterfall([
       (cb) => db.get('SELECT COUNT(id) FROM projects WHERE org = ? AND id = ?', [org, id], cb),
       (n_projects, cb) => { if (n_projects["COUNT(id)"] != 0) { cb(new Error("Already Exists")); } else { cb(null); }},
       (cb) => db.run(sqlAddProject, [org, id, name], cb),
+      (cb) => {
+        addProjectToConfig(org, id, name);
+        let orgClient = mqttLogger.clients[org];
+        if (orgClient) {
+          orgClient.watchProject(id, config.organizations[org].projects[id]);
+        }
+        cb(null);
+      },
     ], cb);
   }
 }
@@ -682,6 +712,11 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
       if (err) {
         console.error("Error opening or creating database", err);
       } else {
+        loadProjectsIntoConfig((err) => {
+          if (err) {
+            console.error("Error loading projects into config", err);
+          }
+        });
         // app.use(express.json()); // Not needed
         app.use(express.urlencoded({ extended: true })); // Passport will not function without this
         app.set('trust proxy', 1); // trust first proxy - see note in https://www.npmjs.com/package/express-session
