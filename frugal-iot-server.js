@@ -377,14 +377,7 @@ function openOrCreateDatabase(cb) {
           cb(err);
         } else {
           console.log("Created user database");
-          db.exec(sqlstart, (err) => {
-            if (err) {
-              cb(err);
-            } else {
-              console.log("Exec-ed starting SQL");
-              cb(null, db)
-            }
-          });
+          execSqlStart(cb);
         }
       });
     } else {
@@ -394,9 +387,21 @@ function openOrCreateDatabase(cb) {
           cb(err);
         } else {
           console.log("Opened user database");
-          cb(null, db);
+          execSqlStart(cb);
         }
       });
+    }
+  });
+}
+
+// Runs sqlstart (CREATE TABLE IF NOT EXISTS ...) so any tables added since the db was first created also get created.
+function execSqlStart(cb) {
+  db.exec(sqlstart, (err) => {
+    if (err) {
+      cb(err);
+    } else {
+      console.log("Exec-ed starting SQL");
+      cb(null, db);
     }
   });
 }
