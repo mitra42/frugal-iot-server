@@ -472,7 +472,7 @@ CREATE TABLE IF NOT EXISTS \`permissions\` (
 );
 `;
 
-
+// Called by /config.json to build a safe json to return
 function addLoggedNodesToConfig() {
   // TODO-N89 TODO-90 this should strip out any sensitive information like passwords
   let configPlusNodes = config; // pointer to, not copy of
