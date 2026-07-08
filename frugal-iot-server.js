@@ -539,9 +539,10 @@ CREATE TABLE IF NOT EXISTS \`users\` (
   \`phone\` TEXT
 );
 CREATE TABLE IF NOT EXISTS \`permissions\` (
-  \`id\` INTEGER PRIMARY KEY,
+  \`id\` INTEGER NOT NULL,
   \`capability\` TEXT NOT NULL,
-  \`org\` TEXT NOT NULL
+  \`org\` TEXT NOT NULL,
+  UNIQUE(\`id\`, \`capability\`, \`org\`)
 );
 CREATE TABLE IF NOT EXISTS \`projects\` (
   \`org\` TEXT NOT NULL,
