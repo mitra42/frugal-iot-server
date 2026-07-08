@@ -92,7 +92,7 @@ Device-Platform and a Farm-Platform. It does not specify:
 - User interface or experience requirements for Farm-Platforms
 
 Exception: modification of setpoints on control systems operating within
-Devices may be within scope where relevant to interoperability (see Section 6.5).
+Devices may be within scope where relevant to interoperability (see Section 6.6).
 
 ### 1.3 Design Goals
 
@@ -163,9 +163,10 @@ Request and response bodies MUST be encoded as UTF-8.
 | Request Type       | Direction | Description | Defined In |
 |--------------------|---|---|---|
 | Data Request       | Farm-Platform → Device-Platform | Request sensor data for a device over a time period | [Section 6.2](#62-request-data-for-a-device) |
-| User Registration  | Farm-Platform → Device-Platform | Register a user with the Device-Platform | [Section 6.3](#63-register-a-user) |
-| Device Registration | Farm-Platform → Device-Platform | Register a device to a user | [Section 6.4](#64-register-a-device-to-a-user) |
-| Device Action      | Farm-Platform → Device-Platform | Send an action or setpoint change to a Device | [Section 6.5](#65-send-an-action-to-a-device) |
+| Farm Registration  | Farm-Platform → Device-Platform | Map a farm to a project on the Device-Platform | [Section 6.3](#63-register-a-farm) |
+| User Registration  | Farm-Platform → Device-Platform | Register a user with the Device-Platform | [Section 6.4](#64-register-a-user) |
+| Device Registration | Farm-Platform → Device-Platform | Register a device to a user | [Section 6.5](#65-register-a-device-to-a-user) |
+| Device Action      | Farm-Platform → Device-Platform | Send an action or setpoint change to a Device | [Section 6.6](#66-send-an-action-to-a-device) |
 | Data Push          | Device-Platform → Farm-Platform | Push sensor data to the Farm-Platform | [Section 7.2](#72-push-sensor-data) |
 | Notification       | Device-Platform → Farm-Platform | Send an event or alert notification | [Section 7.3](#73-send-a-notification) |
 
@@ -474,14 +475,57 @@ to this request:
 
 ---
 
-### 6.3 Register a User
+### 6.3 Register a Farm
 
 #### 6.3.1 Purpose
+
+Map a Farm-Platform's farm to a project on the Device-Platform, so that
+subsequent user and device registrations can be associated with the correct
+organization/project.
+
+#### 6.3.2 Request
+
+```
+POST /farm/register
+```
+
+```json
+{
+  "farm-platform-farm-id": "[farm-platform-farm-identifier]",
+  "device-platform-farm-id": "[org]/[project]",
+  "credentials": { "[TBD]" }
+}
+```
+
+#### 6.3.3 Response
+
+```json
+{
+  "status": "registered"
+}
+```
+
+#### 6.3.4 Error Cases
+
+See Section 3.5 for common error codes. The following error cases are specific
+to this request:
+
+| HTTP Status | Error Code | Notes |
+|---|---|---|
+| `404 Not Found` | `org_not_found` | The organization portion of `device-platform-farm-id` does not exist on this Device-Platform |
+| `403 Forbidden` | `not_authorised` | The authenticated user does not have ADMIN permission on the specified organization |
+| `409 Conflict` | `already_exists` | This farm is already registered on this Device-Platform |
+
+---
+
+### 6.4 Register a User
+
+#### 6.4.1 Purpose
 
 Register a Farm-Platform user with the Device-Platform, enabling subsequent
 device registration and data access.
 
-#### 6.3.2 Request
+#### 6.4.2 Request
 
 ```
 POST /users/register
@@ -494,7 +538,7 @@ POST /users/register
 }
 ```
 
-#### 6.3.3 Response
+#### 6.4.3 Response
 
 ```json
 {
@@ -503,7 +547,7 @@ POST /users/register
 }
 ```
 
-#### 6.3.4 Error Cases
+#### 6.4.4 Error Cases
 
 See Section 3.5 for common error codes. The following error case is specific
 to this request:
@@ -514,16 +558,16 @@ to this request:
 
 ---
 
-### 6.4 Register a Device to a User
+### 6.5 Register a Device to a User
 
-#### 6.4.1 Purpose
+#### 6.5.1 Purpose
 
 Associate a Device with a registered user on the Device-Platform. The
 Device-Platform MUST already know the device — `device_not_found` in this
 context means the Device-Platform has no record of a device with the given
 identifier, not that the physical device is unreachable.
 
-#### 6.4.2 Request
+#### 6.5.2 Request
 
 ```
 POST /devices/register
@@ -537,7 +581,7 @@ POST /devices/register
 }
 ```
 
-#### 6.4.3 Response
+#### 6.5.3 Response
 
 ```json
 {
@@ -546,7 +590,7 @@ POST /devices/register
 }
 ```
 
-#### 6.4.4 Error Cases
+#### 6.5.4 Error Cases
 
 See Section 3.5 for common error codes. The following error cases are specific
 to this request:
@@ -559,9 +603,9 @@ to this request:
 
 ---
 
-### 6.5 Send a Action to a Device
+### 6.6 Send a Action to a Device
 
-#### 6.5.1 Purpose
+#### 6.6.1 Purpose
 
 Send an action to a Device via the Device-Platform. This is the primary
 mechanism for Actuation and setpoint control as defined in the Terminology
@@ -578,7 +622,7 @@ For example, a text field such as `frugal_iot/name` would be set with a
 string value, while a boolean field such as `relay/on` would be set with a
 boolean value.
 
-#### 6.5.2 Request
+#### 6.6.2 Request
 
 ```
 POST /devices/action
@@ -616,7 +660,7 @@ Examples:
 }
 ```
 
-#### 6.5.3 Response
+#### 6.6.3 Response
 
 ```json
 {
@@ -625,7 +669,7 @@ Examples:
 }
 ```
 
-#### 6.5.4 Error Cases
+#### 6.6.4 Error Cases
 
 See Section 3.5 for common error codes. The following error cases are specific
 to this request:
@@ -787,7 +831,7 @@ readers understand the current boundaries of the specification.
 ### 11.1 User-Device Relationships
 
 This standard defines requests for registering a user with a Device-Platform
-(Section 6.3) and registering a device to a user (Section 6.4), but does not
+(Section 6.4) and registering a device to a user (Section 6.5), but does not
 yet fully specify the relationship model between users, devices, and farms.
 Open questions include: how a Farm-Platform discovers which devices are
 associated with a given user; how ownership or access rights are transferred
@@ -1222,12 +1266,12 @@ exchange of base URLs and authentication tokens.
 
 4. The Farm-Platform registers the farmer as a user on the Device-Platform, if
    not already registered.
-   → [Section 6.3 — Register a User](#63-register-a-user)
+   → [Section 6.4 — Register a User](#64-register-a-user)
 
 5. The Farm-Platform registers the device to the farmer's account on the
    Device-Platform, providing its own identifier for the device alongside the
    device identifier supplied by the farmer.
-   → [Section 6.4 — Register a Device to a User](#64-register-a-device-to-a-user)
+   → [Section 6.5 — Register a Device to a User](#65-register-a-device-to-a-user)
 
 6. The Device-Platform records that data for this device should be forwarded
    to the Farm-Platform, and stores the Farm-Platform's device identifier for
@@ -1357,7 +1401,7 @@ control (e.g. `relay/on`, type `boolean`, `rw: "w"`).
    outside the scope of this standard.
 
 3. LiteFarm sends a command to Frugal IoT to turn the irrigation relay on.
-   → [Section 6.5 — Send an Action to a Device](#65-send-an-action-to-a-device)
+   → [Section 6.6 — Send an Action to a Device](#66-send-an-action-to-a-device)
 
    ```json
    {
@@ -1369,13 +1413,13 @@ control (e.g. `relay/on`, type `boolean`, `rw: "w"`).
 
 4. Frugal IoT receives the action, forwards it to the device, and returns
    an `accepted` response to LiteFarm.
-   → [Section 6.5.3 — Response](#653-response)
+   → [Section 6.6.3 — Response](#663-response)
 
 5. The device activates the irrigation relay.
 
 6. The device activates the irrigation relay. After 50 minutes, LiteFarm
    sends a further action to Frugal IoT to turn the relay off.
-   → [Section 6.5 — Send an Action to a Device](#65-send-an-action-to-a-device)
+   → [Section 6.6 — Send an Action to a Device](#66-send-an-action-to-a-device)
 
    ```json
    {

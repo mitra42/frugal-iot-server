@@ -125,7 +125,7 @@ import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
 import {waterfall, each} from 'async';
 // import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
 
-let config;
+export let config; // Live binding - lib/api-routes.js reads the current value at request time
 let mqttLogger = new MqttLogger();
 const loginUrl = '/dashboard/login.html';
 
@@ -324,7 +324,8 @@ function loadProjectsIntoConfig(cb) {
   }, cb);
 }
 const projectIdRegex = /^[a-z0-9]+$/;
-function add_project(org, id, name, cb) {
+// Exported for reuse by lib/api-routes.js (POST /farm/register creates the project if it doesn't already exist)
+export function add_project(org, id, name, cb) {
   if ((org === undefined) || (org.length < 2)
     || (id === undefined) || (id.length < 1) || !projectIdRegex.test(id)
     || (name === undefined) || (name.length < 1)) {
@@ -495,7 +496,8 @@ function can_READ(req, res, next) {
   }
 }
 // Not used as check direct in Multer storage, (since Multer fills the body) but use as template for other permissions (and then delete this comment)
-function can_ADMIN(req, res, next) {
+// Exported for reuse by lib/api-routes.js - reads org from req.params.org, so callers without an :org URL segment must set it first.
+export function can_ADMIN(req, res, next) {
   if (req.isAuthenticated() && hasPermissions(req.user, req.params.org, "ADMIN")) {
     next();
   } else {
@@ -503,7 +505,7 @@ function can_ADMIN(req, res, next) {
     res.sendStatus(401);
   }
 }
-function loggedInOrFail(req, res, next) {
+export function loggedInOrFail(req, res, next) {
   if (req.isAuthenticated()) {
     next();
   } else {
@@ -550,8 +552,27 @@ CREATE TABLE IF NOT EXISTS \`projects\` (
   \`name\` TEXT NOT NULL,
   UNIQUE(\`org\`, \`id\`)
 );
+CREATE TABLE IF NOT EXISTS \`api_platforms\` (
+ \`id\` INTEGER PRIMARY KEY AUTOINCREMENT,
+ \`name\` TEXT UNIQUE NOT NULL, -- name of platform e.g. 'Lite Farm'
+ \`org\` TEXT UNIQUE NOT NULL, -- Frugal-IoT organization id for this platform (may be multiple)
+ \`userid\` INTEGER, -- Userid of Farm platform on Frugal-IoT
+ \`base_url\` TEXT, -- For pushing to platform (in farm-platform-push.js)
+ \`auth_token\` TEXT, -- This is auth_token for Frugal-IoT to authenticate to Farm platform when pushing
+ \`cookie_name\` TEXT, -- Name of auth token for Frugal-IoT -> Farm Platform
+ FOREIGN KEY(\`userid\`) REFERENCES \`users(id)\`
+);
+-- Note its possible for a farm on a platform to refer to more than one project on Frugal IoT 
+-- in which case there will be more than one record here with same platform_id+farm_id
+CREATE TABLE IF NOT EXISTS \`api_farms\` (
+  \`id\` INTEGER PRIMARY KEY AUTOINCREMENT,
+  \`platform_id\` INTEGER, -- index into api_platforms
+  \`farm_id\` TEXT NOT NULL, -- reference on the other platform
+  \`org\` TEXT NOT NULL, -- if of org in Frugal IoT
+  \'project\' TEXT NOT NULL, -- id of project in Frugal IoT
+  FOREIGN KEY(\`platform_id\`) REFERENCES \`api_platforms(id)\`
+);
 `;
-
 // Called by /config.json to build a safe json to return
 function addLoggedNodesToConfig() {
   // TODO-N89 TODO-90 this should strip out any sensitive information like passwords
