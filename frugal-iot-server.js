@@ -486,7 +486,8 @@ function can_OTAUPDATE(req, res, next) {
     res.sendStatus(401); // Just fail - shouldnt happen and anyway lost the file by now
   }
 }
-function can_READ(req, res, next) {
+// Exported for reuse by lib/api-routes.js - reads org from req.params.org or res.locals.org, so callers must set one of those first.
+export function can_READ(req, res, next) {
   const org = req.params.org || res.locals.org;
   if (req.isAuthenticated() && hasPermissions(req.user, org, "READ")) {
     next();

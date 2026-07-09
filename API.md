@@ -491,11 +491,16 @@ POST /farm/register
 
 ```json
 {
+  "platform_id": "[platform-id]",
   "farm-platform-farm-id": "[farm-platform-farm-identifier]",
   "device-platform-farm-id": "[org]/[project]",
   "credentials": { "[TBD]" }
 }
 ```
+
+`platform_id` identifies the calling Farm-Platform on this Device-Platform. It
+is issued during Platform Registration (Section 3.6) and MUST be included on
+every request to this endpoint.
 
 #### 6.3.3 Response
 
@@ -512,6 +517,7 @@ to this request:
 
 | HTTP Status | Error Code | Notes |
 |---|---|---|
+| `404 Not Found` | `platform_not_found` | The specified `platform_id` does not exist on this Device-Platform |
 | `404 Not Found` | `org_not_found` | The organization portion of `device-platform-farm-id` does not exist on this Device-Platform |
 | `403 Forbidden` | `not_authorised` | The authenticated user does not have ADMIN permission on the specified organization |
 | `409 Conflict` | `already_exists` | This farm is already registered on this Device-Platform |
