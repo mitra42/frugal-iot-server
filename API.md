@@ -531,6 +531,8 @@ to this request:
 Register a Farm-Platform user with the Device-Platform, enabling subsequent
 device registration and data access.
 
+Note, this is not used, and not implemented on FrugalIoT. 
+
 #### 6.4.2 Request
 
 ```
@@ -572,6 +574,8 @@ Associate a Device with a registered user on the Device-Platform. The
 Device-Platform MUST already know the device — `device_not_found` in this
 context means the Device-Platform has no record of a device with the given
 identifier, not that the physical device is unreachable.
+
+Note, this is not used, and not implemented on FrugalIoT.
 
 #### 6.5.2 Request
 
