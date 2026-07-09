@@ -486,7 +486,7 @@ organization/project.
 #### 6.3.2 Request
 
 ```
-POST /farm/register
+POST /farms/register
 ```
 
 ```json

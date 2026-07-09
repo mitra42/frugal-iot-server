@@ -108,6 +108,7 @@ import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { initializeSchema } from './lib/database.js';
+import { APIError } from './lib/api-errors.js';
 
 import { access, constants, createReadStream, mkdir, readdir, rm } from 'fs'; // https://nodejs.org/api/fs.html
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
@@ -324,7 +325,7 @@ function loadProjectsIntoConfig(cb) {
   }, cb);
 }
 const projectIdRegex = /^[a-z0-9]+$/;
-// Exported for reuse by lib/api-routes.js (POST /farm/register creates the project if it doesn't already exist)
+// Exported for reuse by lib/api-routes.js (POST /farm_register creates the project if it doesn't already exist)
 export function add_project(org, id, name, cb) {
   if ((org === undefined) || (org.length < 2)
     || (id === undefined) || (id.length < 1) || !projectIdRegex.test(id)
@@ -478,6 +479,10 @@ function loggedInOrRedirect(req, res, next) {
 function hasPermissions(user, org, permission) {
   return user.permissions.some(x => x.capability == permission && x.org == org);
 }
+// Like hasPermissions, but not org-scoped - true if the user has the capability on ANY org.
+function hasPermissionsAny(user, permission) {
+  return user.permissions.some(x => x.capability == permission);
+}
 // Note that uploads check directly rather than using this
 function can_OTAUPDATE(req, res, next) {
   if (req.isAuthenticated() && hasPermissions(req.user, req.params.org, "OTAUPDATE")) {
@@ -505,6 +510,31 @@ export function can_ADMIN(req, res, next) {
     console.log("Failing permission to Admin", req.user, req.params.org);
     res.sendStatus(401);
   }
+}
+// Exported for reuse by lib/api-routes.js - for resources (like api_platforms) that aren't scoped to a
+// single org, valid if the user has ADMIN on ANY org, rather than a specific one.
+export function can_ADMIN_SOME(req, res, next) {
+  if (req.isAuthenticated() && hasPermissionsAny(req.user, "ADMIN")) {
+    next();
+  } else {
+    console.log("Failing permission to Admin (any org)", req.user);
+    res.sendStatus(401);
+  }
+}
+// Exported for reuse by lib/api-routes.js - like can_ADMIN, but for JSON API routes where the org isn't
+// a URL :org segment (so Express has no built-in 404 for an unrecognised org to fall back on). Looks for
+// the org in res.locals.org (set by an earlier middleware, for routes that must derive it from a compound
+// field), then req.body.org, then req.query.org; confirms it actually exists before delegating to can_ADMIN.
+export function can_ADMIN_JSON(req, res, next) {
+  const org = res.locals.org || req.body?.org || req.query?.org;
+  if (!org) {
+    return next(new APIError('invalid_request', 'Missing or invalid organization'));
+  }
+  if (!config.organizations || !config.organizations[org]) {
+    return next(new APIError('org_not_found', `Organization '${org}' does not exist on this platform`));
+  }
+  req.params.org = org;
+  can_ADMIN(req, res, next);
 }
 export function loggedInOrFail(req, res, next) {
   if (req.isAuthenticated()) {
@@ -556,7 +586,6 @@ CREATE TABLE IF NOT EXISTS \`projects\` (
 CREATE TABLE IF NOT EXISTS \`api_platforms\` (
  \`id\` INTEGER PRIMARY KEY AUTOINCREMENT,
  \`name\` TEXT UNIQUE NOT NULL, -- name of platform e.g. 'Lite Farm'
- \`org\` TEXT UNIQUE NOT NULL, -- Frugal-IoT organization id for this platform (may be multiple)
  \`userid\` INTEGER, -- Userid of Farm platform on Frugal-IoT
  \`base_url\` TEXT, -- For pushing to platform (in farm-platform-push.js)
  \`auth_token\` TEXT, -- This is auth_token for Frugal-IoT to authenticate to Farm platform when pushing
