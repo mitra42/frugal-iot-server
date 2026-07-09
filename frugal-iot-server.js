@@ -61,7 +61,7 @@
     /private uses loggedInOrRedirect ╳ 307->/login, ✔︎ serve static
 
   OTA and permissions
-  - user goes to admin.html which redirects to login, and creates session
+  - user goes to /dashboard which redirects to login, and creates session
   - displays tabs including OTA
   - data filled in "Submit" goes to POST /ota_update
   - Code in post /ota_update
@@ -198,7 +198,7 @@ function sanitize(filepath) {
 }
 
 function adminUrl(req, message, lang) {
-  return `${(req.body && req.body.url) || "/dashboard/admin.html"}?message=${encodeURIComponent(message)}&lang=${lang || (req.body && req.body.lang) || "EN"}`;
+  return `${(req.body && req.body.url) || "/dashboard/"}?message=${encodeURIComponent(message)}&lang=${lang || (req.body && req.body.lang) || "EN"}`;
 }
 function clientErrorHandler(err, req, res, next) {
   console.log("ERROR", err);
@@ -549,9 +549,14 @@ export function loggedInOrFail(req, res, next) {
 // Note if originalUrl is /dashboard/index.html then req.url is just /index.html
 function shouldIBeLoggedIn(req, res, next) {
   //console.log("XXX shouldIBeLoggedIn", req.user, req.params.org);
-  if ((['/','/index.html','/admin.html'].includes(req.url)) && !req.isAuthenticated()) {
+  if ((['/','/index.html'].includes(req.url)) && !req.isAuthenticated()) {
     console.log(`Not authenticated redirecting ${req.url} for login`);
-    res.redirect(307, `${loginUrl}?register=false&message=Please%20login&url=` + req.originalUrl);
+    // Capture the full original URL as-is in "url" (so e.g. /data?... comes back with all its params
+    // intact), encoded so its own query string can't corrupt this redirect's query string. Carry "lang"
+    // over as its own top-level param (from req.query, not duplicated into "url") so login.html itself
+    // renders in the right language.
+    const langParam = req.query.lang ? `&lang=${encodeURIComponent(req.query.lang)}` : '';
+    res.redirect(307, `${loginUrl}?register=false&message=Please%20login${langParam}&url=${encodeURIComponent(req.originalUrl)}`);
   } else {
     next();
   }
@@ -1064,7 +1069,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           multerupload.single('file'), // Put file details in req.file
           (req,res,next) => {
             console.log("OTA update posted", req.file.size, "to", req.file.path);
-            // /dashboard/admin.html?message=OTA binary uploaded&lang=XX
+            // /dashboard/?message=OTA binary uploaded&lang=XX
             res.redirect(adminUrl(req,"OTA binary uploaded"));
           },
         );
