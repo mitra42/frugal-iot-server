@@ -752,6 +752,12 @@ Responses and error cases are identical to the POST form above.
 }
 ```
 
+Both requests require the caller to be authenticated as a Frugal-IoT dashboard
+user with READ permission on the device's organization - not the platform
+token described in Section 3.4. An unauthenticated or unauthorised caller
+receives a bare `401 Unauthorized` response with no JSON body, rather than
+the standard error envelope defined in Section 3.5.
+
 #### 6.6.4 Error Cases
 
 See Section 3.5 for common error codes. The following error cases are specific
@@ -759,10 +765,79 @@ to this request:
 
 | HTTP Status | Error Code | Notes |
 |---|---|---|
+| `401 Unauthorized` | *(none - bare status)* | The caller is not authenticated, or does not have READ permission on the device's organization |
 | `404 Not Found` | `device_not_found` | The Device-Platform does not recognise the specified device identifier |
 | `422 Unprocessable Entity` | `field_read_only` | The specified field exists in the Device Schema but is not writable (it is a property, not an action) |
 | `422 Unprocessable Entity` | `invalid_value` | The supplied value does not conform to the field type or falls outside the `minimum`/`maximum` range defined in the Device Schema |
 | `503 Service Unavailable` | `device_unavailable` | The Device-Platform recognises the device but it is currently offline or unreachable |
+
+#### 6.6.5 Read or Write a Property
+
+##### 6.6.5.1 Purpose
+
+Read a device's current property value(s), or write a read-write property.
+A read-write field (e.g. a setpoint that can also be read back) is modelled
+as a single property in the Device Schema, not a separate action (Annex A.2) -
+its `forms` entry has `op: ["readproperty","writeproperty"]` and no
+`htv:methodName`, meaning per the W3C WoT HTTP binding's default operation-to-
+method mapping, the SAME URL is read via GET and written via PUT.
+
+##### 6.6.5.2 Request (read)
+
+```
+GET /devices/property?deviceId=[device-identifier]&property=[module/field]
+```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `deviceId` | MUST | Fully qualified device identifier |
+| `property` | SHOULD | `module/field` to read. If omitted, every readable field the device has reported a value for is returned. |
+
+This is the URL referenced by a property's `forms[0].href` in the Device
+Schema (Annex A.2) - `deviceId`/`property` there match these parameter names
+exactly, so the href can be fetched directly.
+
+##### 6.6.5.3 Response (read)
+
+A SenML packet (Section 4), in the same format as `GET /data` (Section 6.2),
+but of current values rather than a time range:
+
+```json
+[
+  {"bn": "dev/developers/esp32-e4d5f6/", "bt": 1.276020076001e+09},
+  {"n": "sht/temperature", "v": 32.0, "u": "Cel"}
+]
+```
+
+##### 6.6.5.4 Request (write)
+
+```
+PUT /devices/property?deviceId=[device-identifier]&property=[module/field]
+```
+
+```json
+{
+  "value": "[value conforming to field type]"
+}
+```
+
+`deviceId`/`property` come from the query string (matching the property's
+`forms[0].href`, shared with the GET request above) rather than the request
+body - unlike `POST /devices/action` (Section 6.6.2), there is no normative
+WoT mechanism for templating a request body inside a Form, so this body
+carries only the new value.
+
+##### 6.6.5.5 Response (write)
+
+Same as Section 6.6.3.
+
+##### 6.6.5.6 Error Cases
+
+Same as Section 6.6.4, plus:
+
+| HTTP Status | Error Code | Notes |
+|---|---|---|
+| `422 Unprocessable Entity` | `field_read_only` | The specified field exists in the Device Schema as a property, but is not writable |
 
 ---
 
@@ -1020,8 +1095,11 @@ Thing Description specification version 1.1. The top-level structure is as follo
 
 ### A.2 Property Object
 
-A property represents a readable field or sensor value from the device. Each property
-is identified by a field ID in the format `module/field` (e.g., `sht/temperature`).
+A property represents a readable field or sensor value from the device -
+including one that is also writable (e.g. a setpoint that can be read back).
+Each property is identified by a field ID in the format `module/field`
+(e.g., `sht/temperature`). A field that is writable but has no readback
+(e.g. a momentary trigger) is an Action Object (A.3) instead, not a property.
 
 ```json
 {
@@ -1053,14 +1131,16 @@ is identified by a field ID in the format `module/field` (e.g., `sht/temperature
 | `unit` | SHOULD | string | Unit of measurement, conforming to RFC 8428 / UCUM notation (e.g., `"Cel"`, `"%RH"`) |
 | `minimum` | MAY | number | Minimum valid value (numeric fields only) |
 | `maximum` | MAY | number | Maximum valid value (numeric fields only) |
-| `readOnly` | SHOULD | boolean | MUST be `true` for properties |
+| `readOnly` | SHOULD | boolean | `true` if this property cannot be written; OMITTED for a read-write property |
 | `frugal-iot:metadata` | MAY | object | Frugal IoT specific metadata (see A.4) |
-| `forms` | MUST | array | Array of form objects describing how to access the property |
+| `forms` | MUST | array | Array of form objects describing how to access the property. `op` is `["readproperty"]` for a read-only property, or `["readproperty","writeproperty"]` (a single form, no `htv:methodName`) for a read-write one - see Section 6.6.5 |
 
 ### A.3 Action Object
 
-An action represents a controllable (write-only) field that can be set on the device.
-Each action is identified by a field ID in the format `module/field`.
+An action represents a controllable, write-only field with no readback that can
+be set on the device (a field that can also be read is a Property Object, A.2,
+instead - even if it's writable). Each action is identified by a field ID in
+the format `module/field`.
 
 ```json
 {
@@ -1180,7 +1260,7 @@ example is provided for illustration only and does not constitute a normative de
   "security": ["basic_sc"],
   "forms": [
     {
-      "href":   "https://frugaliot.naturalinnovation.org/property?deiceId=dev%2Flotus%2Fesp8266-fb94bb",
+      "href":   "/api/devices/property?deviceId=dev%2Fdevelopers%2Fesp32-e4d5f6",
       "op": "readallproperties",
       "contentType": "application/senml+json"
     },
@@ -1213,7 +1293,7 @@ example is provided for illustration only and does not constitute a normative de
       },
       "forms": [
         {
-          "href": "https://frugaliot.naturalinnovation.org/device/get?deviceId=dev%2Fdevelopers%2Fesp32-e4d5f6&key=sht%2Ftemperature",
+          "href": "/api/devices/property?deviceId=dev%2Fdevelopers%2Fesp32-e4d5f6&property=sht%2Ftemperature",
           "contentType": "application/json",
           "op": ["readproperty"]
         },
@@ -1245,7 +1325,7 @@ example is provided for illustration only and does not constitute a normative de
       },
       "forms": [
         {
-          "href": "https://frugaliot.naturalinnovation.org/device/get?deviceId=dev%2Fdevelopers%2Fesp32-e4d5f6&key=sht%2Fhumidity",
+          "href": "/api/devices/property?deviceId=dev%2Fdevelopers%2Fesp32-e4d5f6&property=sht%2Fhumidity",
           "contentType": "application/json",
           "op": ["readproperty"]
         },
@@ -1264,9 +1344,35 @@ example is provided for illustration only and does not constitute a normative de
       "readOnly": true,
       "forms": [
         {
-          "href": "https://frugaliot.naturalinnovation.org/device/get?deviceId=dev%2Fdevelopers%2Fesp32-e4d5f6&key=frugal_iot%2Fdescription",
+          "href": "/api/devices/property?deviceId=dev%2Fdevelopers%2Fesp32-e4d5f6&property=frugal_iot%2Fdescription",
           "contentType": "application/json",
           "op": ["readproperty"]
+        }
+      ]
+    },
+    "controlhysteresis/hysteresis": {
+      "type": "number",
+      "title": "Hysteresis",
+      "description": "Hysteresis",
+      "minimum": 0,
+      "maximum": 100,
+      "forms": [
+        {
+          "href": "/api/devices/property?deviceId=dev%2Fdevelopers%2Fesp32-e4d5f6&property=controlhysteresis%2Fhysteresis",
+          "contentType": "application/json",
+          "op": ["readproperty", "writeproperty"]
+        },
+        {
+          "href": "mqtt://broker.example.com/dev/developers/esp32-e4d5f6/controlhysteresis/hysteresis",
+          "contentType": "text/plain",
+          "op": ["readproperty"],
+          "subprotocol": "mqtt"
+        },
+        {
+          "href": "mqtt://broker.example.com/dev/developers/esp32-e4d5f6/set/controlhysteresis/hysteresis",
+          "contentType": "text/plain",
+          "op": ["writeproperty"],
+          "subprotocol": "mqtt"
         }
       ]
     }
@@ -1301,16 +1407,24 @@ example is provided for illustration only and does not constitute a normative de
 }
 ```
 
-The action's HTTP form's `href` is root-relative - see Section 6.6.2.1 for
-how to invoke it directly (appending `&value=...`) despite WoT Forms having
-no way to express a JSON request body.
+`controlhysteresis/hysteresis` illustrates a read-write field: it appears
+only under `properties`, with a single HTTP form whose `op` lists both
+`readproperty` and `writeproperty` against the same `href` and no
+`htv:methodName` - per the W3C WoT HTTP binding's default operation-to-method
+mapping, this means GET reads it and PUT writes it (Section 6.6.5). It does
+NOT also appear under `actions` - unlike `frugal_iot/name`, which is
+write-only (no readback) and so remains a genuine action.
+
+All HTTP form hrefs here are root-relative - see Section 6.6.2.1 (actions)
+and Section 6.6.5 (properties) for how to invoke them directly, given WoT
+Forms have no way to express a JSON request body template.
 
 **Key points in this example:**
 
 1. **@context** - Includes the W3C WoT 1.1 context and custom vocabulary namespaces
 2. **id** - Uses the Frugal IoT device identifier format: `org/project/device`
-3. **properties** - Contains readable sensor data with measurement units and constraints
-4. **actions** - Contains controllable/writable fields
+3. **properties** - Contains both read-only sensor data and read-write setpoints; a read-write field has one property entry with `op: ["readproperty","writeproperty"]`, not a separate action
+4. **actions** - Contains only write-only fields with no readback
 5. **frugal-iot:metadata** - Preserves Frugal IoT specific attributes like `display`, `color`, `retain`, and `duplicates`
 6. **forms** - Specifies both HTTP REST and MQTT protocol bindings for accessing data
 7. **contentType** - Indicates JSON format for request/response bodies
