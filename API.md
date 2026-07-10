@@ -433,6 +433,13 @@ This section defines the requests and actions a Farm-Platform MAY issue to
 a Device-Platform. All requests use HTTP. Requests MUST be authenticated as
 defined in Section 3.4.
 
+Every path shown in this section (and in Section 7) is relative to the
+Device-Platform base URL agreed during Platform Registration (Section 3.6),
+e.g. `POST /devices/action` against a base URL of
+`https://frugaliot.naturalinnovation.org/api` means
+`POST https://frugaliot.naturalinnovation.org/api/devices/action`. Paths are
+shown without that prefix here for brevity.
+
 ### 6.2 Request Data for a Device
 
 #### 6.2.1 Purpose
@@ -521,6 +528,53 @@ to this request:
 | `404 Not Found` | `org_not_found` | The organization portion of `device-platform-farm-id` does not exist on this Device-Platform |
 | `403 Forbidden` | `not_authorised` | The authenticated user does not have ADMIN permission on the specified organization |
 | `409 Conflict` | `already_exists` | This farm is already registered on this Device-Platform |
+
+#### 6.3.5 List Farms
+
+##### 6.3.5.1 Purpose
+
+List the farm-to-project mappings already registered for a given organization,
+so a Device-Platform's own dashboard can show what Register a Farm (Section 6.3)
+has produced so far.
+
+##### 6.3.5.2 Request
+
+```
+GET /farms/list?org=[org]
+```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `org` | MUST | Frugal-IoT organization id whose farm mappings should be listed |
+
+##### 6.3.5.3 Response
+
+```json
+[
+  {
+    "id": 1,
+    "platform_id": 1,
+    "farm_id": "[farm-platform-farm-identifier]",
+    "org": "[org]",
+    "project": "[project]"
+  }
+]
+```
+
+An empty array (`[]`) is returned if no farms are registered for `org`. As
+with Register a Farm (Section 6.3), authentication is via the caller's
+Frugal-IoT dashboard session, not the platform token described in Section 3.4.
+
+##### 6.3.5.4 Error Cases
+
+See Section 3.5 for common error codes. The following error cases are specific
+to this request:
+
+| HTTP Status | Error Code | Notes |
+|---|---|---|
+| `400 Bad Request` | `invalid_request` | Missing required parameter: `org` |
+| `404 Not Found` | `org_not_found` | The specified `org` does not exist on this Device-Platform |
+| `403 Forbidden` | `not_authorised` | The authenticated user does not have ADMIN permission on the specified organization |
 
 ---
 
@@ -669,6 +723,25 @@ Examples:
   }
 }
 ```
+
+##### 6.6.2.1 GET variant (WoT Forms compatibility)
+
+A WoT Form (Annex A.4) can only express a URL to invoke - it has no way to
+template a JSON request body. To let a Device Schema's `actions[*].forms[0].href`
+(Annex A.3) remain directly invokable, a Device-Platform MAY additionally offer
+a GET variant of this request, carrying the same fields as query parameters
+instead of a JSON body:
+
+```
+GET /devices/action?deviceId=[device-identifier]&action=[module/field]&value=[value]
+```
+
+Note the parameter names here (`deviceId`, not `device-id`) match those already
+present in the Device Schema's `forms[0].href` for the target action, so a
+consumer can invoke the action by appending `&value=...` to that href directly.
+Query parameters are strings; the Device-Platform MUST coerce `value` to the
+type declared in the field's Device Schema (`input.type`) before validating it.
+Responses and error cases are identical to the POST form above.
 
 #### 6.6.3 Response
 
@@ -1212,7 +1285,7 @@ example is provided for illustration only and does not constitute a normative de
       },
       "forms": [
         {
-          "href": "https://frugaliot.naturalinnovation.org/device/action?deviceId=dev%2Fdevelopers%2Fesp32-e4d5f6&action=frugal_iot%2Fname",
+          "href": "/api/devices/action?deviceId=dev%2Fdevelopers%2Fesp32-e4d5f6&action=frugal_iot%2Fname",
           "contentType": "application/json",
           "op": ["invokeaction"]
         },
@@ -1227,6 +1300,10 @@ example is provided for illustration only and does not constitute a normative de
   }
 }
 ```
+
+The action's HTTP form's `href` is root-relative - see Section 6.6.2.1 for
+how to invoke it directly (appending `&value=...`) despite WoT Forms having
+no way to express a JSON request body.
 
 **Key points in this example:**
 
