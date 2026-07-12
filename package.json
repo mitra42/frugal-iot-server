@@ -12,7 +12,7 @@
     "express": "^5.2.1",
     "express-session": "^1.19.0",
     "frugal-iot-client": "git://github.com/mitra42/frugal-iot-client.git",
-    "frugal-iot-logger": "^1.1.15",
+    "frugal-iot-logger": "^1.1.16",
     "hash-wasm": "^4.12.0",
     "morgan": "^1.11.0",
     "multer": "^2.1.1",
@@ -43,5 +43,5 @@
     "test:coverage": "vitest run --coverage"
   },
   "type": "module",
-  "version": "0.2.10"
+  "version": "0.3.0"
 }
