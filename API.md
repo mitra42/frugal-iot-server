@@ -841,6 +841,66 @@ Same as Section 6.6.4, plus:
 
 ---
 
+### 6.7 List Devices for a Farm
+
+#### 6.7.1 Purpose
+
+List the devices known to the Device-Platform for a given
+`device-platform-farm-id` (the `[org]/[project]` value obtained from
+Register a Farm, Section 6.3), in summary form. This lets a Farm-Platform
+enumerate a farm's devices without fetching each one's full Device Schema
+(Section 5.2).
+
+#### 6.7.2 Request
+
+```
+GET /devices/list?device-platform-farm-id=[org]/[project]
+```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `device-platform-farm-id` | MUST | `[org]/[project]`, as returned by Register a Farm (Section 6.3) |
+
+#### 6.7.3 Response
+
+```json
+[
+  {
+    "id": "dev/lotus/esp32-abc123",
+    "title": "[device name]",
+    "description": "[device description]",
+    "lastSeen": 1276020076,
+    "otaKey": "[ota key]"
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Fully qualified device identifier, in the same `org/project/device` form used elsewhere (e.g. `device` in Section 6.2, `deviceId` in Section 6.6.5) |
+| `title` | string | Human-readable device name, matching `title` in the device's Device Schema (Annex A.1) |
+| `description` | string | Human-readable device description, matching `description` in the device's Device Schema (Annex A.1) |
+| `lastSeen` | number \| null | Unix timestamp (seconds) the device was last seen, or `null` if never seen. Consistent with the `bt`/`t` timestamp convention used elsewhere in this standard (Section 4.2), not an ISO 8601 string |
+| `otaKey` | string | Frugal IoT specific OTA firmware key. Not part of the W3C Thing Description; no equivalent field currently exists in the Device Schema |
+
+An empty array (`[]`) is returned if the project has no known devices. As with
+`GET /data` (Section 6.2) and `GET /devices/schema` (Section 5.2),
+authentication is via the caller's Frugal-IoT dashboard session with READ
+permission on the organization, not the platform token described in
+Section 3.4.
+
+#### 6.7.4 Error Cases
+
+See Section 3.5 for common error codes. The following error cases are
+specific to this request:
+
+| HTTP Status | Error Code | Notes |
+|---|---|---|
+| `400 Bad Request` | `invalid_request` | Missing `device-platform-farm-id`, or it is not of the form `org/project` |
+| `401 Unauthorized` | *(none - bare status)* | The caller is not authenticated, or does not have READ permission on the specified organization |
+
+---
+
 ## 7. Device-Platform to Farm-Platform
 
 ### 7.1 Overview
