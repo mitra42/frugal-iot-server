@@ -158,11 +158,24 @@ INSERT INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'OTAUPDATE', '$
 echo "Added permissions for organization ${ORG_ID}"
 
 # ---- 6. Set the MQTT broker password for this organization ----
+MOSQUITTO_PASSWD_FAILED=0
+MOSQUITTO_PASSWD_ERROR=""
 if [[ "$MOSQUITTO_PASSWD_MISSING" -eq 1 ]]; then
   echo "Warning: mosquitto_passwd command not found - skipped setting MQTT broker password" >&2
 else
-  mosquitto_passwd -b "$MOSQUITTO_PASSWD_FILE" "${ORG_ID}" "${PASSWORD}"
-  echo "Set mosquitto password for ${ORG_ID} in ${MOSQUITTO_PASSWD_FILE}"
+  # Capture stderr without letting `set -e` abort the whole script on failure - the org's config file
+  # and DB rows are already written by this point, so a failure here should be reported, not fatal.
+  MOSQUITTO_PASSWD_ERROR=$(mosquitto_passwd -b "$MOSQUITTO_PASSWD_FILE" "${ORG_ID}" "${PASSWORD}" 2>&1 >/dev/null) || MOSQUITTO_PASSWD_FAILED=1
+  if [[ "$MOSQUITTO_PASSWD_FAILED" -eq 1 ]]; then
+    echo "Warning: mosquitto_passwd failed to set the MQTT broker password:" >&2
+    echo "  ${MOSQUITTO_PASSWD_ERROR}" >&2
+    if [[ "$MOSQUITTO_PASSWD_ERROR" == *"Permission denied"* || ! -w "$MOSQUITTO_PASSWD_FILE" ]]; then
+      echo "This looks like a permissions problem - re-run that command with sudo:" >&2
+      echo "  sudo mosquitto_passwd -b \"${MOSQUITTO_PASSWD_FILE}\" \"${ORG_ID}\" \"${PASSWORD}\"" >&2
+    fi
+  else
+    echo "Set mosquitto password for ${ORG_ID} in ${MOSQUITTO_PASSWD_FILE}"
+  fi
 fi
 
 echo
@@ -172,6 +185,10 @@ echo "  service frugaliot restart"
 if [[ "$MOSQUITTO_PASSWD_MISSING" -eq 1 ]]; then
   echo "NOTE: mosquitto_passwd was not found, so the MQTT broker password was NOT set - run it manually:"
   echo "  mosquitto_passwd -b /etc/mosquitto/mosquitto_passwords ${ORG_ID} <password>"
+elif [[ "$MOSQUITTO_PASSWD_FAILED" -eq 1 ]]; then
+  echo "NOTE: mosquitto_passwd failed (see warning above), so the MQTT broker password was NOT set."
+  echo "  If it was a permissions problem, run it manually with sudo:"
+  echo "  sudo mosquitto_passwd -b \"${MOSQUITTO_PASSWD_FILE}\" ${ORG_ID} <password>"
 elif [[ "$USED_LOCAL_MOSQUITTO_FILE" -eq 1 ]]; then
   echo "NOTE: /etc/mosquitto/mosquitto_passwords was not found, so the local extras/mosquitto_passwords was updated instead."
 fi
