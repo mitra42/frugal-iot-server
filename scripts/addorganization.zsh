@@ -59,7 +59,8 @@ if [[ ! "$PHONE" =~ ^[+][0-9]+$ ]]; then
 fi
 
 if [[ ! -f "$DB" ]]; then
-  echo "Error: database ${DB} not found" >&2
+  echo "Error: database ${DB} not found - create it with:" >&2
+  echo "  sqlite3 ${DB} < frugal-iot-createdb.sql" >&2
   exit 1
 fi
 
@@ -147,13 +148,17 @@ fi
 echo "Created user '${ORG_ID}' (id=${NEW_ID})"
 
 # ---- 5. Insert permissions ----
+# id 0 is "everyone" and id 1 is this server's superuser - both seeded by frugal-iot-createdb.sql.
+# OR IGNORE because permissions has a UNIQUE(id, capability, org) constraint, so a repeat of any of
+# these rows (e.g. on a database where id 1 is also the org's own account) would otherwise abort
+# the whole statement part-way through, leaving the organization with only some of its permissions.
 sqlite3 "$DB" "
-INSERT INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'ADMIN', '${ORG_ID}');
-INSERT INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'READ', '${ORG_ID}');
-INSERT INTO permissions (id, capability, org) VALUES (0, 'READ', '${ORG_ID}');
-INSERT INTO permissions (id, capability, org) VALUES (1, 'ADMIN', '${ORG_ID}');
-INSERT INTO permissions (id, capability, org) VALUES (1, 'READ', '${ORG_ID}');
-INSERT INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'OTAUPDATE', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'ADMIN', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'READ', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (0, 'READ', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'ADMIN', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'READ', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'OTAUPDATE', '${ORG_ID}');
 "
 echo "Added permissions for organization ${ORG_ID}"
 

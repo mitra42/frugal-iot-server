@@ -99,18 +99,17 @@ import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http requ
 
 // If you are developing comment out the Production line, and uncomment the Development line
 // Production
-// import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
+import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
 // Development of Logger
-import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
+// import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
 // API Integration - Farm IoT Interoperability Standard
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
-import { initializeSchema } from './lib/database.js';
 import { APIError } from './lib/api-errors.js';
 
-import { access, constants, createReadStream, mkdir, readdir, rm } from 'fs'; // https://nodejs.org/api/fs.html
+import { access, constants, createReadStream, mkdir, readdir, readFile, rm } from 'fs'; // https://nodejs.org/api/fs.html
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
 import multer from 'multer'; // https://www.npmjs.com/package/multer
@@ -426,14 +425,23 @@ function openOrCreateDatabase(cb) {
   });
 }
 
-// Runs sqlstart (CREATE TABLE IF NOT EXISTS ...) so any tables added since the db was first created also get created.
+// Runs frugal-iot-createdb.sql (CREATE TABLE IF NOT EXISTS ...) so any tables added since the db was first created also get created.
+// The same file can be run by hand on a new installation: sqlite3 frugal-iot.db < frugal-iot-createdb.sql
+// Resolved relative to this file, not the working directory, so it is found however the server is started.
+const sqlstartpath = new URL('./frugal-iot-createdb.sql', import.meta.url);
 function execSqlStart(cb) {
-  db.exec(sqlstart, (err) => {
+  readFile(sqlstartpath, 'utf8', (err, sqlstart) => {
     if (err) {
       cb(err);
     } else {
-      console.log("Exec-ed starting SQL");
-      cb(null, db);
+      db.exec(sqlstart, (err) => {
+        if (err) {
+          cb(err);
+        } else {
+          console.log("Exec-ed starting SQL");
+          cb(null, db);
+        }
+      });
     }
   });
 }
@@ -563,51 +571,8 @@ function shouldIBeLoggedIn(req, res, next) {
 }
 
 
-// TODO check on size of fields hashed_password and salt
-// TO-ADD-REGISTRATION-FIELD
-const sqlstart = `
-CREATE TABLE IF NOT EXISTS \`users\` (
-  \`id\` INTEGER PRIMARY KEY AUTOINCREMENT,
-  \`username\` TEXT UNIQUE,
-  \`hashed_password\` BLOB,
-  \`salt\` BLOB '',
-  \`organization\` varchar(20) NOT NULL DEFAULT '',
-  \`name\` TEXT,
-  \`email\` TEXT,
-  \`phone\` TEXT
-);
-CREATE TABLE IF NOT EXISTS \`permissions\` (
-  \`id\` INTEGER NOT NULL,
-  \`capability\` TEXT NOT NULL,
-  \`org\` TEXT NOT NULL,
-  UNIQUE(\`id\`, \`capability\`, \`org\`)
-);
-CREATE TABLE IF NOT EXISTS \`projects\` (
-  \`org\` TEXT NOT NULL,
-  \`id\` TEXT NOT NULL,
-  \`name\` TEXT NOT NULL,
-  UNIQUE(\`org\`, \`id\`)
-);
-CREATE TABLE IF NOT EXISTS \`api_platforms\` (
- \`id\` INTEGER PRIMARY KEY AUTOINCREMENT,
- \`name\` TEXT UNIQUE NOT NULL, -- name of platform e.g. 'Lite Farm'
- \`userid\` INTEGER, -- Userid of Farm platform on Frugal-IoT
- \`base_url\` TEXT, -- For pushing to platform (in farm-platform-push.js)
- \`auth_token\` TEXT, -- This is auth_token for Frugal-IoT to authenticate to Farm platform when pushing
- \`cookie_name\` TEXT, -- Name of auth token for Frugal-IoT -> Farm Platform
- FOREIGN KEY(\`userid\`) REFERENCES \`users(id)\`
-);
--- Note its possible for a farm on a platform to refer to more than one project on Frugal IoT 
--- in which case there will be more than one record here with same platform_id+farm_id
-CREATE TABLE IF NOT EXISTS \`api_farms\` (
-  \`id\` INTEGER PRIMARY KEY AUTOINCREMENT,
-  \`platform_id\` INTEGER, -- index into api_platforms
-  \`farm_id\` TEXT NOT NULL, -- reference on the other platform
-  \`org\` TEXT NOT NULL, -- if of org in Frugal IoT
-  \'project\' TEXT NOT NULL, -- id of project in Frugal IoT
-  FOREIGN KEY(\`platform_id\`) REFERENCES \`api_platforms(id)\`
-);
-`;
+// Note: the schema this used to hold inline now lives in frugal-iot-createdb.sql, read by execSqlStart above.
+
 // Called by /config.json to build a safe json to return
 function addLoggedNodesToConfig() {
   // TODO-N89 TODO-90 this should strip out any sensitive information like passwords
@@ -815,10 +780,8 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.use(passport.authenticate('session')); // Add user to req.user
 
         // ===== API Integration: Farm IoT Interoperability Standard =====
-        // Initialize database schema for API
-        initializeSchema(db).catch(err => {
-          console.error("Error initializing API schema:", err);
-        });
+        // Its tables are in frugal-iot-createdb.sql, already run by execSqlStart above, so there is
+        // nothing to initialize here (lib/database.js still exports initializeSchema for the tests).
 
         // Create logger client with direct reference to mqttLogger
         const loggerClient = createLoggerClient(mqttLogger);

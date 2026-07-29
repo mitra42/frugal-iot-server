@@ -19,6 +19,4 @@ firebase:
   #allowedNodes:
     #- esp32-6c5e0e
     #- esp32-3c7ab8
-projects:
-  developers:
-    name: Developers
+

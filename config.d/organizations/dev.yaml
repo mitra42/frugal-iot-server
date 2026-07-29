@@ -8,10 +8,4 @@ gsheets:
     topics:
       - dev/lotus/esp8266-fb94bb/sht/humidity
       - dev/lotus/esp8266-fb94bb/sht/temperature
-projects:
-  lotus:
-    name: Lotus Ponds
-  developers:
-    name: Developers
-  umahpupa:
-    name: Umah Pupa
+
