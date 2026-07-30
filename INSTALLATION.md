@@ -30,6 +30,7 @@ see [README.md](https://github.com/mitra42/frugal-iot-server/blob/main/README.md
 * The official Raspberry Pi USB-C power supply (5 V / 3 A). Phone chargers frequently cause
   random reboots and corrupted SD cards — this is the single most common cause of "it doesn't work".
 * A way to write the SD card from your laptop: a built-in SD slot or a USB card reader.
+* Note that you will often need an adapter from the SD format the Pi uses to the SD format of most laptop readers.
 
 **Software and information**
 

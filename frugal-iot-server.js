@@ -99,9 +99,9 @@ import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http requ
 
 // If you are developing comment out the Production line, and uncomment the Development line
 // Production
-// import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
+import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
 // Development of Logger
-import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
+// import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
 // API Integration - Farm IoT Interoperability Standard
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
@@ -312,11 +312,13 @@ function addProjectToConfig(org, id, name) {
 }
 // Read the projects table for every configured organization and add them to config.organizations
 function loadProjectsIntoConfig(cb) {
+  console.log("XXX loadProjectsIntoConfig");
   each(Object.keys(config.organizations), (org, cb) => {
     get_projects_list(org, (err, projects) => {
       if (err) {
         cb(err);
       } else {
+        console.log("XXX lpic proj=", projects);
         projects.forEach(({id, name}) => addProjectToConfig(org, id, name));
         cb(null);
       }
