@@ -96,5 +96,7 @@ WHERE id = ${USER_ID};
 "
 
 echo "Set password for '${ACCOUNT}' (id=${USER_ID})"
-echo "Restart the server for it to be picked up if the account is already logged in somewhere:"
-echo "  service frugaliot restart"
+echo "It applies to the next login - the server reads the password on each login, so nothing needs restarting."
+echo "Anyone already logged in stays logged in - a session is never re-checked against the password."
+echo "To end existing sessions as well (e.g. if the old password leaked) restart the server, which"
+echo "logs everyone out because sessions are only held in memory:  service frugaliot restart"

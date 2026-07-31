@@ -318,7 +318,6 @@ function loadProjectsIntoConfig(cb) {
       if (err) {
         cb(err);
       } else {
-        console.log("XXX lpic proj=", projects);
         projects.forEach(({id, name}) => addProjectToConfig(org, id, name));
         cb(null);
       }
@@ -697,8 +696,9 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     app.get('/ota_update/:org/:project/:node/:attribs', (req, res) => {
       //Intentionally no login
       const version = req.headers['x-esp8266-version'] || req.headers['x-esp32-version'];
+      // Note not using version - we match MD5s instead
       const currentMD5 = req.headers['x-esp8266-sketch-md5'] || req.headers['x-esp32-sketch-md5'];
-      console.log("GET: parms=", req.params, "version:", version, "md5", currentMD5);
+      //console.log("GET: parms=", req.params, "version:", version, "md5", currentMD5);
       // sendFile insists on absolute file names or root-ed
       findMostSpecificFile(config.server.otadir, req.params.org, req.params.project, req.params.node, req.params.attribs,
         (err, path) => {
@@ -708,17 +708,15 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           } else {
             if (path) {
               calculateFileMd5(path, (err, md5) => {
-                console.log("Found OTA file at", path, "with MD5", md5);
+                console.log(req.params.node, ": found OTA file at", path, "with ", (md5 === currentMD5) ? "matching " : "different ","MD5=", md5);
                 if (md5 === currentMD5) {
-                  console.log("MD5 matches, no update needed");
                   res.sendStatus(304);
                 } else {
-                  console.log("MD5 does not match, sending update");
                   res.sendFile(path);
                 }
               });
             } else { // None of the paths matched
-              console.log("No OTA file for", req.url);
+              console.log(req.params.node, ": No OTA file for", req.url);
               res.sendStatus(304);
             }
           }

@@ -30,6 +30,12 @@ in `config.d` put a yaml file for your organization
 - the repo has an example for `dev` which is the developers. 
 - or `scripts/addorganization.zsh <org-id> <org-name> <email> <phone> <password>` will write one,
   along with a login account, its permissions, and its broker password.
+
+This password is the one used for nodes, it will also work for login, so it is recommended to change the login password with:
+```
+scripts/setpassword.zsh <org-id> <login-password>
+```
+
 ```
 node frugal-iot-server.js
 ```
