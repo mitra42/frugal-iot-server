@@ -1,22 +1,33 @@
-# Copy to /etc/systemd/system/frugaliot.service (or /usr/lib/systemd/system on some distributions)
-# and edit User, WorkingDirectory and ExecStart for this machine.
+# Systemd unit for the Frugal IoT server.
+#
+# As shipped this matches the Raspberry Pi installation in INSTALLATION.md: user "pi", installed
+# with npm into /home/pi/frugal-iot. If that is what you have, install it unedited:
+#   sudo cp extras/frugaliot.service /etc/systemd/system/frugaliot.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now frugaliot
+#
+# On any other machine, change User and WorkingDirectory to the account and the directory you
+# installed into, and ExecStart to match (see the git clone alternative below).
 [Unit]
 Description=frugal-iot server
-After=network-online.target
+# mosquitto is listed for the common case of the broker running on this same machine; harmless if
+# it is not installed, because systemd ignores ordering against units that do not exist.
+After=network-online.target mosquitto.service
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=mitra
+User=pi
 # The directory holding this server's config.d, database and data - where npm install was run
-WorkingDirectory=/var/www/frugal-iot
+WorkingDirectory=/home/pi/frugal-iot
 # Installed with npm, this is the command npm put in that directory:
-ExecStart=/var/www/frugal-iot/node_modules/.bin/frugal-iot-server
+ExecStart=/home/pi/frugal-iot/node_modules/.bin/frugal-iot-server
 # From a git clone instead, run the file directly (check the node path with "which node"):
 #ExecStart=/usr/bin/node ./frugal-iot-server.js
 Restart=always
 RestartSec=10
-StandardOutput=syslog
-StandardError=syslog
+StandardOutput=journal
+StandardError=journal
 SyslogIdentifier=frugaliot
 
 [Install]

@@ -51,25 +51,20 @@ If its working correctly you should see something like
 readYamlConfigFile ./config.yaml
 ... and then reading each of the other files
 
-Config= {
-  server: { port: 8080 },
-  mqtt: { broker: 'wss://frugaliot.naturalinnovation.org/wss' },
-  organizations: { 
-    dev: { mqtt_password: 'public', projects: [Array] } 
-  }
-}
+Broker wss://frugaliot.naturalinnovation.org/wss - organizations: dev
 Doing OTA updates at /ota_update from ...some path.../ota
 Serving /node_modules from ./node_modules
 User Database exists
 Opened user database
+Exec-ed starting SQL
 Serving /data from ./data
 Server starting on port 8080
-Serving from ./node_modules/frugal-iot-client
 mqtt dev connecting
 mqtt dev connect
+Subscribing topic dev/# 0
 Received dev/lotus/esp8266-85ea2b/humidity   71.8
 ```
-Where the config is reported back, 
+Where the broker and organizations are reported back, 
 then it successfully connects to the mqtt server
 and receives data from nodes attached to it. 
 

@@ -313,7 +313,6 @@ function addProjectToConfig(org, id, name) {
 }
 // Read the projects table for every configured organization and add them to config.organizations
 function loadProjectsIntoConfig(cb) {
-  console.log("XXX loadProjectsIntoConfig");
   each(Object.keys(config.organizations), (org, cb) => {
     get_projects_list(org, (err, projects) => {
       if (err) {
@@ -659,13 +658,25 @@ function debugRoutes(req, res, next) {
   next();
 }
 // Main for server
+// Everything is read relative to the working directory, so being in the wrong one is the most
+// common way to fail to start - say so plainly rather than reporting ENOENT on ./config.yaml.
+access('./config.yaml', constants.R_OK, (err) => {
+  if (err) {
+    console.error(`No config.yaml in ${process.cwd()}`);
+    console.error("Run this from the directory this server was installed into - the one holding");
+    console.error("config.d and frugal-iot.db. If it is a new directory, set it up with: npx frugal-iot-init");
+    process.exit(1);
+  }
+});
 mqttLogger.readYamlConfig('.', (err, configobj) => {
   // Note side effect leaves copy of config in the mqttLogger
   if (err) {
     console.error(err);
   } else {
     /* global */ config = configobj;
-    console.log("Config=", config);
+    // Summarize rather than dumping the whole config: it is mostly the sensor schema, and it holds
+    // each organization's mqtt_password, which should not be going to the console and the journal.
+    console.log("Broker", config.mqtt.broker, "- organizations:", Object.keys(config.organizations).join(", ") || "(none)");
     // Could genericize config defaults
     if (!config.morgan) {
       config.morgan = ':method :url :req[range] :status :res[content-length] :response-time ms :req[referer]'

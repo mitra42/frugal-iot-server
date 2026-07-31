@@ -101,8 +101,14 @@ Say `yes` to the fingerprint question, then give the password you set in Imager.
 * Wait another minute and try again — the Pi may still be on its first boot.
 * Log in to your Wi-Fi router's admin page and look for a device called `frugaliot` in its
   list of connected clients; note its IP address and use that instead: `ssh pi@192.168.1.42`.
+* **Plug an Ethernet cable from the Pi into your router.** Nothing needs configuring — the Pi picks
+  up an address, and `ssh pi@frugaliot.local` then works over the cable. This is the least effort
+  way in if the Pi is within reach of the router, and once you are logged in you can sort the Wi-Fi
+  out over SSH with `nmtui` as below, no monitor or keyboard needed. Unplug the cable afterwards and
+  check that Wi-Fi alone still gets you in.
 * Plug in the HDMI and keyboard, log in at the console, and run `ip addr` to read the IP address,
-  and `sudo journalctl -b | grep -i wpa` to see why Wi-Fi failed.
+  and `sudo journalctl -b | grep -i wpa` to see why Wi-Fi failed. Use this when the Pi is nowhere
+  near the router, or when you want to see boot messages.
 
 **If Wi-Fi did not connect at all** — `ip addr` shows no address on `wlan0`, and the journal has
 `WPA: 4-Way Handshake failed - pre-shared key may be incorrect` — then the Pi found your network
@@ -145,8 +151,19 @@ sudo reboot
 
 Wait a minute, then `ssh pi@frugaliot.local` again.
 
-**Recommended:** in your router, give the Pi a fixed (reserved) IP address. Sensor nodes and
-phones then have a stable address to talk to even where `.local` names do not work.
+**Find the Pi's IP address**, because later steps can need it — for the broker URL if you will view
+the dashboard on a phone, and for your sensor nodes. From your laptop:
+
+```
+ping -c1 frugaliot.local
+```
+
+The address it prints is the Pi's. That is easier than hunting through your router's admin pages,
+which you may not have the password for.
+
+**Recommended:** if you can get into your router, give the Pi a fixed (reserved) IP address, so that
+address does not change. Sensor nodes and phones then have something stable to talk to even where
+`.local` names do not work.
 
 ### A3. Install the prerequisites
 
@@ -186,9 +203,10 @@ This copies in the configuration files, creates the `data`, `ota` and `config.d/
 directories, and creates the database. It never overwrites anything already there, so it is also
 what you run after an upgrade to pick up newly added configuration.
 
-> If `npm install` fails while building `sqlite3`, it could not find a ready-made binary for this
-> platform and needs to compile one. Install the compiler toolchain and try again:
-> `sudo apt install -y build-essential python3` then `npm install frugal-iot-server`.
+> On a 64-bit Raspberry Pi OS this installs ready-made binaries and compiles nothing. If it ever
+> does stop while building `sqlite3`, no binary was available for your platform, so install the
+> compiler toolchain and try again: `sudo apt install -y build-essential python3` then
+> `npm install frugal-iot-server`.
 
 Everything from here on is run from `~/frugal-iot`, and `npx` is how you run the server's commands
 without having to know where npm put them.
@@ -210,9 +228,11 @@ This one URL is used both by the server's own logger and by the browser UI, so i
 WebSocket (`ws://`) address that **your phone or laptop browser** can reach, not just one that
 works on the Pi.
 
-> Many Android phones cannot resolve `.local` names. If you will view the dashboard from a phone,
-> use the Pi's IP address instead — for example `broker: ws://192.168.1.42:9012` — and give the Pi
-> a reserved address in your router so it does not change.
+> `frugaliot.local` is known to work from a laptop and from an iPhone. Android phones generally
+> cannot resolve `.local` names, so if you will view the dashboard on Android, put the Pi's IP
+> address here instead — `broker: ws://192.168.1.42:9012`, using the address `ping -c1
+> frugaliot.local` reported in step A2 — and reserve that address in your router if you can, so it
+> does not change under you.
 
 ### A5. Install and configure the MQTT broker (Mosquitto)
 
@@ -254,7 +274,8 @@ sudo systemctl restart mosquitto
 systemctl status mosquitto
 ```
 
-`systemctl status` should say `active (running)`. Press `q` to exit. If it is not running,
+`systemctl status` should say `active (running)`, and returns you to the prompt. (If the output is
+long enough that it opens a pager instead, `q` gets you out.) If it is not running,
 `sudo journalctl -u mosquitto -n 50` will show what it objected to.
 
 **Check both listeners are open:**
@@ -349,29 +370,49 @@ If you get `Connection Refused: not authorised`, the password does not match the
 
 ### A7. Start the server by hand and check it
 
+From your install directory — `npx` looks for the server in the current directory's `node_modules`,
+so this only works there:
+
 ```
+cd ~/frugal-iot
 npx frugal-iot-server
 ```
 
-You should see the configuration echoed back, then something like:
+> If npx answers with `Need to install the following packages: frugal-iot-server` and asks to
+> continue, you are in the wrong directory. Say no, `cd ~/frugal-iot`, and try again — otherwise
+> npx fetches a throwaway copy that has none of your configuration.
+
+It lists each configuration file as it reads it, then:
 
 ```
+readYamlConfigFile ./config.yaml
+readYamlConfigDir ./config.d
+    ... one line per configuration file ...
+Broker ws://frugaliot.local:9012 - organizations: dev
 Doing OTA updates at /ota_update from /home/pi/frugal-iot/ota
 Serving /node_modules from ./node_modules
 User Database exists
 Opened user database
+Exec-ed starting SQL
+Created logger client for API integration
+Created push manager for Farm-Platform data push
+Mounted API routes at /api
+Added API error handler
 Serving /data from ./data
 Server starting on port 8080
-Serving from ./node_modules/frugal-iot-client
 mqtt dev connecting
 mqtt dev connect
+Subscribing topic dev/# 0
 ```
 
-The two lines that matter most are `Server starting on port 8080` and `mqtt dev connect`.
-`mqtt dev connect` means the server reached your broker and authenticated. If instead you see
-repeated `mqtt dev close` or `offline`, the broker URL or the password is wrong — recheck
+Check the `Broker` line names your own broker and your organization. The lines that matter most are
+the last three: `mqtt dev connect` means the server reached the broker and authenticated, and
+`Subscribing topic dev/#` means it is listening for your nodes. If instead you see repeated
+`mqtt dev close`, `offline`, or `Not authorized`, the broker URL or the password is wrong — recheck
 `config.d/mqtt.yaml` and that the password in `config.d/organizations/dev.yaml` matches the `dev`
 broker account.
+
+Once nodes are reporting, each reading is logged as it arrives, so this output keeps scrolling.
 
 Now open a browser on your laptop or phone at:
 
@@ -379,15 +420,21 @@ Now open a browser on your laptop or phone at:
 http://frugaliot.local:8080
 ```
 
-(or `http://<the Pi's IP>:8080`). You should get the Frugal IoT UI, and be able to log in as
-username `dev` with the login password you set with `frugal-iot-setpassword` — not the broker
-password. (`superuser` and its password work too.)
+(or `http://<the Pi's IP>:8080`).
 
-Once logged in and with your organization selected, the UI's MQTT status should show *connected*:
-that is the browser using the organization's broker credentials over the WebSocket listener on
-port 9012, which is the last untested piece of the chain. If it does not connect, check that the
-`broker:` URL in `config.d/mqtt.yaml` is one this browser can actually resolve — a phone that
-cannot look up `.local` names needs the Pi's IP address there instead.
+> On a Mac, the browser will ask something like *"Allow Google Chrome Helper to find devices on
+> local networks"* the first time. **Allow it** — without that permission the browser cannot look up
+> `frugaliot.local`, nor reach the broker at that name, so the page and the live data both fail.
+
+You land on the Frugal IoT home page. Click **Dashboard**, and log in as username `dev` with the
+login password you set with `frugal-iot-setpassword` — not the broker password. (`superuser` and its
+password work too.)
+
+Once you are through to the dashboard and have selected your organization, its MQTT status should
+show **connected**. That is the browser authenticating to the broker as your organization, over the
+WebSocket listener on port 9012, from a different machine — the last untested piece of the chain.
+If it does not connect, check that the `broker:` URL in `config.d/mqtt.yaml` is one this browser can
+actually resolve: a phone that cannot look up `.local` names needs the Pi's IP address there instead.
 
 Until a sensor node reports in there will be no data to look at, but the dashboard should load.
 
@@ -395,31 +442,25 @@ Stop the server with `Ctrl-C` before continuing.
 
 ### A8. Run the server as a service
 
-So that it starts automatically at boot and restarts if it crashes:
+So that it starts automatically at boot and restarts if it crashes. The file that
+`npx frugal-iot-init` put in `extras/` already describes this installation — user `pi`, installed
+into `/home/pi/frugal-iot` — so it needs no editing:
 
 ```
 sudo cp extras/frugaliot.service /etc/systemd/system/frugaliot.service
-sudo nano /etc/systemd/system/frugaliot.service
-```
-
-Three lines need to match your Pi:
-
-```
-User=pi
-WorkingDirectory=/home/pi/frugal-iot
-ExecStart=/home/pi/frugal-iot/node_modules/.bin/frugal-iot-server
-```
-
-`WorkingDirectory` must be the directory you installed into, because that is where the server
-finds its configuration and database. `ExecStart` is the command npm created for you there — check
-it exists with `ls node_modules/.bin/frugal-iot-server`. Then:
-
-```
 sudo systemctl daemon-reload
-sudo systemctl enable frugaliot
-sudo systemctl start frugaliot
+sudo systemctl enable --now frugaliot
 systemctl status frugaliot
 ```
+
+`enable --now` both starts it and sets it to start at boot. `status` should report
+`active (running)`.
+
+> Only if you departed from this guide — a different username, or a directory other than
+> `~/frugal-iot` — edit `User`, `WorkingDirectory` and `ExecStart` in
+> `/etc/systemd/system/frugaliot.service` to match, then `sudo systemctl daemon-reload` and
+> `sudo systemctl restart frugaliot`. `WorkingDirectory` is the important one: it is where the
+> server looks for its configuration and database.
 
 To watch its log output, which is where the `mqtt dev connect` and incoming-reading messages now go:
 
@@ -432,21 +473,37 @@ still answers. Your server is now installed.
 
 ### A9. Point your sensor nodes at the Pi
 
-Your ESP8266/ESP32 nodes need to be told to use the Pi's broker — hostname or IP of the Pi,
-port `1883`, username and password of the organization (`dev` / the broker password from step A6),
-and the organization and project names to publish under.
+Your ESP8266/ESP32 nodes are told which broker to use in their sketch — `main.cpp`, or the `.ino`
+file if you build in the Arduino IDE. Look for a line like:
 
-> **To be written.** The node firmware lives in a separate repo
-> ([mitra42/frugal-iot](https://github.com/mitra42/frugal-iot)) and its exact configuration
-> settings are not documented here yet. See [Open questions](#open-questions).
+```cpp
+frugal_iot.configure_mqtt("frugaliot.naturalinnovation.org", "dev", "public");
+```
 
-You can confirm nodes are reporting without the UI at all, using the subscriber from step A6:
+and point it at your Pi instead:
+
+```cpp
+frugal_iot.configure_mqtt("frugaliot.local", "dev", "<broker-password>");
+```
+
+The three arguments are the broker's host, the organization, and that organization's broker
+password. The organization must be the one you created in step A6, because it is the first part of
+every topic the node publishes to, and the password is the *broker* password from that step — not
+the login password. Then rebuild and flash the node as usual.
+
+> If the node does not connect, try the Pi's IP address in place of `frugaliot.local`. Resolving
+> `.local` names needs mDNS support in the firmware, which is not something this guide has
+> confirmed; an IP address avoids the question entirely, which is why step A2 suggests reserving one
+> for the Pi in your router.
+
+You can confirm nodes are reporting without involving the UI, using the subscriber from step A6:
 
 ```
 mosquitto_sub -h localhost -u dev -P '<broker-password>' -t '#' -v
 ```
 
-Every reading from every node should scroll past.
+Every reading from every node should scroll past. Seeing anything here also proves the broker's
+port 1883 is reachable from off the Pi, which is what the nodes need.
 
 ### A10. HTTPS and over-the-air firmware updates
 
@@ -460,6 +517,25 @@ all an offline installation needs. HTTPS matters for two things:
 That section will cover: a DNS name for the Pi, port forwarding on the router, nginx as a reverse
 proxy in front of port 8080, and certificates from Let's Encrypt via certbot. Both require the Pi
 to have internet access, which is the opposite of the offline case this guide is aimed at.
+
+### Known limitation: the clock on an offline Pi
+
+A Raspberry Pi has no battery-backed clock. While it has internet access it sets its time from the
+network and everything is correct — which is what you will see during this install. Fully offline it
+cannot: Raspberry Pi OS saves the time periodically and restores that value at boot, so after a
+power cut the Pi comes up believing it is whenever it last saved, and the gap never gets made up.
+
+What that affects:
+
+* **Logged data is stamped with the wrong time**, so graphs and history drift after each power cut.
+* **Relaying MQTT and watching devices live are unaffected** — the dashboard shows current values
+  whatever the Pi believes the date to be.
+
+If timestamps matter to you on an installation with no internet, the fix today is a hardware RTC
+module on the Pi's GPIO header. A possible future fix within Frugal IoT itself: the dashboard knows
+the time of the phone or laptop viewing it, so it could hand that to the server, which could adopt
+it whenever its own clock looks implausible (a date far in the past). Not accurate to the second,
+but close enough for sensor data.
 
 ---
 
@@ -502,40 +578,19 @@ they get settled.
 
 **Part A, to check while installing**
 
-1. **`sqlite3` native build** (step A4) — does `npm install frugal-iot-server` find a prebuilt
-   ARM64 binary, or does it need `build-essential`? If it always needs compiling, that should move
-   up into step A3 as a normal prerequisite rather than a troubleshooting note.
-2. **Mosquitto listeners** (step A5) — confirm that copying `extras/mosquitto.conf` into `conf.d`
-   does not collide with the packaged default configuration, and that both 1883 and 9012 are
-   reachable from another machine (`mosquitto_sub -h frugaliot.local ...` from your laptop).
-3. **Empty password file** (step A5) - Mosquitto is started with a `password_file` that exists but
-   is empty, because the first account is not created until step A6. Confirm
-   it starts happily like that. If it refuses, the fix is to create a throwaway account with
-   `sudo mosquitto_passwd -c -b /etc/mosquitto/mosquitto_passwords unused unused` before starting it.
-4. **`frugal-iot-addorganization` writing the broker password** (step A6) — step A5 chowns
-   `/etc/mosquitto/mosquitto_passwords` to your user so the script can add the account without
-   sudo. Confirm it does, and that it reports "Set mosquitto password" rather than a warning.
-5. **`.local` name resolution** (step A2) — does `frugaliot.local` work from your laptop, and from
-   an Android phone? If Android fails as expected, the guide should recommend IP addresses more strongly.
-6. **First-run output** (step A7) — the expected startup output above is adapted from README.md and
-   a run on a development machine; replace it with the actual output from the Pi.
-7. **Time and dates while offline** — an offline Pi has no internet clock to sync with, and no
-   battery-backed clock, so after a power cut it starts with a wrong date until something corrects
-   it. For a data logger writing timestamped files, that matters. Does the logger cope? Should this
-   guide recommend a hardware RTC module, or a way for a phone or laptop on the LAN to set the time?
+1. **`.local` from an Android phone** (step A2, A4) - confirmed working from a laptop (with the
+   local-network permission granted on a Mac) and from an iPhone. Android is expected to fail, which
+   is what the note in A4 assumes; worth confirming on a real Android phone.
 
 **Needs information I do not have**
 
-8. **Sensor node configuration** (step A9) — what exactly does one set in the node firmware to
-   point it at a local broker (broker host/port, credentials, organization, project)? Once you tell
-   me, or point me at the right file in the `frugal-iot` repo, I can write that section properly.
-9. **Which Pi Zero** (Part B) — original Zero W, Zero 2 W, or both.
-10. **Bridging to the shared server** — the local broker could optionally bridge to
+2. **Which Pi Zero** (Part B) — original Zero W, Zero 2 W, or both.
+3. **Bridging to the shared server** — the local broker could optionally bridge to
     naturalinnovation.org so data also reaches the shared server. Not covered here; a later task.
-11. **Organization naming** — this guide sets up exactly one organization named `dev`, because that
+4. **Organization naming** — this guide sets up exactly one organization named `dev`, because that
     is the node firmware's default. Is that the right default for a farm installation, or should the
     guide encourage a meaningful organization id (which then has to be set in the node firmware too)?
-12. **Upgrading an existing installation** — `npm update frugal-iot-server` followed by
+5. **Upgrading an existing installation** — `npm update frugal-iot-server` followed by
     `npx frugal-iot-init` should be all it takes, since init adds missing configuration without
     touching what is there. Not yet tried on a server that has been running for a while.
 
