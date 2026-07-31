@@ -46,12 +46,11 @@ see [README.md](https://github.com/mitra42/frugal-iot-server/blob/main/README.md
 * You are comfortable typing commands into a terminal, but you are not assumed to know Linux administration.
 * Anything shown as `<something>` is for you to substitute.
 
-**Useful fallbacks, if the headless setup does not come up**
+**Have these to hand in case the headless setup does not come up**
 
-You should not need these, but if the Pi never appears on the network they turn a dead end into a
-five minute fix. Worth having to hand if you own them:
-
-* A micro-HDMI to HDMI cable plus a monitor, and a USB keyboard — lets you log in directly and see boot errors.
+* A micro-HDMI to HDMI cable plus a monitor, and a USB keyboard — lets you log in directly, see boot
+  errors, and finish Wi-Fi setup by hand. Wi-Fi configured through Imager does not always connect on
+  the first boot (see step A2), so do not count on not needing these.
 * An Ethernet cable from the Pi to your router — bypasses all Wi-Fi problems.
 
 ### A1. Write the operating system to the SD card
@@ -64,17 +63,25 @@ a desktop would only consume memory and SD card space.
 3. **Choose OS** → *Raspberry Pi OS (other)* → *Raspberry Pi OS Lite (64-bit)*.
 4. **Choose Storage** → your SD card. Check the size shown matches your card — this erases it.
 5. Click **Next**. When asked *"Would you like to apply OS customisation settings?"*, choose
-   **Edit Settings**. This is the step that makes headless setup possible — do not skip it.
-6. On the **General** tab:
-   * Set hostname to `frugaliot` (this guide assumes that name throughout).
-   * Set username and password. This guide assumes username `pi`. Choose a real password — the Pi will accept SSH logins.
-   * Tick *Configure wireless LAN* and enter your Wi-Fi SSID, password, and country code.
-   * Set your locale and timezone.
-7. On the **Services** tab: tick **Enable SSH**, and choose *Use password authentication*
-   (or paste your public key if you already use SSH keys).
-8. **Save**, then **Yes** to apply the settings, then **Yes** to erase the card. Writing and
-   verifying takes several minutes.
-9. Eject the card, put it in the Pi, connect power.
+   **Edit Settings** — everything below depends on it.
+6. Set hostname to `frugaliot` (this guide assumes that name throughout). Click "Next", do **NOT** "Skip Customization"
+7. Set your Capital; TimeZone; and Keyboard
+8. Set username and password. This guide assumes username `pi`. Choose a real password — the Pi will accept SSH logins.
+9. Enter your Wi-Fi SSID, password 
+   * And country code if requested - some versions do not request it any more.
+   * Type the SSID exactly as the network broadcasts it, including capitals. Imager does not store
+     your Wi-Fi password; it converts it into a 64-character key using the SSID, so a mistyped SSID
+     produces a key that fails even though the password was right.
+   * Do not be surprised if the Pi still does not join the network - this has been seen on a plain
+     WPA2 network with correct details, and is quick to fix at the console with `nmtui` (step A2).
+     A WPA3 network cannot use Imager's derived key at all, so there expect to use `nmtui`.
+10. Enable SSH, either choose *Use password authentication* or paste your public key if you already use SSH keys.
+11. Leave Raspberry Pi Connect off for now - feel free to experiment with this, as we haven't yet. 
+12. Confirm that you want to save settings and write to the card, and click through operating system prompts wanting to stop you ! 
+
+Writing and verifying takes several minutes.
+
+Eject the card, put it in the Pi, connect power.
 
 The first boot resizes the filesystem and reboots itself. Give it **two to three minutes** before
 expecting it to answer.
@@ -96,6 +103,37 @@ Say `yes` to the fingerprint question, then give the password you set in Imager.
   list of connected clients; note its IP address and use that instead: `ssh pi@192.168.1.42`.
 * Plug in the HDMI and keyboard, log in at the console, and run `ip addr` to read the IP address,
   and `sudo journalctl -b | grep -i wpa` to see why Wi-Fi failed.
+
+**If Wi-Fi did not connect at all** — `ip addr` shows no address on `wlan0`, and the journal has
+`WPA: 4-Way Handshake failed - pre-shared key may be incorrect` — then the Pi found your network
+but was refused. At the console, fix it interactively:
+
+```
+sudo nmtui
+```
+
+Choose *Activate a connection*, pick your network, and type the Wi-Fi password. (*Edit a
+connection* changes the stored one instead.) This works where Imager did not, because you are
+giving NetworkManager the passphrase itself rather than the key Imager derived from it.
+
+To see what Imager actually stored, before or after fixing it:
+
+```
+sudo grep -H -e ssid -e psk /etc/NetworkManager/system-connections/*.nmconnection
+```
+
+A 64-character hexadecimal `psk` is normal — that is your password combined with the SSID, not a
+corrupted value. You can check whether it is the *right* key by deriving it yourself and comparing:
+
+```
+wpa_passphrase '<SSID exactly as broadcast>' '<the password you typed into Imager>'
+```
+
+A key that does not match means the SSID or the password did not reach Imager as intended. A key
+that does match, yet still does not connect, is a fault in the profile Imager wrote rather than in
+the password — either way `nmtui` is the fix, and it is not worth more time than that.
+(`sudo nmcli device wifi list` shows each nearby network's SSID and whether it is WPA2 or WPA3;
+WPA3 cannot use a derived key at all.)
 
 Once logged in, bring the system up to date and reboot:
 
