@@ -1,4 +1,5 @@
-# Often this goes in /usr/lib/systemd/system/frugaliot.service
+# Copy to /etc/systemd/system/frugaliot.service (or /usr/lib/systemd/system on some distributions)
+# and edit User, WorkingDirectory and ExecStart for this machine.
 [Unit]
 Description=frugal-iot server
 After=network-online.target
@@ -6,8 +7,12 @@ After=network-online.target
 [Service]
 Type=simple
 User=mitra
+# The directory holding this server's config.d, database and data - where npm install was run
 WorkingDirectory=/var/www/frugal-iot
-ExecStart=/usr/bin/node ./frugal-iot-server.js
+# Installed with npm, this is the command npm put in that directory:
+ExecStart=/var/www/frugal-iot/node_modules/.bin/frugal-iot-server
+# From a git clone instead, run the file directly (check the node path with "which node"):
+#ExecStart=/usr/bin/node ./frugal-iot-server.js
 Restart=always
 RestartSec=10
 StandardOutput=syslog

@@ -1,12 +1,14 @@
 #!/usr/bin/env zsh
 #
 # Add a new organization to Frugal IoT: config file, user account, permissions, and mqtt credentials.
-# Run from the top level of the frugal-iot-server repo (all paths below are relative to there).
+# Run from the server's own directory, the one holding frugal-iot.db (all paths below are relative
+# to there) - prepare it first with "npx frugal-iot-init".
 #
 # Usage:
+#   npx frugal-iot-addorganization <org-id> <org-name> <email> <phone> <password>
 #   scripts/addorganization.zsh <org-id> <org-name> <email> <phone> <password>
 # Example:
-#   scripts/addorganization.zsh abc "Clever People" foo@abc.org +61123456 "secret!123"
+#   npx frugal-iot-addorganization abc "Clever People" foo@abc.org +61123456 "secret!123"
 
 set -euo pipefail
 
@@ -28,11 +30,8 @@ EMAIL=$3
 PHONE=$4
 PASSWORD=$5
 
-# Must be run from the repo root
-if [[ ! -f frugal-iot-server.js || ! -d config.d ]]; then
-  echo "Error: must be run from the top level of the frugal-iot-server repo" >&2
-  exit 1
-fi
+# Run from a server's own directory - the one holding its database and configuration. That is where
+# npm install was run, or the top level of a git clone. The database being there is what identifies it.
 
 DB="./frugal-iot.db"
 CONFIG_FILE="config.d/organizations/${ORG_ID}.yaml"
@@ -59,8 +58,8 @@ if [[ ! "$PHONE" =~ ^[+][0-9]+$ ]]; then
 fi
 
 if [[ ! -f "$DB" ]]; then
-  echo "Error: database ${DB} not found - create it with:" >&2
-  echo "  sqlite3 ${DB} < frugal-iot-createdb.sql" >&2
+  echo "Error: database ${DB} not found in this directory - prepare the directory first with:" >&2
+  echo "  npx frugal-iot-init" >&2
   exit 1
 fi
 
@@ -68,6 +67,8 @@ if ! command -v sqlite3 >/dev/null; then
   echo "Error: sqlite3 command not found" >&2
   exit 1
 fi
+
+mkdir -p "${CONFIG_FILE:h}" "ota"
 
 MOSQUITTO_PASSWD_MISSING=0
 if ! command -v mosquitto_passwd >/dev/null; then

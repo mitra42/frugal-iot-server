@@ -1,13 +1,14 @@
 #!/usr/bin/env zsh
 #
 # Set (or reset) the password of an existing Frugal IoT user account.
-# Run from the top level of the frugal-iot-server repo (all paths below are relative to there).
+# Run from the server's own directory, the one holding frugal-iot.db.
 #
 # Typically used on a new installation to give the seeded 'superuser' account a password,
-# since frugal-iot-createdb.sql seeds it without one:
-#   scripts/setpassword.zsh superuser "secret!123"
+# since the database is created with that account having none:
+#   npx frugal-iot-setpassword superuser "secret!123"
 #
 # Usage:
+#   npx frugal-iot-setpassword <username> <password>
 #   scripts/setpassword.zsh <username> <password>
 
 set -euo pipefail
@@ -27,12 +28,7 @@ fi
 ACCOUNT=$1
 PASSWORD=$2
 
-# Must be run from the repo root
-if [[ ! -f frugal-iot-server.js || ! -d config.d ]]; then
-  echo "Error: must be run from the top level of the frugal-iot-server repo" >&2
-  exit 1
-fi
-
+# Run from the server's own directory - the one holding its database
 DB="./frugal-iot.db"
 
 if [[ -z "$PASSWORD" ]]; then
@@ -41,8 +37,8 @@ if [[ -z "$PASSWORD" ]]; then
 fi
 
 if [[ ! -f "$DB" ]]; then
-  echo "Error: database ${DB} not found - create it with:" >&2
-  echo "  sqlite3 ${DB} < frugal-iot-createdb.sql" >&2
+  echo "Error: database ${DB} not found in this directory - prepare the directory first with:" >&2
+  echo "  npx frugal-iot-init" >&2
   exit 1
 fi
 

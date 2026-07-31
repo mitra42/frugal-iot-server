@@ -151,58 +151,47 @@ phones then have a stable address to talk to even where `.local` names do not wo
 ### A3. Install the prerequisites
 
 ```
-sudo apt install -y git sqlite3 zsh
-```
-
-* `git` — to fetch the server code.
-* `sqlite3` — the command line tool, used by the script that creates an organization.
-* `zsh` — that script is written in zsh.
-
-Now Node.js. The server needs **Node 18 or later**. First try the version Raspberry Pi OS ships:
-
-```
-sudo apt install -y nodejs npm
+sudo apt install -y nodejs npm sqlite3 zsh
 node -v
 npm -v
 ```
 
-If `node -v` reports **v18 or higher**, you are done — skip to the next section. If it reports
-something older, or the packages are unavailable, install a current Node from NodeSource instead:
-
-```
-sudo apt remove -y nodejs npm
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-node -v
-```
-
-> **To confirm on real hardware:** which of these two routes was needed, and what version
-> `apt` actually provides on current Raspberry Pi OS. See [Open questions](#open-questions).
+* `nodejs` — the server needs **Node 18 or later**. Raspberry Pi OS currently provides 20.19.2,
+  which is fine. If `node -v` ever reports something older on your image, install a current
+  version from [NodeSource](https://github.com/nodesource/distributions) instead.
+* `npm` — installs the server; it is a separate package from `nodejs` on Debian.
+* `sqlite3` — the database the server keeps its accounts in.
+* `zsh` — the setup commands in step A6 are zsh scripts.
 
 ### A4. Install the Frugal IoT server
 
+The server is an npm package. Make a directory for this server to live in and install it there —
+that directory will hold your configuration, your data, and your database, while npm looks after
+the software itself underneath it in `node_modules`.
+
 ```
-cd ~
-git clone https://github.com/mitra42/frugal-iot-server.git
-cd frugal-iot-server
-npm install
-npm update
+mkdir ~/frugal-iot
+cd ~/frugal-iot
+npm install frugal-iot-server
 ```
 
-`npm install` fetches the dependencies, including the web UI (`frugal-iot-client`) and the logger
-(`frugal-iot-logger`), into `node_modules`. `npm update` makes sure the UI is the latest version,
-because it comes straight from GitHub rather than from the npm registry. Expect this to take a
-few minutes on a Pi.
+That pulls in the web UI (`frugal-iot-client`) and the logger (`frugal-iot-logger`) as well.
+Expect a few minutes on a Pi. Then set the directory up:
+
+```
+npx frugal-iot-init
+```
+
+This copies in the configuration files, creates the `data`, `ota` and `config.d/organizations`
+directories, and creates the database. It never overwrites anything already there, so it is also
+what you run after an upgrade to pick up newly added configuration.
 
 > If `npm install` fails while building `sqlite3`, it could not find a ready-made binary for this
 > platform and needs to compile one. Install the compiler toolchain and try again:
-> `sudo apt install -y build-essential python3` then `npm install`.
+> `sudo apt install -y build-essential python3` then `npm install frugal-iot-server`.
 
-Create the directories for data and firmware:
-
-```
-mkdir -p data ota
-```
+Everything from here on is run from `~/frugal-iot`, and `npx` is how you run the server's commands
+without having to know where npm put them.
 
 **Point the server at your own broker.** Out of the box the server talks to the shared broker at
 naturalinnovation.org. Edit the MQTT config:
@@ -286,39 +275,29 @@ mosquitto_sub -h localhost -u nobody -P wrong -t '#'
 requires an account. There are no accounts yet; step A6 creates the first one, and there is a
 fuller test at the end of it.
 
-### A6. Create the database and your organization
+### A6. Create your accounts and your organization
 
-Create the user database, which holds login accounts and permissions:
-
-```
-sqlite3 frugal-iot.db < frugal-iot-createdb.sql
-```
-
-That prints nothing and takes no time. (The server runs the same file at every startup, so a
-database created this way stays up to date as the software gains tables.)
-
-It creates two accounts. One is `everyone`, which nobody logs in as — it exists so that
-permissions granted to all logged-in users have somewhere to live. The other is `superuser`,
-this server's administrator, which is given admin rights over every organization you create.
-It starts with no password and cannot be logged into until you give it one:
+The database was created by `npx frugal-iot-init` in step A4, holding two accounts. One is
+`everyone`, which nobody logs in as — it exists so that permissions granted to all logged-in users
+have somewhere to live. The other is `superuser`, this server's administrator, which is given admin
+rights over every organization you create. It starts with no password and cannot be logged into
+until you give it one:
 
 ```
-scripts/setpassword.zsh superuser "<a-good-password>"
+npx frugal-iot-setpassword superuser "<a-good-password>"
 ```
 
 Use the same command later if you ever need to reset a password — for `superuser` or for any
 other account.
 
-Frugal IoT groups devices as **organization → project → device**. Delete the developers'
-organization config files and create your own:
+Frugal IoT groups devices as **organization → project → device**. Create yours:
 
 ```
-rm config.d/organizations/*.yaml
-scripts/addorganization.zsh dev "My Farm" you@example.com +61123456789 "<broker-password>"
+npx frugal-iot-addorganization dev "My Farm" you@example.com +61123456789 "<broker-password>"
 ```
 
 The arguments are: organization id, display name, your email, your phone (`+` and digits only),
-and a password. That one command writes the organization's config file, creates a login account
+and a password. That one command writes `config.d/organizations/dev.yaml`, creates a login account
 named after the organization (`dev`), grants it admin rights, creates its OTA directory, **and adds
 the organization's account to the broker's password file** — which is why the broker had to be
 installed first.
@@ -337,13 +316,13 @@ Tell Mosquitto to re-read the password file, so the new account works:
 sudo systemctl restart mosquitto
 ```
 
-**Give your login its own password.** `addorganization.zsh` set the `dev` *web login* password to
-the same string as the broker password. They serve completely different purposes, so change the
-login one now to something only you know — the broker credential is unaffected, and nothing needs
-to be kept in step:
+**Give your login its own password.** That command set the `dev` *web login* password to the same
+string as the broker password. They serve completely different purposes, so change the login one
+now to something only you know — the broker credential is unaffected, and nothing needs to be kept
+in step:
 
 ```
-scripts/setpassword.zsh dev "<your-own-login-password>"
+npx frugal-iot-setpassword dev "<your-own-login-password>"
 ```
 
 **Now the full broker test.** In your SSH session subscribe as the organization, using the broker
@@ -371,19 +350,19 @@ If you get `Connection Refused: not authorised`, the password does not match the
 ### A7. Start the server by hand and check it
 
 ```
-node frugal-iot-server.js
+npx frugal-iot-server
 ```
 
 You should see the configuration echoed back, then something like:
 
 ```
-Doing OTA updates at /ota_update from /home/pi/frugal-iot-server/ota
+Doing OTA updates at /ota_update from /home/pi/frugal-iot/ota
 Serving /node_modules from ./node_modules
 User Database exists
 Opened user database
 Serving /data from ./data
 Server starting on port 8080
-Serving from /home/pi/frugal-iot-server/node_modules/frugal-iot-client
+Serving from ./node_modules/frugal-iot-client
 mqtt dev connecting
 mqtt dev connect
 ```
@@ -401,8 +380,8 @@ http://frugaliot.local:8080
 ```
 
 (or `http://<the Pi's IP>:8080`). You should get the Frugal IoT UI, and be able to log in as
-username `dev` with the login password you set with `setpassword.zsh` — not the broker password.
-(`superuser` and its password work too.)
+username `dev` with the login password you set with `frugal-iot-setpassword` — not the broker
+password. (`superuser` and its password work too.)
 
 Once logged in and with your organization selected, the UI's MQTT status should show *connected*:
 that is the browser using the organization's broker credentials over the WebSocket listener on
@@ -427,12 +406,13 @@ Three lines need to match your Pi:
 
 ```
 User=pi
-WorkingDirectory=/home/pi/frugal-iot-server
-ExecStart=/usr/bin/node ./frugal-iot-server.js
+WorkingDirectory=/home/pi/frugal-iot
+ExecStart=/home/pi/frugal-iot/node_modules/.bin/frugal-iot-server
 ```
 
-Confirm the path to Node with `which node` — `/usr/bin/node` is correct for both installation
-routes in step A3. Then:
+`WorkingDirectory` must be the directory you installed into, because that is where the server
+finds its configuration and database. `ExecStart` is the command npm created for you there — check
+it exists with `ls node_modules/.bin/frugal-iot-server`. Then:
 
 ```
 sudo systemctl daemon-reload
@@ -522,46 +502,42 @@ they get settled.
 
 **Part A, to check while installing**
 
-1. **Node.js version** (step A3) — does `sudo apt install nodejs npm` on current Raspberry Pi OS
-   give Node 18 or later? If yes, the NodeSource fallback can become a footnote. If no, which
-   version does it give, and does the NodeSource `setup_22.x` script support this OS release?
-2. **`sqlite3` native build** (step A4) — does `npm install` find a prebuilt ARM64 binary, or does
-   it need `build-essential`? If it always needs compiling, that should move up into step A3 as a
-   normal prerequisite rather than a troubleshooting note.
-3. **Mosquitto listeners** (step A5) — confirm that copying `extras/mosquitto.conf` into `conf.d`
+1. **`sqlite3` native build** (step A4) — does `npm install frugal-iot-server` find a prebuilt
+   ARM64 binary, or does it need `build-essential`? If it always needs compiling, that should move
+   up into step A3 as a normal prerequisite rather than a troubleshooting note.
+2. **Mosquitto listeners** (step A5) — confirm that copying `extras/mosquitto.conf` into `conf.d`
    does not collide with the packaged default configuration, and that both 1883 and 9012 are
    reachable from another machine (`mosquitto_sub -h frugaliot.local ...` from your laptop).
-4. **Empty password file** (step A5) — Mosquitto is started with a `password_file` that exists but
-   is empty, because `addorganization.zsh` does not create the first account until step A6. Confirm
+3. **Empty password file** (step A5) - Mosquitto is started with a `password_file` that exists but
+   is empty, because the first account is not created until step A6. Confirm
    it starts happily like that. If it refuses, the fix is to create a throwaway account with
    `sudo mosquitto_passwd -c -b /etc/mosquitto/mosquitto_passwords unused unused` before starting it.
-5. **`addorganization.zsh` writing the broker password** (step A6) — step A5 chowns
+4. **`frugal-iot-addorganization` writing the broker password** (step A6) — step A5 chowns
    `/etc/mosquitto/mosquitto_passwords` to your user so the script can add the account without
    sudo. Confirm it does, and that it reports "Set mosquitto password" rather than a warning.
-6. **`.local` name resolution** (step A2) — does `frugaliot.local` work from your laptop, and from
+5. **`.local` name resolution** (step A2) — does `frugaliot.local` work from your laptop, and from
    an Android phone? If Android fails as expected, the guide should recommend IP addresses more strongly.
-7. **First-run output** (step A7) — the expected startup output above is adapted from README.md and
+6. **First-run output** (step A7) — the expected startup output above is adapted from README.md and
    a run on a development machine; replace it with the actual output from the Pi.
-8. **Time and dates while offline** — an offline Pi has no internet clock to sync with, and no
+7. **Time and dates while offline** — an offline Pi has no internet clock to sync with, and no
    battery-backed clock, so after a power cut it starts with a wrong date until something corrects
    it. For a data logger writing timestamped files, that matters. Does the logger cope? Should this
    guide recommend a hardware RTC module, or a way for a phone or laptop on the LAN to set the time?
 
 **Needs information I do not have**
 
-9. **Sensor node configuration** (step A9) — what exactly does one set in the node firmware to
+8. **Sensor node configuration** (step A9) — what exactly does one set in the node firmware to
    point it at a local broker (broker host/port, credentials, organization, project)? Once you tell
    me, or point me at the right file in the `frugal-iot` repo, I can write that section properly.
-10. **Which Pi Zero** (Part B) — original Zero W, Zero 2 W, or both.
-11. **Bridging to the shared server** — the local broker could optionally bridge to
+9. **Which Pi Zero** (Part B) — original Zero W, Zero 2 W, or both.
+10. **Bridging to the shared server** — the local broker could optionally bridge to
     naturalinnovation.org so data also reaches the shared server. Not covered here; a later task.
-12. **Organization naming** — this guide sets up exactly one organization named `dev`, because that
+11. **Organization naming** — this guide sets up exactly one organization named `dev`, because that
     is the node firmware's default. Is that the right default for a farm installation, or should the
     guide encourage a meaningful organization id (which then has to be set in the node firmware too)?
-13. **Client version dependency** — the guide creates no `public` broker account, because the browser
-    now authenticates as the organization. That needs the version of `frugal-iot-client` with
-    per-organization credentials to be the one `npm install` fetches. Confirm that before publishing;
-    an older client would connect as `public`/`public` and silently show no live values.
+12. **Upgrading an existing installation** — `npm update frugal-iot-server` followed by
+    `npx frugal-iot-init` should be all it takes, since init adds missing configuration without
+    touching what is there. Not yet tried on a server that has been running for a while.
 
 **Tested on**
 

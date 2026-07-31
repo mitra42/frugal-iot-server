@@ -54,6 +54,8 @@ data/
 #do not upload db files.
 *.db
 *.db.bak
+*.db.*
+
 *.sqlite
 *.sqlite3
 

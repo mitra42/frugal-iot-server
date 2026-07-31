@@ -11,7 +11,7 @@
     "cookie-parser": "^1.4.7",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
-    "frugal-iot-client": "git://github.com/mitra42/frugal-iot-client.git",
+    "frugal-iot-client": "^1.3.11",
     "frugal-iot-logger": "^1.1.17",
     "hash-wasm": "^4.12.0",
     "morgan": "^1.11.0",
@@ -20,7 +20,31 @@
     "passport-local": "^1.0.0",
     "sqlite3": "^5.1.7"
   },
+  "bin": {
+    "frugal-iot-server": "frugal-iot-server.js",
+    "frugal-iot-init": "scripts/init.zsh",
+    "frugal-iot-addorganization": "scripts/addorganization.zsh",
+    "frugal-iot-setpassword": "scripts/setpassword.zsh"
+  },
   "description": "Frugal IoT client and server",
+  "//files": "An allowlist, not an ignore list - anything not named here is never published, so a stray file (a database backup, a credential) cannot leak by default. Check with: npm pack --dry-run",
+  "files": [
+    "frugal-iot-server.js",
+    "frugal-iot-createdb.sql",
+    "config.yaml",
+    "config.d/logger.yaml",
+    "config.d/mqtt.yaml",
+    "config.d/server.yaml",
+    "config.d/schema/",
+    "lib/",
+    "public/",
+    "private/",
+    "scripts/",
+    "extras/mosquitto.conf",
+    "extras/frugaliot.service",
+    "API.md",
+    "INSTALLATION.md"
+  ],
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "jest": "^30.4.2",
@@ -35,7 +59,6 @@
   "license": "MIT",
   "main": "frugal-iot-server.js",
   "name": "frugal-iot-server",
-  "private": true,
   "repository": "https://github.com/mitra42/frugal-iot-server",
   "scripts": {
     "test": "vitest run",
@@ -43,5 +66,5 @@
     "test:coverage": "vitest run --coverage"
   },
   "type": "module",
-  "version": "0.3.1"
+  "version": "0.3.2"
 }
