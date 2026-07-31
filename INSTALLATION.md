@@ -13,9 +13,13 @@ Two hardware paths are covered:
 If you already have a working Linux server (not a Pi), you do not need this document —
 see [README.md](https://github.com/mitra42/frugal-iot-server/blob/main/README.md) instead.
 
-> **Status:** first draft, written 2026-07. The Pi 4 path has been written against the current
-> code but not yet walked through end to end on hardware. Items still to confirm are collected
-> under [Open questions](#open-questions) — please add your findings there as you go.
+> **Status:** the Raspberry Pi 4 path has been followed end to end on hardware (see
+> [Tested on](#tested-on)), and corrected from what that run found. Part B, and HTTPS/OTA in step
+> A10, are not written yet. Remaining uncertainties are listed under
+> [Open questions](#open-questions) — please add your findings there as you go.
+
+**Already have a Frugal IoT server running and just want a newer version?** Skip everything below
+and go to [Upgrading](#upgrading).
 
 ---
 
@@ -25,8 +29,11 @@ see [README.md](https://github.com/mitra42/frugal-iot-server/blob/main/README.md
 
 **Hardware**
 
-* Raspberry Pi 4 Model B. 2 GB RAM or more is comfortable; 1 GB should work.
-* A microSD card, 16 GB or larger, Class 10 / A1 or better. (8 GB works but leaves little room for data.)
+* Raspberry Pi 4 Model B. Any RAM size — a running server uses around 250 MB, so even the 1 GB
+  model has plenty of room. (Measured on a 4 GB Pi 4: 231 MB in use with the server running.)
+* A microSD card. 8 GB is enough for the system and software — a working install occupies about
+  5 GB — but sensor data accumulates on this card for as long as the server runs, so 16 GB or larger
+  is the safer choice. Class 10 / A1 or better.
 * The official Raspberry Pi USB-C power supply (5 V / 3 A). Phone chargers frequently cause
   random reboots and corrupted SD cards — this is the single most common cause of "it doesn't work".
 * A way to write the SD card from your laptop: a built-in SD slot or a USB card reader.
@@ -173,9 +180,10 @@ node -v
 npm -v
 ```
 
-* `nodejs` — the server needs **Node 18 or later**. Raspberry Pi OS currently provides 20.19.2,
-  which is fine. If `node -v` ever reports something older on your image, install a current
-  version from [NodeSource](https://github.com/nodesource/distributions) instead.
+* `nodejs` — the server needs **Node 18 or later**. Current Raspberry Pi OS (Debian 13, trixie)
+  provides 20.19.2, which is fine. Older images shipped Node 18, also fine. If `node -v` reports
+  anything below 18, install a current version from
+  [NodeSource](https://github.com/nodesource/distributions) instead.
 * `npm` — installs the server; it is a separate package from `nodejs` on Debian.
 * `sqlite3` — the database the server keeps its accounts in.
 * `zsh` — the setup commands in step A6 are zsh scripts.
@@ -525,6 +533,16 @@ network and everything is correct — which is what you will see during this ins
 cannot: Raspberry Pi OS saves the time periodically and restores that value at boot, so after a
 power cut the Pi comes up believing it is whenever it last saved, and the gap never gets made up.
 
+To see whether the Pi's clock is actually right at any moment:
+
+```
+timedatectl
+```
+
+`System clock synchronized: yes` means it has reached a time server and the clock is trustworthy.
+`no`, with `NTP service: active`, means it is trying but has not succeeded — normal on a Pi with no
+route to the internet, and the point at which the timestamps below become a concern.
+
 What that affects:
 
 * **Logged data is stamped with the wrong time**, so graphs and history drift after each power cut.
@@ -539,6 +557,44 @@ but close enough for sensor data.
 
 ---
 
+## Upgrading
+
+To move an existing server to a newer release, from the directory you installed into:
+
+```
+cd ~/frugal-iot
+npm update frugal-iot-server
+npx frugal-iot-init
+sudo systemctl restart frugaliot
+```
+
+Taking those in turn:
+
+* `npm update` fetches the new version of the server, and of the client and logger it depends on.
+* `frugal-iot-init` adds any configuration file or directory the new version expects and you do not
+  have yet. It never changes files you already have, so your settings, database and data are safe.
+* `systemctl restart frugaliot` is what actually puts the new version into service — without it the
+  old one keeps running from memory, and nothing appears to have changed. (Skip this if you are
+  running the server by hand rather than as a service; stop it with `Ctrl-C` and start it again.)
+
+Check it came back up, and is running the version you expect:
+
+```
+systemctl status frugaliot
+journalctl -u frugaliot -n 30
+npm ls frugal-iot-server
+```
+
+> Because `frugal-iot-init` leaves existing files alone, a *new setting added to a file you already
+> have* will not appear by itself. If a release note mentions one, compare your copy against the
+> packaged original, for example:
+> `diff config.d/server.yaml node_modules/frugal-iot-server/config.d/server.yaml`
+
+Your organizations, accounts, database and logged data are untouched by an upgrade — they live in
+this directory, not in `node_modules`.
+
+---
+
 ## Part B — Raspberry Pi Zero W
 
 **Not yet tested — do not follow this section expecting it to work.** It records what is known
@@ -547,8 +603,9 @@ and what has to be checked.
 First, work out which board you have, because they are very different:
 
 * **Raspberry Pi Zero 2 W** — 64-bit ARM (Cortex-A53), 512 MB RAM. Should follow **Part A**
-  almost unchanged: choose *Raspberry Pi Zero 2 W* in Imager, and everything else applies.
-  The concern is memory, not architecture.
+  almost unchanged: choose *Raspberry Pi Zero 2 W* in Imager, and everything else applies. Running
+  the server needs about 250 MB, so 512 MB should be enough; the pinch point is more likely to be
+  `npm install`, which is far hungrier than the running server.
 * **Raspberry Pi Zero W** (the original) — 32-bit ARMv6 (BCM2835), 512 MB RAM. This is the
   awkward one: it needs the 32-bit Raspberry Pi OS, and **the official Node.js builds no longer
   support ARMv6**. Unofficial ARMv6 builds exist at
@@ -565,8 +622,9 @@ Differences to expect on either Zero:
 * Everything will be slow. `npm install` may take a long time, especially if `sqlite3` has to be
   compiled from source — which is likely on ARMv6, since no ready-made binaries are published.
 
-**Before this section can be written, I need to know:** which Zero you intend to support (original
-W, 2 W, or both), and the results of trying a Node install on it.
+**Both boards are to be tested**, one of each having been ordered for the purpose. This section gets
+written once we know how they behave — in particular whether a usable Node exists for the original
+Zero W's ARMv6.
 
 ---
 
@@ -584,20 +642,18 @@ they get settled.
 
 **Needs information I do not have**
 
-2. **Which Pi Zero** (Part B) — original Zero W, Zero 2 W, or both.
+2. **Pi Zero W and Zero 2 W** (Part B) — both boards are on order; Part B stays unwritten until they
+    have been tried. The open technical question is Node on the original Zero W's ARMv6.
 3. **Bridging to the shared server** — the local broker could optionally bridge to
     naturalinnovation.org so data also reaches the shared server. Not covered here; a later task.
 4. **Organization naming** — this guide sets up exactly one organization named `dev`, because that
     is the node firmware's default. Is that the right default for a farm installation, or should the
     guide encourage a meaningful organization id (which then has to be set in the node firmware too)?
-5. **Upgrading an existing installation** — `npm update frugal-iot-server` followed by
-    `npx frugal-iot-init` should be all it takes, since init adds missing configuration without
-    touching what is there. Not yet tried on a server that has been running for a while.
 
-**Tested on**
+## Tested on
 
-Fill this in as you go, so we know what the guide has actually been proven against:
+What the guide has actually been proven against — add a row for each run:
 
-| Date | Board | OS image | Node version | Result |
-| --- | --- | --- | --- | --- |
-|  | Pi 4 Model B |  |  |  |
+| Date | Board | OS image | Node | Server | Result |
+| --- | --- | --- | --- | --- | --- |
+| 2026-07-31 | Pi 4 Model B, 4 GB | Raspberry Pi OS Lite 64-bit, Debian 13.6 (trixie) | 20.19.2 and npm 9.2.0, both from `apt` | frugal-iot-server 0.3.3 from npm | Steps A1–A8 completed, plus an upgrade over the top of it. Wi-Fi from Imager did not connect and was fixed with `nmtui` (A2). `sqlite3` installed as a prebuilt binary, nothing compiled. Mosquitto started with an empty password file, and `frugal-iot-addorganization` wrote the broker account without sudo. Dashboard reached over `frugaliot.local` from a Mac (Chrome, after allowing local network access) and from an iPhone, MQTT status *connected*. A9 (sensor nodes) and A10 (HTTPS/OTA) not exercised. |
