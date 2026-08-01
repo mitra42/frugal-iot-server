@@ -75,13 +75,42 @@ if ! command -v mosquitto_passwd >/dev/null; then
   MOSQUITTO_PASSWD_MISSING=1
 fi
 
-# Prefer the real system password file; if it's not present (e.g. mosquitto isn't installed on this
-# machine), fall back to editing the local copy under extras/ so the script still does something useful.
-MOSQUITTO_PASSWD_FILE="/etc/mosquitto/mosquitto_passwords"
+# Find the broker's password file: where this project's mosquitto.conf puts it, then where older
+# installations kept it, and finally - if mosquitto is not installed on this machine at all - the
+# local copy under extras/, so the script still does something useful.
+MOSQUITTO_PASSWD_FILE=""
 USED_LOCAL_MOSQUITTO_FILE=0
-if [[ ! -e "$MOSQUITTO_PASSWD_FILE" && -e "extras/mosquitto_passwords" ]]; then
-  MOSQUITTO_PASSWD_FILE="extras/mosquitto_passwords"
-  USED_LOCAL_MOSQUITTO_FILE=1
+for f in /var/lib/mosquitto/passwords /etc/mosquitto/mosquitto_passwords; do
+  if [[ -e "$f" ]]; then
+    MOSQUITTO_PASSWD_FILE="$f"
+    break
+  fi
+done
+if [[ -z "$MOSQUITTO_PASSWD_FILE" ]]; then
+  if [[ -e "extras/mosquitto_passwords" ]]; then
+    MOSQUITTO_PASSWD_FILE="extras/mosquitto_passwords"
+    USED_LOCAL_MOSQUITTO_FILE=1
+  else
+    MOSQUITTO_PASSWD_FILE="/var/lib/mosquitto/passwords"
+  fi
+fi
+
+# Run mosquitto_passwd as whoever owns that file. Mosquitto warns unless the file belongs to the user
+# opening it, and mosquitto_passwd writes a temporary backup beside it, so it needs the directory too
+# - neither of which we get by running as ourselves against a file owned by mosquitto or by root.
+# On Raspberry Pi OS the first user has passwordless sudo, so this is invisible.
+MOSQUITTO_PASSWD_CMD=(mosquitto_passwd)
+if [[ ! -w "${MOSQUITTO_PASSWD_FILE:h}" || ( -e "$MOSQUITTO_PASSWD_FILE" && ! -w "$MOSQUITTO_PASSWD_FILE" ) ]]; then
+  if command -v sudo >/dev/null; then
+    # stat's spelling differs between Linux (-c) and BSD/macOS (-f)
+    MOSQUITTO_PASSWD_OWNER=$(stat -c '%U' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null \
+      || stat -f '%Su' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null || true)
+    if [[ -n "$MOSQUITTO_PASSWD_OWNER" && "$MOSQUITTO_PASSWD_OWNER" != "$(id -un)" && "$MOSQUITTO_PASSWD_OWNER" != "root" ]]; then
+      MOSQUITTO_PASSWD_CMD=(sudo -u "$MOSQUITTO_PASSWD_OWNER" mosquitto_passwd)
+    else
+      MOSQUITTO_PASSWD_CMD=(sudo mosquitto_passwd)
+    fi
+  fi
 fi
 
 # ---- Escaping helpers ----
@@ -171,14 +200,14 @@ if [[ "$MOSQUITTO_PASSWD_MISSING" -eq 1 ]]; then
 else
   # Capture stderr without letting `set -e` abort the whole script on failure - the org's config file
   # and DB rows are already written by this point, so a failure here should be reported, not fatal.
-  MOSQUITTO_PASSWD_ERROR=$(mosquitto_passwd -b "$MOSQUITTO_PASSWD_FILE" "${ORG_ID}" "${PASSWORD}" 2>&1 >/dev/null) || MOSQUITTO_PASSWD_FAILED=1
+  MOSQUITTO_PASSWD_ERROR=$("${MOSQUITTO_PASSWD_CMD[@]}" -b "$MOSQUITTO_PASSWD_FILE" "${ORG_ID}" "${PASSWORD}" 2>&1 >/dev/null) || MOSQUITTO_PASSWD_FAILED=1
   if [[ "$MOSQUITTO_PASSWD_FAILED" -eq 1 ]]; then
     echo "Warning: mosquitto_passwd failed to set the MQTT broker password:" >&2
     echo "  ${MOSQUITTO_PASSWD_ERROR}" >&2
-    if [[ "$MOSQUITTO_PASSWD_ERROR" == *"Permission denied"* || ! -w "$MOSQUITTO_PASSWD_FILE" ]]; then
-      echo "This looks like a permissions problem - re-run that command with sudo:" >&2
-      echo "  sudo mosquitto_passwd -b \"${MOSQUITTO_PASSWD_FILE}\" \"${ORG_ID}\" \"${PASSWORD}\"" >&2
-    fi
+    echo "Everything else was done, so set just the broker password by hand:" >&2
+    echo "  sudo mosquitto_passwd -b \"${MOSQUITTO_PASSWD_FILE}\" \"${ORG_ID}\" \"${PASSWORD}\"" >&2
+    echo "If it complains about creating a backup file, the directory holding that file is not" >&2
+    echo "writable by you - which is why the command above uses sudo." >&2
   else
     echo "Set mosquitto password for ${ORG_ID} in ${MOSQUITTO_PASSWD_FILE}"
   fi

@@ -55,10 +55,10 @@ and go to [Upgrading](#upgrading).
 
 **Have these to hand in case the headless setup does not come up**
 
-* A micro-HDMI to HDMI cable plus a monitor, and a USB keyboard — lets you log in directly, see boot
-  errors, and finish Wi-Fi setup by hand. Wi-Fi configured through Imager does not always connect on
-  the first boot (see step A2), so do not count on not needing these.
-* An Ethernet cable from the Pi to your router — bypasses all Wi-Fi problems.
+* An Ethernet cable from the Pi to your router — the simplest way in if the Pi does not appear on
+  the Wi-Fi, and you can then sort the Wi-Fi out over SSH (step A2).
+* A micro-HDMI to HDMI cable plus a monitor, and a USB keyboard — for when the Pi is nowhere near the
+  router, or you want to see boot messages.
 
 ### A1. Write the operating system to the SD card
 
@@ -79,9 +79,11 @@ a desktop would only consume memory and SD card space.
    * Type the SSID exactly as the network broadcasts it, including capitals. Imager does not store
      your Wi-Fi password; it converts it into a 64-character key using the SSID, so a mistyped SSID
      produces a key that fails even though the password was right.
-   * Do not be surprised if the Pi still does not join the network - this has been seen on a plain
-     WPA2 network with correct details, and is quick to fix at the console with `nmtui` (step A2).
-     A WPA3 network cannot use Imager's derived key at all, so there expect to use `nmtui`.
+   * If the Pi does not join the network, a mistyped SSID or password is much the likeliest cause -
+     neither is echoed back to you here, and Imager combines the two into a key, so a slip in either
+     looks the same later. Step A2 fixes it in a couple of minutes with `nmtui`.
+   * A WPA3 network cannot use the key Imager derives at all, so on one of those expect to finish the
+     Wi-Fi setup with `nmtui` regardless.
 10. Enable SSH, either choose *Use password authentication* or paste your public key if you already use SSH keys.
 11. Leave Raspberry Pi Connect off for now - feel free to experiment with this, as we haven't yet. 
 12. Confirm that you want to save settings and write to the card, and click through operating system prompts wanting to stop you ! 
@@ -265,14 +267,21 @@ sudo cp extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf
 `/etc/mosquitto/mosquitto.conf`, which keeps its own settings for logging and persistence.)
 
 That configuration names a password file, and Mosquitto will not start if the file is missing, so
-create an empty one. The accounts inside it get created for you in the next step, by
-`addorganization.zsh` — which runs as you rather than as root, hence the ownership:
+create an empty one. The accounts inside it get created for you in the next step:
 
 ```
-sudo touch /etc/mosquitto/mosquitto_passwords
-sudo chown ${USER}:mosquitto /etc/mosquitto/mosquitto_passwords
-sudo chmod 640 /etc/mosquitto/mosquitto_passwords
+sudo install -o mosquitto -g mosquitto -m 600 /dev/null /var/lib/mosquitto/passwords
 ```
+
+That makes an empty file belonging to the `mosquitto` user, readable by nobody else — one command
+instead of a `touch`, a `chown` and a `chmod`.
+
+> The ownership matters, and is easy to get wrong. Mosquitto warns unless the password file belongs
+> to whoever opened it, and the broker runs as the `mosquitto` user — so the file belongs to
+> `mosquitto`, and it lives under `/var/lib/mosquitto` (which that user owns) rather than
+> `/etc/mosquitto` (which root owns). `mosquitto_passwd` also writes a temporary backup file
+> alongside it, so it needs to write to that directory too, not just to the file. Step A6 runs it as
+> the right user for you.
 
 Start the broker and have it start at every boot:
 
