@@ -30,6 +30,7 @@
  *Δ /admin (get) dashboard for administrators - includes OTA and will include permission management
  P /ota_update (post) protected place to upload new binaries (OTAUPDATE)
  XP /ota_list/:org list all ota files for an organization
+ XP /ota_get/:org/*remainingpath download a binary so the client can flash it over USB
  O  /private Serve up private files under authentication - currently unused
  * /register (post) register a new user
  */
@@ -916,6 +917,24 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                     res.status(200).json(dirs);
                   }
                 });
+              }
+            });
+          }
+        );
+        // Download an OTA binary so the client can flash it over USB (see FLASH_PLAN.md in
+        // frugal-iot-client). Deliberately not /ota_update, which is unauthenticated for devices
+        // and answers 304 rather than sending bytes.
+        app.get('/ota_get/:org/*remainingpath',
+          loggedInOrFail,
+          can_OTAUPDATE,
+          (req,res) => {
+            let remainingpath = req.params.remainingpath.join('/');
+            let filepath = `${config.server.otadir}/${req.params.org}/${sanitize(remainingpath)}/firmware.bin`;
+            console.log("Sending OTA file", filepath);
+            res.sendFile(filepath, {}, (err) => {
+              if (err) {
+                console.error("Error sending ota file:", filepath, err);
+                if (!res.headersSent) res.status(404).send(err.message);
               }
             });
           }
