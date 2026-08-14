@@ -75,23 +75,31 @@ if ! command -v mosquitto_passwd >/dev/null; then
   MOSQUITTO_PASSWD_MISSING=1
 fi
 
-# Find the broker's password file: where this project's mosquitto.conf puts it, then where older
-# installations kept it, and finally - if mosquitto is not installed on this machine at all - the
-# local copy under extras/, so the script still does something useful.
-MOSQUITTO_PASSWD_FILE=""
+# Ask the broker's own configuration where its password file is, rather than guessing - that way
+# this works whatever layout a machine uses, including installations older than this script.
+# Mosquitto reads /etc/mosquitto/mosquitto.conf and then the .conf files in conf.d, last one wins.
+MOSQUITTO_PASSWD_FILE=$(grep -hE '^[[:space:]]*password_file[[:space:]]' \
+  /etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*.conf(N) 2>/dev/null | tail -1 | awk '{print $2}')
 USED_LOCAL_MOSQUITTO_FILE=0
-for f in /var/lib/mosquitto/passwords /etc/mosquitto/mosquitto_passwords; do
-  if [[ -e "$f" ]]; then
-    MOSQUITTO_PASSWD_FILE="$f"
-    break
-  fi
-done
-if [[ -z "$MOSQUITTO_PASSWD_FILE" ]]; then
-  if [[ -e "extras/mosquitto_passwords" ]]; then
-    MOSQUITTO_PASSWD_FILE="extras/mosquitto_passwords"
-    USED_LOCAL_MOSQUITTO_FILE=1
-  else
-    MOSQUITTO_PASSWD_FILE="/var/lib/mosquitto/passwords"
+if [[ -n "$MOSQUITTO_PASSWD_FILE" ]]; then
+  MOSQUITTO_PASSWD_FROM_CONFIG=1
+else
+  MOSQUITTO_PASSWD_FROM_CONFIG=0
+  # No mosquitto configuration here - fall back to the usual locations, and then to the copy under
+  # extras/ so that a machine without mosquitto installed still gets something useful.
+  for f in /var/lib/mosquitto/passwords /etc/mosquitto/mosquitto_passwords; do
+    if [[ -e "$f" ]]; then
+      MOSQUITTO_PASSWD_FILE="$f"
+      break
+    fi
+  done
+  if [[ -z "$MOSQUITTO_PASSWD_FILE" ]]; then
+    if [[ -e "extras/mosquitto_passwords" ]]; then
+      MOSQUITTO_PASSWD_FILE="extras/mosquitto_passwords"
+      USED_LOCAL_MOSQUITTO_FILE=1
+    else
+      MOSQUITTO_PASSWD_FILE="/var/lib/mosquitto/passwords"
+    fi
   fi
 fi
 
@@ -197,6 +205,13 @@ MOSQUITTO_PASSWD_FAILED=0
 MOSQUITTO_PASSWD_ERROR=""
 if [[ "$MOSQUITTO_PASSWD_MISSING" -eq 1 ]]; then
   echo "Warning: mosquitto_passwd command not found - skipped setting MQTT broker password" >&2
+elif [[ "$MOSQUITTO_PASSWD_FROM_CONFIG" -eq 1 && ! -e "$MOSQUITTO_PASSWD_FILE" ]]; then
+  # Nothing to add an account to - and mosquitto will not be running either, for the same reason.
+  echo "Warning: mosquitto is configured to use ${MOSQUITTO_PASSWD_FILE}, but that file does not exist," >&2
+  echo "so the MQTT broker password was NOT set. Create it, then add this organization to it:" >&2
+  echo "  sudo install -o mosquitto -g mosquitto -m 600 /dev/null \"${MOSQUITTO_PASSWD_FILE}\"" >&2
+  echo "  sudo -u mosquitto mosquitto_passwd -b \"${MOSQUITTO_PASSWD_FILE}\" \"${ORG_ID}\" \"${PASSWORD}\"" >&2
+  MOSQUITTO_PASSWD_FAILED=1
 else
   # Capture stderr without letting `set -e` abort the whole script on failure - the org's config file
   # and DB rows are already written by this point, so a failure here should be reported, not fatal.

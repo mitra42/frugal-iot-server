@@ -28,11 +28,24 @@ if [[ ! -f "${PKG}/frugal-iot-createdb.sql" ]]; then
 fi
 
 # ---- 1. Configuration files, copied only if not already here ----
-COPIED=()   # which files this run actually created, so existing ones are never rewritten below
+COPIED=()      # which files this run actually created, so existing ones are never rewritten below
+DIFFER_TO=()   # files kept that no longer match what this release ships, and where to compare them
+DIFFER_FROM=()
+# copy_if_missing <packaged file> <local file> [compare]
+# "compare" asks for a warning when the file exists but differs from the one this release ships.
+# Only pass it for files nobody is expected to edit - config.yaml, mqtt.yaml and server.yaml are
+# this installation's own settings, so of course they differ, and warning about them every time
+# would train you to ignore the warning that matters.
 copy_if_missing() {
-  local from=$1 to=$2
+  local from=$1 to=$2 compare=${3:-}
   if [[ -e "$to" ]]; then
-    echo "  kept    ${to} (already present)"
+    if [[ "$compare" == compare && -e "$from" ]] && ! cmp -s "$from" "$to"; then
+      DIFFER_TO+=("$to")
+      DIFFER_FROM+=("$from")
+      echo "  kept    ${to} (DIFFERS from this release - see below)"
+    else
+      echo "  kept    ${to} (already present)"
+    fi
   elif [[ -e "$from" ]]; then
     mkdir -p "${to:h}"
     cp "$from" "$to"
@@ -46,12 +59,14 @@ copy_if_missing "${PKG}/config.yaml" "./config.yaml"
 for f in logger.yaml mqtt.yaml server.yaml; do
   copy_if_missing "${PKG}/config.d/${f}" "./config.d/${f}"
 done
+# The schema describes the sensor types the software understands, so a release changing it matters
 for f in "${PKG}"/config.d/schema/*.yaml(N); do
-  copy_if_missing "$f" "./config.d/schema/${f:t}"
+  copy_if_missing "$f" "./config.d/schema/${f:t}" compare
 done
-# Copied so that mosquitto.conf and frugaliot.service can be edited and installed from here
+# Copied so that mosquitto.conf and frugaliot.service can be edited and installed from here. Worth
+# comparing: these get copied on somewhere else (/etc/...), where an old version lingers unnoticed.
 for f in "${PKG}"/extras/*(N); do
-  copy_if_missing "$f" "./extras/${f:t}"
+  copy_if_missing "$f" "./extras/${f:t}" compare
 done
 
 # ---- 1a. Point server.yaml at the web client this instance actually has ----
@@ -102,6 +117,18 @@ if [[ -f "$DB" ]]; then
 else
   sqlite3 "$DB" < "${PKG}/frugal-iot-createdb.sql"
   echo "  created ${DB}"
+fi
+
+if (( ${#DIFFER_TO} )); then
+  echo
+  echo "These files were left as you have them, but this release ships a different version:"
+  for i in {1..${#DIFFER_TO}}; do
+    echo "  ${DIFFER_TO[$i]}"
+    echo "    compare with:  diff ${DIFFER_TO[$i]} ${DIFFER_FROM[$i]}"
+  done
+  echo "Usually that just means you edited it, and there is nothing to do. But a release can also"
+  echo "change one of these files - and anything installed elsewhere from it, such as"
+  echo "/etc/mosquitto/conf.d/frugal-iot.conf, keeps the old content until you copy it again."
 fi
 
 echo

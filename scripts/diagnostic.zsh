@@ -1,0 +1,289 @@
+#!/usr/bin/env zsh
+#
+# Report the state of a Frugal IoT installation, for working out why something in INSTALLATION.md
+# did not do what it said it would. It only looks - it changes nothing.
+#
+# Run it from the directory the server is installed in (the one holding frugal-iot.db):
+#   zsh diagnostic.zsh
+# or, once installed from npm:
+#   npx frugal-iot-diagnostic
+#
+# Paste the whole output into a bug report. Passwords are deliberately not printed: the password
+# file is reported by account name only, and organization configs by name only.
+
+# No "set -e": a failing check should report and carry on, not stop the script.
+setopt no_unset 2>/dev/null
+
+section() { print -r -- ""; print -r -- "===== $* ====="; }
+item()    { print -r -- "  $*"; }
+have()    { command -v "$1" >/dev/null 2>&1; }
+# Ownership and mode of a file, spelled for either Linux or BSD/macOS stat
+fileinfo() {
+  local f=$1
+  if [[ ! -e "$f" ]]; then print -r -- "missing"; return; fi
+  stat -c '%U:%G %a %s bytes' "$f" 2>/dev/null || stat -f '%Su:%Sg %Lp %z bytes' "$f" 2>/dev/null || print -r -- "(cannot stat)"
+}
+
+PROBLEMS=()
+problem() { PROBLEMS+=("$1"); }
+
+section "When and where"
+item "date:        $(date 2>/dev/null)"
+item "host:        $(hostname 2>/dev/null)"
+item "user:        $(id -un 2>/dev/null) (groups: $(id -Gn 2>/dev/null))"
+item "directory:   $PWD"
+
+section "The machine"
+have uname && item "kernel:      $(uname -srm)"
+[[ -r /etc/os-release ]] && item "os:          $(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)"
+[[ -r /proc/device-tree/model ]] && item "board:       $(tr -d '\0' < /proc/device-tree/model)"
+have free && item "memory:      $(free -h | awk '/^Mem:/ {print $3 " used of " $2 ", " $7 " available"}')"
+have df && item "disk (/):    $(df -h / | awk 'NR==2 {print $3 " used of " $2 ", " $4 " free"}')"
+if have timedatectl; then
+  item "clock:       $(timedatectl show -p NTPSynchronized --value 2>/dev/null | sed 's/^yes$/synchronized with a time server/; s/^no$/NOT synchronized - timestamps may be wrong/')"
+fi
+
+section "Software versions"
+for c in node npm sqlite3 zsh mosquitto mosquitto_passwd mosquitto_sub; do
+  if have $c; then
+    case $c in
+      node|npm)            item "$c: $($c -v 2>&1 | head -1)" ;;
+      sqlite3)             item "$c: $(sqlite3 --version 2>&1 | awk '{print $1}')" ;;
+      zsh)                 item "$c: $ZSH_VERSION" ;;
+      mosquitto)           item "$c: $(mosquitto -h 2>&1 | head -1)" ;;
+      *)                   item "$c: present" ;;
+    esac
+  else
+    item "$c: NOT INSTALLED"
+    [[ $c == (node|npm|sqlite3) ]] && problem "$c is not installed - see INSTALLATION.md step A3"
+  fi
+done
+
+section "This installation"
+for f in config.yaml config.d frugal-iot.db data ota node_modules; do
+  if [[ -e $f ]]; then item "$f: present"; else item "$f: MISSING"; fi
+done
+[[ ! -e frugal-iot.db ]] && problem "No frugal-iot.db here - either the wrong directory, or 'npx frugal-iot-init' has not been run"
+if [[ -d node_modules/frugal-iot-server ]]; then
+  item "frugal-iot-server: $(node -e 'console.log(require("./node_modules/frugal-iot-server/package.json").version)' 2>/dev/null)"
+  item "frugal-iot-client: $(node -e 'console.log(require("./node_modules/frugal-iot-client/package.json").version)' 2>/dev/null)"
+  item "frugal-iot-logger: $(node -e 'console.log(require("./node_modules/frugal-iot-logger/package.json").version)' 2>/dev/null)"
+  item "commands:    $(ls node_modules/.bin 2>/dev/null | grep frugal | tr '\n' ' ')"
+else
+  item "frugal-iot-server is not installed in this directory"
+fi
+if [[ -f config.d/mqtt.yaml ]]; then item "broker configured as: $(grep -h '^broker:' config.d/mqtt.yaml 2>/dev/null)"; fi
+if [[ -d config.d/organizations ]]; then
+  # Names only - these files contain the broker password.
+  # (N) makes a non-matching glob expand to nothing rather than erroring - and the list has to be
+  # tested before use, because "ls" with no arguments would list the current directory instead.
+  ORGS=(config.d/organizations/*.yaml(N:t:r))
+  if (( ${#ORGS} )); then
+    item "organizations: ${ORGS}"
+  else
+    item "organizations: none defined yet"
+  fi
+fi
+if [[ -f frugal-iot.db ]] && have sqlite3; then
+  item "accounts:    $(sqlite3 frugal-iot.db 'SELECT group_concat(username, ", ") FROM users;' 2>/dev/null)"
+fi
+
+section "Mosquitto configuration"
+if [[ -f /etc/mosquitto/mosquitto.conf ]]; then
+  item "/etc/mosquitto/mosquitto.conf: $(fileinfo /etc/mosquitto/mosquitto.conf)"
+else
+  item "/etc/mosquitto/mosquitto.conf: missing - is mosquitto installed?"
+fi
+item "files in /etc/mosquitto/conf.d:"
+for f in /etc/mosquitto/conf.d/*(N); do
+  item "  ${f}: $(fileinfo $f)"
+  grep -nE '^[[:space:]]*(listener|protocol|password_file|allow_anonymous)' $f 2>/dev/null | sed 's/^/      /'
+done
+[[ -z "$(print -r -- /etc/mosquitto/conf.d/*(N))" ]] && problem "Nothing in /etc/mosquitto/conf.d - the Frugal IoT config was never copied there (step A5)"
+
+# Which password file does the running configuration actually name?
+# mosquitto's include_dir only loads files ending in .conf, so look at exactly those, last one wins
+CONFIGURED_PWFILE=$(grep -hE '^[[:space:]]*password_file[[:space:]]' /etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*.conf(N) 2>/dev/null | tail -1 | awk '{print $2}')
+section "Mosquitto password file"
+if [[ -n "$CONFIGURED_PWFILE" ]]; then
+  item "configuration names: $CONFIGURED_PWFILE"
+  item "  that file:         $(fileinfo $CONFIGURED_PWFILE)"
+  if [[ ! -e "$CONFIGURED_PWFILE" ]]; then
+    problem "Mosquitto is configured to use $CONFIGURED_PWFILE but that file does not exist - it will refuse to start"
+  else
+    # Account names only, never the hashes
+    item "  accounts in it:    $(cut -d: -f1 "$CONFIGURED_PWFILE" 2>/dev/null | tr '\n' ' ')"
+    [[ ! -s "$CONFIGURED_PWFILE" ]] && item "  (the file is empty - no accounts yet)"
+  fi
+else
+  item "no password_file line found in any mosquitto configuration"
+  problem "No password_file configured - the broker would allow anonymous access or reject everything"
+fi
+# The copy in this installation is what step A5 tells you to put into /etc - if the two disagree,
+# either the copy never happened or the installed package is older than the instructions.
+if [[ -f extras/mosquitto.conf ]]; then
+  item "this installation's extras/mosquitto.conf names: $(grep -hE '^[[:space:]]*password_file' extras/mosquitto.conf 2>/dev/null | awk '{print $2}')"
+  if [[ -n "$CONFIGURED_PWFILE" ]] && ! diff -q extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf >/dev/null 2>&1; then
+    problem "extras/mosquitto.conf here differs from /etc/mosquitto/conf.d/frugal-iot.conf - if you followed step A5 with an older installed package, copy it again after upgrading"
+  fi
+fi
+item "candidate locations, whether or not configured:"
+for f in /var/lib/mosquitto/passwords /etc/mosquitto/mosquitto_passwords; do
+  item "  ${f}: $(fileinfo $f)"
+done
+item "directories they live in:"
+for d in /var/lib/mosquitto /etc/mosquitto; do
+  item "  ${d}: $(fileinfo $d)"
+done
+
+section "Mosquitto service"
+if have systemctl; then
+  item "enabled:     $(systemctl is-enabled mosquitto 2>&1)"
+  item "active:      $(systemctl is-active mosquitto 2>&1)"
+  [[ "$(systemctl is-active mosquitto 2>/dev/null)" != "active" ]] && problem "Mosquitto is not running - see its own log, quoted above under 'Mosquitto service'"
+  print -r -- "  --- last 12 journal lines (systemd's view: usually only an exit code) ---"
+  journalctl -u mosquitto -n 12 --no-pager 2>&1 | sed 's/^/      /'
+else
+  item "systemctl not available on this machine"
+fi
+# Debian's mosquitto logs to a file rather than the journal, so this is where the real reason is.
+MOSQUITTO_LOG=$(grep -hE '^[[:space:]]*log_dest[[:space:]]+file' /etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*(N) 2>/dev/null | tail -1 | awk '{print $3}')
+[[ -z "$MOSQUITTO_LOG" ]] && MOSQUITTO_LOG=/var/log/mosquitto/mosquitto.log
+item "its own log file: ${MOSQUITTO_LOG} ($(fileinfo $MOSQUITTO_LOG))"
+if [[ -r "$MOSQUITTO_LOG" ]]; then
+  print -r -- "  --- last 12 lines of that log (this is where startup errors appear) ---"
+  tail -12 "$MOSQUITTO_LOG" 2>&1 | sed 's/^/      /'
+elif [[ -e "$MOSQUITTO_LOG" ]]; then
+  # The log belongs to the mosquitto user, so reading it needs privilege. Try without prompting -
+  # on Raspberry Pi OS the first user has passwordless sudo, so this usually just works.
+  if have sudo && MOSQUITTO_LOG_TAIL=$(sudo -n tail -12 "$MOSQUITTO_LOG" 2>/dev/null); then
+    print -r -- "  --- last 12 lines of that log, read with sudo (startup errors appear here) ---"
+    print -r -- "$MOSQUITTO_LOG_TAIL" | sed 's/^/      /'
+  else
+    item "  it belongs to $(fileinfo $MOSQUITTO_LOG | awk '{print $1}') so it cannot be read as $(id -un)."
+    item "  Re-run this whole script with sudo to include it:  sudo zsh $0"
+    problem "Could not read ${MOSQUITTO_LOG}, which is where Mosquitto explains itself - re-run with sudo"
+  fi
+fi
+
+section "Listening ports"
+PORTS=""
+if have ss; then
+  PORTS=$(ss -tln 2>/dev/null | grep -E ':(1883|9012|8080)\b')
+elif have netstat; then
+  PORTS=$(netstat -an 2>/dev/null | grep -E '[.:](1883|9012|8080) ')
+else
+  item "neither ss nor netstat available"
+fi
+if [[ -n "$PORTS" ]]; then
+  print -r -- "$PORTS" | sed 's/^/  /'
+else
+  item "none of 1883 (mqtt), 9012 (websockets), 8080 (web) are listening"
+fi
+
+section "Frugal IoT server service"
+if have systemctl; then
+  if systemctl list-unit-files 2>/dev/null | grep -q '^frugaliot.service'; then
+    item "enabled:     $(systemctl is-enabled frugaliot 2>&1)"
+    item "active:      $(systemctl is-active frugaliot 2>&1)"
+    print -r -- "  --- last 20 journal lines ---"
+    journalctl -u frugaliot -n 20 --no-pager 2>&1 | sed 's/^/      /'
+  else
+    item "no frugaliot service installed yet (step A8 not reached)"
+  fi
+else
+  item "systemctl not available on this machine"
+fi
+
+section "Name resolution (step A2, A4)"
+# The broker URL in config.d/mqtt.yaml has to resolve from every machine that uses it - this one,
+# and whatever browser or node talks to it.
+BROKER_URL=$(grep -h '^broker:' config.d/mqtt.yaml 2>/dev/null | awk '{print $2}')
+BROKER_HOST=${${BROKER_URL#*://}%%:*}
+if [[ -n "$BROKER_HOST" ]]; then
+  item "broker host: $BROKER_HOST"
+  if have getent && BROKER_IP=$(getent hosts "$BROKER_HOST" 2>/dev/null | head -1 | awk '{print $1}') && [[ -n "$BROKER_IP" ]]; then
+    item "  resolves to $BROKER_IP from this machine"
+  elif have ping && ping -c1 -W2 "$BROKER_HOST" >/dev/null 2>&1; then
+    item "  answers ping from this machine"
+  else
+    item "  DOES NOT RESOLVE from this machine"
+    problem "The broker host '$BROKER_HOST' does not resolve here - the server's own logger cannot connect either"
+  fi
+  [[ "$BROKER_HOST" == *.local ]] && item "  note: .local names do not resolve on most Android phones - use an IP address there"
+fi
+MYADDRS=$( (have ip && ip -4 -o addr show scope global | awk '{print $2"="$4}') 2>/dev/null | tr '\n' ' ')
+item "this machine's addresses: ${MYADDRS:-(could not determine)}"
+
+section "Broker authentication (steps A5, A6)"
+if have mosquitto_sub; then
+  # A wrong password must be refused - that is the check in step A5
+  WRONGOUT=$(mosquitto_sub -h localhost -u nobody -P wrong -t '#' -W 2 2>&1)
+  if [[ "$WRONGOUT" == *"not authorised"* ]]; then
+    item "wrong password: correctly refused"
+  elif [[ "$WRONGOUT" == *"Connection refused"* || "$WRONGOUT" == *"Error"* ]]; then
+    item "wrong password: broker did not answer - $WRONGOUT"
+    problem "The broker is not answering on localhost:1883"
+  else
+    item "wrong password: ACCEPTED - the broker is not requiring credentials"
+    problem "A wrong password was not refused - check password_file is set in the mosquitto config"
+  fi
+  # Then each configured organization should be able to connect with its own credentials.
+  # The password is read from the config and used, never printed.
+  for f in config.d/organizations/*.yaml(N); do
+    ORG=${f:t:r}
+    ORG_PW=$(sed -n 's/^mqtt_password:[[:space:]]*//p' "$f" 2>/dev/null | head -1 | tr -d '"'"'"'')
+    if [[ -z "$ORG_PW" ]]; then
+      item "organization $ORG: no mqtt_password in $f"
+      continue
+    fi
+    ORGOUT=$(mosquitto_sub -h localhost -u "$ORG" -P "$ORG_PW" -t '#' -W 2 2>&1)
+    if [[ "$ORGOUT" == *"not authorised"* ]]; then
+      item "organization $ORG: REFUSED by the broker"
+      problem "Organization '$ORG' cannot log in to the broker - its password in $f does not match the broker's password file (step A6)"
+    elif [[ "$ORGOUT" == *"Connection refused"* ]]; then
+      item "organization $ORG: broker not answering"
+    else
+      item "organization $ORG: authenticates, and saw $(print -r -- "$ORGOUT" | grep -c . ) message(s) in a 2 second sample"
+    fi
+  done
+else
+  item "mosquitto_sub not installed - cannot test broker logins (sudo apt install mosquitto-clients)"
+fi
+
+section "Web server (step A7)"
+WEBPORT=$(grep -h '^port:' config.d/server.yaml 2>/dev/null | awk '{print $2}')
+[[ -z "$WEBPORT" ]] && WEBPORT=8080
+if have curl; then
+  HOMECODE=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost:${WEBPORT}/ 2>/dev/null)
+  if [[ "$HOMECODE" == "000" ]]; then
+    item "nothing is answering on port ${WEBPORT} - the server is not running"
+    item "  (expected if you have not reached step A7 yet; otherwise start it, or see the frugaliot service below)"
+  else
+    item "GET /            -> ${HOMECODE} (expect 200)"
+    item "GET /config.json -> $(curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost:${WEBPORT}/config.json 2>/dev/null) (expect 401 when not logged in)"
+    [[ "$HOMECODE" != "200" ]] && problem "The web server answered ${HOMECODE} rather than 200 on port ${WEBPORT}"
+  fi
+else
+  item "curl not installed - cannot test the web server"
+fi
+
+section "Logged data (step A9)"
+if [[ -d data ]]; then
+  DATADIRS=(data/*(N/))
+  if (( ${#DATADIRS} )); then
+    for d in $DATADIRS; do
+      item "${d}: $(find $d -type f 2>/dev/null | wc -l | tr -d ' ') files, newest $(ls -t $d/**/*(N.om[1]) 2>/dev/null | head -1)"
+    done
+  else
+    item "data/ is empty - no readings logged yet, which is expected until a node reports (step A9)"
+  fi
+fi
+
+section "Summary"
+if (( ${#PROBLEMS} == 0 )); then
+  item "No problems detected by these checks."
+else
+  for p in $PROBLEMS; do item "PROBLEM: $p"; done
+fi
+print -r -- ""

@@ -179,7 +179,6 @@ address does not change. Sensor nodes and phones then have something stable to t
 ```
 sudo apt install -y nodejs npm sqlite3 zsh
 node -v
-npm -v
 ```
 
 * `nodejs` — the server needs **Node 18 or later**. Current Raspberry Pi OS (Debian 13, trixie)
@@ -594,9 +593,19 @@ journalctl -u frugaliot -n 30
 npm ls frugal-iot-server
 ```
 
-> Because `frugal-iot-init` leaves existing files alone, a *new setting added to a file you already
-> have* will not appear by itself. If a release note mentions one, compare your copy against the
-> packaged original, for example:
+`frugal-iot-init` leaves your files alone, so watch its output for a section headed **"These files
+were left as you have them, but this release ships a different version"**. It gives you the `diff`
+command for each. That matters most for the files you copy somewhere else — a changed
+`extras/mosquitto.conf` or `extras/frugaliot.service` does nothing until you install it again:
+
+```
+sudo cp extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf && sudo systemctl restart mosquitto
+sudo cp extras/frugaliot.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart frugaliot
+```
+
+> It does not compare `config.yaml`, `config.d/mqtt.yaml` or `config.d/server.yaml`, because those
+> hold your own settings and would differ every time. If a release note mentions a new setting in
+> one of them, compare it yourself:
 > `diff config.d/server.yaml node_modules/frugal-iot-server/config.d/server.yaml`
 
 Your organizations, accounts, database and logged data are untouched by an upgrade — they live in
