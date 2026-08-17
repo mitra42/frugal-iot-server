@@ -17,7 +17,7 @@ data and database; npm keeps the software itself under it in `node_modules`.
 mkdir ~/frugal-iot
 cd ~/frugal-iot
 npm install frugal-iot-server
-npx frugal-iot-init
+npx --no frugal-iot-init
 ```
 `frugal-iot-init` copies in the configuration files, creates the `data`, `ota` and
 `config.d/organizations` directories, and creates the database. It never overwrites anything
@@ -27,24 +27,24 @@ Edit `config.yaml` and `config.d/mqtt.yaml` (which broker to talk to) if the def
 
 The database is created with a `superuser` account that has no password, so give it one:
 ```
-npx frugal-iot-setpassword superuser "<a-good-password>"
+npx --no frugal-iot-setpassword superuser "<a-good-password>"
 ```
 
 Then add an organization - this writes its yaml file into `config.d/organizations`, creates a
 login account of the same name with its permissions, and sets its password on the MQTT broker:
 ```
-npx frugal-iot-addorganization <org-id> <org-name> <email> <phone> <broker-password>
+npx --no frugal-iot-addorganization <org-id> <org-name> <email> <phone> <broker-password>
 ```
 
 That password is the one used by the nodes and the broker. It will also work for login, so it is
 recommended to give the login its own:
 ```
-npx frugal-iot-setpassword <org-id> <login-password>
+npx --no frugal-iot-setpassword <org-id> <login-password>
 ```
 
 Now start it:
 ```
-npx frugal-iot-server
+npx --no frugal-iot-server
 ```
 If its working correctly you should see something like
 ```
@@ -70,7 +70,7 @@ and receives data from nodes attached to it.
 
 Open a browser pointing at for example `localhost:8080` and you should see the UI.
 
-To upgrade later: `npm update frugal-iot-server` then `npx frugal-iot-init`.
+To upgrade later: `npm update frugal-iot-server` then `npx --no frugal-iot-init`.
 
 #### Developing the server, client or logger
 

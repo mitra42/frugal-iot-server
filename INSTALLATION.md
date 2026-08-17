@@ -22,7 +22,7 @@ see [README.md](https://github.com/mitra42/frugal-iot-server/blob/main/README.md
 and go to [Upgrading](#upgrading).
 
 **If a step does not do what it says here**, once you reach step A4 you can run
-`npx frugal-iot-diagnostic` from your install directory — it inspects the whole installation and
+`npx --no frugal-iot-diagnostic` from your install directory — it inspects the whole installation and
 reports what looks wrong. See [When something does not work](#when-something-does-not-work).
 
 ---
@@ -209,7 +209,7 @@ That pulls in the web UI (`frugal-iot-client`) and the logger (`frugal-iot-logge
 Expect a few minutes on a Pi. Then set the directory up:
 
 ```
-npx frugal-iot-init
+npx --no frugal-iot-init
 ```
 
 This copies in the configuration files, creates the `data`, `ota` and `config.d/organizations`
@@ -316,21 +316,21 @@ mosquitto_sub -h localhost -u nobody -P wrong -t '#'
 requires an account. There are no accounts yet; step A6 creates the first one, and there is a
 fuller test at the end of it.
 
-> If Mosquitto did not start, `npx frugal-iot-diagnostic` will tell you why in one step — most often
+> If Mosquitto did not start, `npx --no frugal-iot-diagnostic` will tell you why in one step — most often
 > that the password file its configuration names does not exist. Note that `systemctl status` and
 > the journal only show an exit code; the actual reason is in Mosquitto's own log, which the
 > diagnostic reads for you. See [When something does not work](#when-something-does-not-work).
 
 ### A6. Create your accounts and your organization
 
-The database was created by `npx frugal-iot-init` in step A4, holding two accounts. One is
+The database was created by `npx --no frugal-iot-init` in step A4, holding two accounts. One is
 `everyone`, which nobody logs in as — it exists so that permissions granted to all logged-in users
 have somewhere to live. The other is `superuser`, this server's administrator, which is given admin
 rights over every organization you create. It starts with no password and cannot be logged into
 until you give it one:
 
 ```
-npx frugal-iot-setpassword superuser "<a-good-password>"
+npx --no frugal-iot-setpassword superuser "<a-good-password>"
 ```
 
 Use the same command later if you ever need to reset a password — for `superuser` or for any
@@ -339,7 +339,7 @@ other account.
 Frugal IoT groups devices as **organization → project → device**. Create yours:
 
 ```
-npx frugal-iot-addorganization dev "My Farm" you@example.com +61123456789 "<broker-password>"
+npx --no frugal-iot-addorganization dev "My Farm" you@example.com +61123456789 "<broker-password>"
 ```
 
 The arguments are: organization id, display name, your email, your phone (`+` and digits only),
@@ -368,7 +368,7 @@ now to something only you know — the broker credential is unaffected, and noth
 in step:
 
 ```
-npx frugal-iot-setpassword dev "<your-own-login-password>"
+npx --no frugal-iot-setpassword dev "<your-own-login-password>"
 ```
 
 **Now the full broker test.** In your SSH session subscribe as the organization, using the broker
@@ -392,7 +392,7 @@ window onto what your nodes are doing. (`Ctrl-C` stops it.)
 
 If you get `Connection Refused: not authorised`, the password does not match the one in
 `config.d/organizations/dev.yaml`, or Mosquitto has not re-read the file since it changed.
-`npx frugal-iot-diagnostic` checks this for every organization you have, and reports which ones the
+`npx --no frugal-iot-diagnostic` checks this for every organization you have, and reports which ones the
 broker actually accepts.
 
 ### A7. Start the server by hand and check it
@@ -402,7 +402,7 @@ so this only works there:
 
 ```
 cd ~/frugal-iot
-npx frugal-iot-server
+npx --no frugal-iot-server
 ```
 
 > If npx answers with `Need to install the following packages: frugal-iot-server` and asks to
@@ -466,7 +466,7 @@ actually resolve: a phone that cannot look up `.local` names needs the Pi's IP a
 Until a sensor node reports in there will be no data to look at, but the dashboard should load.
 
 > Anything wrong here — the server not starting, `mqtt dev close` instead of `connect`, the page not
-> loading, the MQTT status not reaching *connected* — is worth a `npx frugal-iot-diagnostic` in
+> loading, the MQTT status not reaching *connected* — is worth a `npx --no frugal-iot-diagnostic` in
 > another terminal before digging in by hand. It tests the same chain from the Pi's side: broker
 > logins, the three ports, and the web server.
 
@@ -475,7 +475,7 @@ Stop the server with `Ctrl-C` before continuing.
 ### A8. Run the server as a service
 
 So that it starts automatically at boot and restarts if it crashes. The file that
-`npx frugal-iot-init` put in `extras/` already describes this installation — user `pi`, installed
+`npx --no frugal-iot-init` put in `extras/` already describes this installation — user `pi`, installed
 into `/home/pi/frugal-iot` — so it needs no editing:
 
 ```
@@ -593,7 +593,7 @@ From your install directory:
 
 ```
 cd ~/frugal-iot
-npx frugal-iot-diagnostic
+npx --no frugal-iot-diagnostic
 ```
 
 It only looks — it changes nothing — and it ends with a **Summary** of anything it recognises as
@@ -614,7 +614,7 @@ broken. It covers most of the checks scattered through this guide, in one pass:
 Two things to know:
 
 * Mosquitto's log belongs to the `mosquitto` user. The script reads it with `sudo` where it can; if
-  it says it could not, run the whole thing as `sudo npx frugal-iot-diagnostic`.
+  it says it could not, run the whole thing as `sudo npx --no frugal-iot-diagnostic`.
 * The output is safe to paste into a bug report. Passwords are deliberately not printed — the
   password file is listed by account name only, and organizations by name.
 
@@ -631,7 +631,7 @@ To move an existing server to a newer release, from the directory you installed 
 ```
 cd ~/frugal-iot
 npm update frugal-iot-server
-npx frugal-iot-init
+npx --no frugal-iot-init
 sudo systemctl restart frugaliot
 ```
 
@@ -771,7 +771,7 @@ long as it is producing output it is working. `--foreground-scripts` is what let
 If the board locks up again, pull the power, boot it, and re-run the same command - work already
 done is kept, so each attempt gets further.
 
-Then `npx frugal-iot-init` and continue from **step A5**.
+Then `npx --no frugal-iot-init` and continue from **step A5**.
 
 > Most of what is being installed is not Frugal IoT. The logger depends on `firebase-admin`, which
 > brings in the Google Cloud SDK - around 40 packages and 30 MB - and that is what the board is

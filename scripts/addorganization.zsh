@@ -2,13 +2,13 @@
 #
 # Add a new organization to Frugal IoT: config file, user account, permissions, and mqtt credentials.
 # Run from the server's own directory, the one holding frugal-iot.db (all paths below are relative
-# to there) - prepare it first with "npx frugal-iot-init".
+# to there) - prepare it first with "npx --no frugal-iot-init".
 #
 # Usage:
-#   npx frugal-iot-addorganization <org-id> <org-name> <email> <phone> <password>
+#   npx --no frugal-iot-addorganization <org-id> <org-name> <email> <phone> <password>
 #   scripts/addorganization.zsh <org-id> <org-name> <email> <phone> <password>
 # Example:
-#   npx frugal-iot-addorganization abc "Clever People" foo@abc.org +61123456 "secret!123"
+#   npx --no frugal-iot-addorganization abc "Clever People" foo@abc.org +61123456 "secret!123"
 
 set -euo pipefail
 
@@ -59,7 +59,7 @@ fi
 
 if [[ ! -f "$DB" ]]; then
   echo "Error: database ${DB} not found in this directory - prepare the directory first with:" >&2
-  echo "  npx frugal-iot-init" >&2
+  echo "  npx --no frugal-iot-init" >&2
   exit 1
 fi
 

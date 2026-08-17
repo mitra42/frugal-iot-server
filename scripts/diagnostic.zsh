@@ -6,7 +6,7 @@
 # Run it from the directory the server is installed in (the one holding frugal-iot.db):
 #   zsh diagnostic.zsh
 # or, once installed from npm:
-#   npx frugal-iot-diagnostic
+#   npx --no frugal-iot-diagnostic
 #
 # Paste the whole output into a bug report. Passwords are deliberately not printed: the password
 # file is reported by account name only, and organization configs by name only.
@@ -63,7 +63,7 @@ section "This installation"
 for f in config.yaml config.d frugal-iot.db data ota node_modules; do
   if [[ -e $f ]]; then item "$f: present"; else item "$f: MISSING"; fi
 done
-[[ ! -e frugal-iot.db ]] && problem "No frugal-iot.db here - either the wrong directory, or 'npx frugal-iot-init' has not been run"
+[[ ! -e frugal-iot.db ]] && problem "No frugal-iot.db here - either the wrong directory, or 'npx --no frugal-iot-init' has not been run"
 if [[ -d node_modules/frugal-iot-server ]]; then
   item "frugal-iot-server: $(node -e 'console.log(require("./node_modules/frugal-iot-server/package.json").version)' 2>/dev/null)"
   item "frugal-iot-client: $(node -e 'console.log(require("./node_modules/frugal-iot-client/package.json").version)' 2>/dev/null)"
@@ -71,6 +71,20 @@ if [[ -d node_modules/frugal-iot-server ]]; then
   item "commands:    $(ls node_modules/.bin 2>/dev/null | grep frugal | tr '\n' ' ')"
 else
   item "frugal-iot-server is not installed in this directory"
+fi
+# sqlite3 is the one dependency with compiled code in it. Where no ready-made binary exists for the
+# platform (32-bit ARM, so any Pi Zero W or Pi 1) npm compiles it during install - and if that fails,
+# npm can still report success, leaving a package directory with nothing usable inside it. Nothing
+# else here looks wrong when that happens, and the server simply refuses to start.
+if [[ -d node_modules/sqlite3 ]]; then
+  if node -e "require('sqlite3')" >/dev/null 2>&1; then
+    item "sqlite3 native module: builds and loads OK"
+  else
+    item "sqlite3 native module: PRESENT BUT NOT BUILT"
+    problem "node_modules/sqlite3 has no compiled binding, so the server cannot start. Build it with:
+      npm rebuild sqlite3 --foreground-scripts
+    (about 40 minutes on a Pi Zero W; needs build-essential python3-dev python3-setuptools)"
+  fi
 fi
 if [[ -f config.d/mqtt.yaml ]]; then item "broker configured as: $(grep -h '^broker:' config.d/mqtt.yaml 2>/dev/null)"; fi
 if [[ -d config.d/organizations ]]; then
@@ -199,7 +213,8 @@ section "Name resolution (step A2, A4)"
 # The broker URL in config.d/mqtt.yaml has to resolve from every machine that uses it - this one,
 # and whatever browser or node talks to it.
 BROKER_URL=$(grep -h '^broker:' config.d/mqtt.yaml 2>/dev/null | awk '{print $2}')
-BROKER_HOST=${${BROKER_URL#*://}%%:*}
+# Strip scheme, then any path (wss://host/wss), then any port - leaving just the hostname
+BROKER_HOST=${${${BROKER_URL#*://}%%/*}%%:*}
 if [[ -n "$BROKER_HOST" ]]; then
   item "broker host: $BROKER_HOST"
   if have getent && BROKER_IP=$(getent hosts "$BROKER_HOST" 2>/dev/null | head -1 | awk '{print $1}') && [[ -n "$BROKER_IP" ]]; then

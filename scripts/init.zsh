@@ -5,7 +5,7 @@
 # in node_modules (or which sits in a git clone).
 #
 # Usage:
-#   npx frugal-iot-init          # after: npm install frugal-iot-server
+#   npx --no frugal-iot-init          # after: npm install frugal-iot-server
 #   scripts/init.zsh             # in a git clone, where the config files are already present
 #
 # Safe to run again: existing files are left exactly as they are, only missing ones are added,
@@ -133,6 +133,6 @@ fi
 
 echo
 echo "Ready. Next:"
-echo "  npx frugal-iot-setpassword superuser <password>            # so you can log in as the administrator"
-echo "  npx frugal-iot-addorganization <org-id> <name> <email> <phone> <broker-password>"
-echo "  npx frugal-iot-server                                      # start it"
+echo "  npx --no frugal-iot-setpassword superuser <password>            # so you can log in as the administrator"
+echo "  npx --no frugal-iot-addorganization <org-id> <name> <email> <phone> <broker-password>"
+echo "  npx --no frugal-iot-server                                      # start it"

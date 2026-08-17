@@ -5,10 +5,10 @@
 #
 # Typically used on a new installation to give the seeded 'superuser' account a password,
 # since the database is created with that account having none:
-#   npx frugal-iot-setpassword superuser "secret!123"
+#   npx --no frugal-iot-setpassword superuser "secret!123"
 #
 # Usage:
-#   npx frugal-iot-setpassword <username> <password>
+#   npx --no frugal-iot-setpassword <username> <password>
 #   scripts/setpassword.zsh <username> <password>
 
 set -euo pipefail
@@ -38,7 +38,7 @@ fi
 
 if [[ ! -f "$DB" ]]; then
   echo "Error: database ${DB} not found in this directory - prepare the directory first with:" >&2
-  echo "  npx frugal-iot-init" >&2
+  echo "  npx --no frugal-iot-init" >&2
   exit 1
 fi
 
