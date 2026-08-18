@@ -5,43 +5,60 @@ an MQTT broker (Mosquitto), the Frugal IoT server, the logger that writes sensor
 and the web UI. Once installed, the Pi works **offline** — your sensor nodes talk to the Pi,
 and you view the data from a phone or laptop on the same Wi-Fi. No internet needed after setup.
 
-Two hardware paths are covered:
-
-* [Raspberry Pi 4](#part-a--raspberry-pi-4) — the recommended, tested path.
-* [Raspberry Pi Zero W](#part-b--raspberry-pi-zero-w) — smaller and cheaper, **not yet tested**, see the open questions in that section.
-
 If you already have a working Linux server (not a Pi), you do not need this document —
 see [README.md](https://github.com/mitra42/frugal-iot-server/blob/main/README.md) instead.
 
-> **Status:** the Raspberry Pi 4 path has been followed end to end on hardware (see
-> [Tested on](#tested-on)), and corrected from what that run found. Part B, and HTTPS/OTA in step
-> A10, are not written yet. Remaining uncertainties are listed under
-> [Open questions](#open-questions) — please add your findings there as you go.
+**Read the steps in order.** Anything specific to one board is marked in the step it belongs to,
+like this:
+
+> **Pi Zero W:** extra detail that only applies to a Zero W. Skip these on a Pi 4.
+
+> **Status:** followed on hardware — a Raspberry Pi 4 through step 9, and a Pi Zero W through step 8
+> (see [Tested on](#tested-on)) — and corrected from what those runs found. HTTPS/OTA in step 10 is
+> not written yet. Remaining uncertainties are under [Open questions](#open-questions) — please add
+> your findings there as you go.
 
 **Already have a Frugal IoT server running and just want a newer version?** Skip everything below
 and go to [Upgrading](#upgrading).
 
-**If a step does not do what it says here**, once you reach step A4 you can run
+**If a step does not do what it says here**, once you reach step 4 you can run
 `npx --no frugal-iot-diagnostic` from your install directory — it inspects the whole installation and
 reports what looks wrong. See [When something does not work](#when-something-does-not-work).
 
 ---
 
-## Part A — Raspberry Pi 4
+## Which Raspberry Pi
 
-### A0. What you need before you start
+Any of these work. What differs is only how long the install takes, and how much of a fight it is:
+
+| Board | Install | Notes |
+| --- | --- | --- |
+| **Pi 4** (or Pi 5, Pi 3) | About half an hour | The straightforward path. 64-bit, everything installs as ready-made binaries. |
+| **Pi Zero 2 W** | Expect longer | 64-bit, so it should avoid the long compile below, but shares the Zero's 512 MB. Not yet tested. |
+| **Pi Zero W** (the original) | Allow an afternoon | 32-bit ARMv6. One dependency has to be compiled — about 40 minutes — and 512 MB of RAM is not enough without adding swap. Tested and works. |
+
+A Zero W runs the server perfectly well once installed. It is *installing* that is slow, because a
+single 1 GHz core has to unpack several hundred packages and compile one of them.
+
+### 0. What you need before you start
 
 **Hardware**
 
-* Raspberry Pi 4 Model B. Any RAM size — a running server uses around 250 MB, so even the 1 GB
-  model has plenty of room. (Measured on a 4 GB Pi 4: 231 MB in use with the server running.)
+* A Raspberry Pi, per the table above. Any RAM size — a running server uses around 250 MB.
+  (Measured on a 4 GB Pi 4: 231 MB in use with the server running.)
 * A microSD card. 8 GB is enough for the system and software — a working install occupies about
   5 GB — but sensor data accumulates on this card for as long as the server runs, so 16 GB or larger
   is the safer choice. Class 10 / A1 or better.
-* The official Raspberry Pi USB-C power supply (5 V / 3 A). Phone chargers frequently cause
-  random reboots and corrupted SD cards — this is the single most common cause of "it doesn't work".
+* The official Raspberry Pi power supply for your board — USB-C on a Pi 4, micro-USB on a Zero.
+  Phone chargers frequently cause random reboots and corrupted SD cards — this is the single most
+  common cause of "it doesn't work".
 * A way to write the SD card from your laptop: a built-in SD slot or a USB card reader.
 * Note that you will often need an adapter from the SD format the Pi uses to the SD format of most laptop readers.
+
+> **Pi Zero W:** its Wi-Fi is 2.4 GHz only, so it cannot see a 5 GHz-only network. It has no
+> Ethernet socket either, so the cable trick in step 2 is unavailable — have the micro-HDMI cable
+> and a keyboard to hand instead. Note micro-USB for power and a micro-USB OTG adapter for the
+> keyboard: different cables from a Pi 4.
 
 **Software and information**
 
@@ -60,18 +77,20 @@ reports what looks wrong. See [When something does not work](#when-something-doe
 **Have these to hand in case the headless setup does not come up**
 
 * An Ethernet cable from the Pi to your router — the simplest way in if the Pi does not appear on
-  the Wi-Fi, and you can then sort the Wi-Fi out over SSH (step A2).
+  the Wi-Fi, and you can then sort the Wi-Fi out over SSH (step 2).
 * A micro-HDMI to HDMI cable plus a monitor, and a USB keyboard — for when the Pi is nowhere near the
   router, or you want to see boot messages.
 
-### A1. Write the operating system to the SD card
+### 1. Write the operating system to the SD card
 
-We use **Raspberry Pi OS Lite (64-bit)** — the version with no desktop. The Pi is a server;
+We use **Raspberry Pi OS Lite** — the version with no desktop. The Pi is a server;
 a desktop would only consume memory and SD card space.
 
 1. Insert the SD card into your laptop and start Raspberry Pi Imager.
-2. **Choose Device** → *Raspberry Pi 4*.
+2. **Choose Device** → your board.
 3. **Choose OS** → *Raspberry Pi OS (other)* → *Raspberry Pi OS Lite (64-bit)*.
+   * **On a Pi Zero W choose *Raspberry Pi OS Lite (32-bit)*** — the 64-bit images will not boot on
+     its ARMv6 processor. (A Pi Zero **2** W is 64-bit, so it takes the 64-bit image like a Pi 4.)
 4. **Choose Storage** → your SD card. Check the size shown matches your card — this erases it.
 5. Click **Next**. When asked *"Would you like to apply OS customisation settings?"*, choose
    **Edit Settings** — everything below depends on it.
@@ -85,7 +104,7 @@ a desktop would only consume memory and SD card space.
      produces a key that fails even though the password was right.
    * If the Pi does not join the network, a mistyped SSID or password is much the likeliest cause -
      neither is echoed back to you here, and Imager combines the two into a key, so a slip in either
-     looks the same later. Step A2 fixes it in a couple of minutes with `nmtui`.
+     looks the same later. Step 2 fixes it in a couple of minutes with `nmtui`.
    * A WPA3 network cannot use the key Imager derives at all, so on one of those expect to finish the
      Wi-Fi setup with `nmtui` regardless.
 10. Enable SSH, either choose *Use password authentication* or paste your public key if you already use SSH keys.
@@ -99,7 +118,7 @@ Eject the card, put it in the Pi, connect power.
 The first boot resizes the filesystem and reboots itself. Give it **two to three minutes** before
 expecting it to answer.
 
-### A2. Log in over the network
+### 2. Log in over the network
 
 From your laptop's terminal:
 
@@ -108,6 +127,8 @@ ssh pi@frugaliot.local
 ```
 
 Say `yes` to the fingerprint question, then give the password you set in Imager.
+
+**If that logged you in, go straight to step 3.** The rest of this step is for when it did not.
 
 **If `frugaliot.local` is not found**, the `.local` (mDNS) name is not reaching you. In order of ease:
 
@@ -118,7 +139,7 @@ Say `yes` to the fingerprint question, then give the password you set in Imager.
   up an address, and `ssh pi@frugaliot.local` then works over the cable. This is the least effort
   way in if the Pi is within reach of the router, and once you are logged in you can sort the Wi-Fi
   out over SSH with `nmtui` as below, no monitor or keyboard needed. Unplug the cable afterwards and
-  check that Wi-Fi alone still gets you in.
+  check that Wi-Fi alone still gets you in. (Not an option on a Pi Zero — no Ethernet socket.)
 * Plug in the HDMI and keyboard, log in at the console, and run `ip addr` to read the IP address,
   and `sudo journalctl -b | grep -i wpa` to see why Wi-Fi failed. Use this when the Pi is nowhere
   near the router, or when you want to see boot messages.
@@ -154,7 +175,9 @@ the password — either way `nmtui` is the fix, and it is not worth more time th
 (`sudo nmcli device wifi list` shows each nearby network's SSID and whether it is WPA2 or WPA3;
 WPA3 cannot use a derived key at all.)
 
-Once logged in, bring the system up to date and reboot:
+### 3. Update the operating system and install the prerequisites
+
+Logged in, bring the system up to date and reboot:
 
 ```
 sudo apt update
@@ -178,26 +201,67 @@ which you may not have the password for.
 address does not change. Sensor nodes and phones then have something stable to talk to even where
 `.local` names do not work.
 
-### A3. Install the prerequisites
+Now the packages the server needs.
+
+**On a Pi 4** (or any 64-bit board):
 
 ```
 sudo apt install -y nodejs npm sqlite3 zsh
 node -v
 ```
 
+**On a Pi Zero W**, three more packages, because a 32-bit machine has to compile part of the server
+in step 4 and a Lite image has no compiler:
+
+```
+sudo apt install -y nodejs npm sqlite3 zsh build-essential python3-dev python3-setuptools
+node -v
+```
+
+What each is for:
+
 * `nodejs` — the server needs **Node 18 or later**. Current Raspberry Pi OS (Debian 13, trixie)
-  provides 20.19.2, which is fine. Older images shipped Node 18, also fine. If `node -v` reports
-  anything below 18, install a current version from
+  provides 20.19.2, which is fine, on 32-bit as well as 64-bit. Older images shipped Node 18, also
+  fine. If `node -v` reports anything below 18, install a current version from
   [NodeSource](https://github.com/nodesource/distributions) instead.
 * `npm` — installs the server; it is a separate package from `nodejs` on Debian.
 * `sqlite3` — the database the server keeps its accounts in.
-* `zsh` — the setup commands in step A6 are zsh scripts.
+* `zsh` — the setup commands in step 6 are zsh scripts.
+* `build-essential`, `python3-dev`, `python3-setuptools` — only needed where something has to be
+  compiled. `python3-setuptools` is the non-obvious one: the build uses node-gyp 8, which imports
+  Python's `distutils`, removed in Python 3.12, and setuptools puts an importable `distutils` back.
+  Without it step 4 ends in `ModuleNotFoundError: No module named 'distutils'`.
 
-### A4. Install the Frugal IoT server
+> **Pi Zero W: add swap before going on.** 512 MB is not enough to unpack what step 4 downloads, and
+> running out does not fail cleanly — the board stops answering SSH and ping, and has to have its
+> power pulled. Raspberry Pi OS enables zram, which is **not** sufficient here, because compressed
+> RAM does not help when the working set is genuinely large. Add a real swap file (`dphys-swapfile`
+> is not on the Trixie Lite image, so make it directly):
+>
+> ```
+> sudo fallocate -l 2G /swapfile
+> sudo chmod 600 /swapfile
+> sudo mkswap /swapfile
+> sudo swapon /swapfile
+> free -h                                              # should show 2.0Gi of swap
+> echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+> ```
+>
+> **No reboot needed** — `swapon` takes effect at once, which the `free -h` line confirms. The
+> `/etc/fstab` entry only matters later, so that the swap comes back after a reboot rather than
+> having to be turned on by hand. Go straight on to step 4.
+>
+> Swapping to an SD card is slow. That is the trade: the install takes longer, but it finishes
+> instead of hanging.
+
+### 4. Install the Frugal IoT server
 
 The server is an npm package. Make a directory for this server to live in and install it there —
 that directory will hold your configuration, your data, and your database, while npm looks after
 the software itself underneath it in `node_modules`.
+
+**On a Pi 4** (or any 64-bit board) — a few minutes, everything arrives as ready-made binaries and
+nothing is compiled:
 
 ```
 mkdir ~/frugal-iot
@@ -205,8 +269,41 @@ cd ~/frugal-iot
 npm install frugal-iot-server
 ```
 
+**On a Pi Zero W** — the extra flags make npm do one thing at a time, which lowers the peak memory
+as well as being kinder to the SD card. This is the slow part; leave it running:
+
+```
+mkdir ~/frugal-iot
+cd ~/frugal-iot
+npm install --maxsockets 1 --no-audit --no-fund frugal-iot-server
+```
+
 That pulls in the web UI (`frugal-iot-client`) and the logger (`frugal-iot-logger`) as well.
-Expect a few minutes on a Pi. Then set the directory up:
+
+> **Pi Zero W: check that the compiled part actually built.** npm can report success while leaving
+> it out, and nothing else looks wrong when that happens — the server just refuses to start later.
+>
+> ```
+> node -e "require('sqlite3'); console.log('sqlite3 native module loads OK')"
+> ```
+>
+> If that throws `Could not locate the bindings file`, build just that package:
+>
+> ```
+> time npm rebuild sqlite3 --foreground-scripts
+> ```
+>
+> **This takes around 40 minutes on a Zero W** — it is compiling SQLite itself on one slow core. As
+> long as it is producing output it is working; `--foreground-scripts` is what lets you see that. If
+> the board locks up, pull the power, boot it, and run the same command again: work already done is
+> kept, so each attempt gets further.
+>
+> Most of what is being installed is not Frugal IoT. The logger depends on `firebase-admin`, which
+> brings in the Google Cloud SDK — around 40 packages and 30 MB — and that is what the board
+> struggles with. It is only used by organizations that configure a `firebase:` section.
+> TODO make that dependency optional in frugal-iot-logger, so small boards can skip it.
+
+Then set the directory up:
 
 ```
 npx --no frugal-iot-init
@@ -215,11 +312,6 @@ npx --no frugal-iot-init
 This copies in the configuration files, creates the `data`, `ota` and `config.d/organizations`
 directories, and creates the database. It never overwrites anything already there, so it is also
 what you run after an upgrade to pick up newly added configuration.
-
-> On a 64-bit Raspberry Pi OS this installs ready-made binaries and compiles nothing. If it ever
-> does stop while building `sqlite3`, no binary was available for your platform, so install the
-> compiler toolchain and try again: `sudo apt install -y build-essential python3` then
-> `npm install frugal-iot-server`.
 
 Everything from here on is run from `~/frugal-iot`, and `npx` is how you run the server's commands
 without having to know where npm put them.
@@ -244,10 +336,10 @@ works on the Pi.
 > `frugaliot.local` is known to work from a laptop and from an iPhone. Android phones generally
 > cannot resolve `.local` names, so if you will view the dashboard on Android, put the Pi's IP
 > address here instead — `broker: ws://192.168.1.42:9012`, using the address `ping -c1
-> frugaliot.local` reported in step A2 — and reserve that address in your router if you can, so it
+> frugaliot.local` reported in step 3 — and reserve that address in your router if you can, so it
 > does not change under you.
 
-### A5. Install and configure the MQTT broker (Mosquitto)
+### 5. Install and configure the MQTT broker (Mosquitto)
 
 Sensor nodes publish their readings to an MQTT broker; the Frugal IoT logger subscribes to it and
 writes the readings to disk; the web UI subscribes to it to show live values. On an offline Pi,
@@ -283,7 +375,7 @@ instead of a `touch`, a `chown` and a `chmod`.
 > to whoever opened it, and the broker runs as the `mosquitto` user — so the file belongs to
 > `mosquitto`, and it lives under `/var/lib/mosquitto` (which that user owns) rather than
 > `/etc/mosquitto` (which root owns). `mosquitto_passwd` also writes a temporary backup file
-> alongside it, so it needs to write to that directory too, not just to the file. Step A6 runs it as
+> alongside it, so it needs to write to that directory too, not just to the file. Step 6 runs it as
 > the right user for you.
 
 Start the broker and have it start at every boot:
@@ -313,7 +405,7 @@ mosquitto_sub -h localhost -u nobody -P wrong -t '#'
 ```
 
 `Connection Refused: not authorised` is the **success** case here — the broker answered and
-requires an account. There are no accounts yet; step A6 creates the first one, and there is a
+requires an account. There are no accounts yet; step 6 creates the first one, and there is a
 fuller test at the end of it.
 
 > If Mosquitto did not start, `npx --no frugal-iot-diagnostic` will tell you why in one step — most often
@@ -321,9 +413,9 @@ fuller test at the end of it.
 > the journal only show an exit code; the actual reason is in Mosquitto's own log, which the
 > diagnostic reads for you. See [When something does not work](#when-something-does-not-work).
 
-### A6. Create your accounts and your organization
+### 6. Create your accounts and your organization
 
-The database was created by `npx --no frugal-iot-init` in step A4, holding two accounts. One is
+The database was created by `npx --no frugal-iot-init` in step 4, holding two accounts. One is
 `everyone`, which nobody logs in as — it exists so that permissions granted to all logged-in users
 have somewhere to live. The other is `superuser`, this server's administrator, which is given admin
 rights over every organization you create. It starts with no password and cannot be logged into
@@ -387,7 +479,7 @@ mosquitto_pub -h localhost -u dev -P '<broker-password>' -t 'dev/test/hello' -m 
 
 `dev/test/hello 42` appearing in the first window proves the account, the password file and the
 port 1883 listener your sensor nodes use are all working. The WebSocket listener on 9012 gets
-exercised by the browser in step A7. Leave the subscriber running if you like — it is a useful
+exercised by the browser in step 7. Leave the subscriber running if you like — it is a useful
 window onto what your nodes are doing. (`Ctrl-C` stops it.)
 
 If you get `Connection Refused: not authorised`, the password does not match the one in
@@ -395,7 +487,7 @@ If you get `Connection Refused: not authorised`, the password does not match the
 `npx --no frugal-iot-diagnostic` checks this for every organization you have, and reports which ones the
 broker actually accepts.
 
-### A7. Start the server by hand and check it
+### 7. Start the server by hand and check it
 
 From your install directory — `npx` looks for the server in the current directory's `node_modules`,
 so this only works there:
@@ -472,7 +564,7 @@ Until a sensor node reports in there will be no data to look at, but the dashboa
 
 Stop the server with `Ctrl-C` before continuing.
 
-### A8. Run the server as a service
+### 8. Run the server as a service
 
 So that it starts automatically at boot and restarts if it crashes. The file that
 `npx --no frugal-iot-init` put in `extras/` already describes this installation — user `pi`, installed
@@ -503,7 +595,7 @@ journalctl -u frugaliot -f
 Reboot the Pi (`sudo reboot`), wait a couple of minutes, and check `http://frugaliot.local:8080`
 still answers. Your server is now installed.
 
-### A9. Point your sensor nodes at the Pi
+### 9. Point your sensor nodes at the Pi
 
 Your ESP8266/ESP32 nodes are told which broker to use in their sketch — `main.cpp`, or the `.ino`
 file if you build in the Arduino IDE. Look for a line like:
@@ -519,16 +611,16 @@ frugal_iot.configure_mqtt("frugaliot.local", "dev", "<broker-password>");
 ```
 
 The three arguments are the broker's host, the organization, and that organization's broker
-password. The organization must be the one you created in step A6, because it is the first part of
+password. The organization must be the one you created in step 6, because it is the first part of
 every topic the node publishes to, and the password is the *broker* password from that step — not
 the login password. Then rebuild and flash the node as usual.
 
 > If the node does not connect, try the Pi's IP address in place of `frugaliot.local`. Resolving
 > `.local` names needs mDNS support in the firmware, which is not something this guide has
-> confirmed; an IP address avoids the question entirely, which is why step A2 suggests reserving one
+> confirmed; an IP address avoids the question entirely, which is why step 3 suggests reserving one
 > for the Pi in your router.
 
-You can confirm nodes are reporting without involving the UI, using the subscriber from step A6:
+You can confirm nodes are reporting without involving the UI, using the subscriber from step 6:
 
 ```
 mosquitto_sub -h localhost -u dev -P '<broker-password>' -t '#' -v
@@ -537,7 +629,7 @@ mosquitto_sub -h localhost -u dev -P '<broker-password>' -t '#' -v
 Every reading from every node should scroll past. Seeing anything here also proves the broker's
 port 1883 is reachable from off the Pi, which is what the nodes need.
 
-### A10. HTTPS and over-the-air firmware updates
+### 10. HTTPS and over-the-air firmware updates
 
 **To be written.** Everything above gives you a plain HTTP server on your local network, which is
 all an offline installation needs. HTTPS matters for two things:
@@ -618,7 +710,7 @@ Two things to know:
 * The output is safe to paste into a bug report. Passwords are deliberately not printed — the
   password file is listed by account name only, and organizations by name.
 
-If you have not reached step A4 yet, the command does not exist. Copy
+If you have not reached step 4 yet, the command does not exist. Copy
 [scripts/diagnostic.zsh](https://github.com/mitra42/frugal-iot-server/blob/main/scripts/diagnostic.zsh)
 to the Pi and run `zsh diagnostic.zsh` instead.
 
@@ -672,131 +764,23 @@ this directory, not in `node_modules`.
 
 ---
 
-## Part B — Raspberry Pi Zero W
-
-A Zero W runs the server perfectly well — it is *installing* that is hard, because 512 MB of RAM and
-a single 1 GHz core have to unpack several hundred packages and compile one of them. Budget an
-afternoon rather than the half hour a Pi 4 takes.
-
-**Follow Part A**, with the differences below. Only steps A0 to A4 differ; from A5 (Mosquitto)
-onward the two boards behave the same.
-
-First, work out which board you have:
-
-* **Raspberry Pi Zero W** (the original) — 32-bit ARMv6, 512 MB RAM. This is the board the notes
-  below were written against.
-* **Raspberry Pi Zero 2 W** — 64-bit ARM (Cortex-A53), still 512 MB RAM. Choose *Raspberry Pi
-  Zero 2 W* in Imager and you can use the 64-bit image, which means `sqlite3` installs as a
-  ready-made binary and the long compile below does not apply. The memory advice still does.
-  Not yet tested.
-
-### B0. Hardware differences
-
-* Micro-USB power and micro-USB OTG, not USB-C and USB-A — different cables and adapters from a Pi 4.
-* Wi-Fi is 2.4 GHz only, so it cannot see a 5 GHz-only network.
-* No Ethernet socket, so the Ethernet fallback in step A2 is unavailable. Have the micro-HDMI cable
-  and keyboard to hand instead. (The Zero can also be reached as a USB gadget over its data port,
-  which is not covered here.)
-
-### B1. Operating system
-
-In Imager choose **Raspberry Pi Zero W** as the device, and **Raspberry Pi OS Lite (32-bit)** — the
-64-bit images will not boot on ARMv6. Everything else in step A1 is unchanged.
-
-`sudo apt install nodejs npm` then gives **Node 20.19.2 and npm 9.2.0**, which are fine. No special
-build of Node is needed — a pleasant surprise, since the official Node.js downloads have not covered
-ARMv6 for years.
-
-### B2. Extra packages, before installing the server
-
-Nothing publishes a ready-made `sqlite3` binary for 32-bit ARM, so it gets compiled during
-`npm install`, and the tools for that are not on a Lite image:
-
-```
-sudo apt install -y build-essential python3-dev python3-setuptools
-```
-
-`python3-setuptools` is not obvious but is required: the `sqlite3` package builds with `node-gyp` 8,
-which imports Python's `distutils`, and that was removed from Python 3.12. Installing setuptools puts
-an importable `distutils` back. Without it the install ends in `ModuleNotFoundError: No module named
-'distutils'`.
-
-### B3. Swap - do this before `npm install`
-
-512 MB is not enough to unpack the dependency tree. Without more memory the board does not fail
-cleanly: it stops responding to SSH and to ping, and has to be power cycled.
-
-Raspberry Pi OS enables zram, which is *not* sufficient here — compressed RAM does not help when the
-working set is genuinely large. Add a real swap file. (`dphys-swapfile` is not on the Trixie Lite
-image, so make the file directly.)
-
-```
-sudo fallocate -l 2G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-free -h                     # should show 2.0Gi of swap
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
-
-Swapping to an SD card is slow, which is the trade being made: the install takes longer, but it
-finishes instead of hanging.
-
-### B4. Installing the server
-
-As step A4, but ask npm to do one thing at a time — that lowers the peak memory as well as being
-kinder to the SD card:
-
-```
-mkdir ~/frugal-iot
-cd ~/frugal-iot
-npm install --maxsockets 1 --no-audit --no-fund frugal-iot-server
-```
-
-Then confirm the compiled part actually built, because npm can report success while leaving it out:
-
-```
-node -e "require('sqlite3'); console.log('sqlite3 native module loads OK')"
-```
-
-If that throws `Could not locate the bindings file`, build just that package:
-
-```
-time npm rebuild sqlite3 --foreground-scripts
-```
-
-**This takes around 40 minutes on a Zero W.** It is compiling SQLite itself on one slow core. As
-long as it is producing output it is working. `--foreground-scripts` is what lets you see that.
-
-If the board locks up again, pull the power, boot it, and re-run the same command - work already
-done is kept, so each attempt gets further.
-
-Then `npx --no frugal-iot-init` and continue from **step A5**.
-
-> Most of what is being installed is not Frugal IoT. The logger depends on `firebase-admin`, which
-> brings in the Google Cloud SDK - around 40 packages and 30 MB - and that is what the board is
-> struggling with. It is only used by organizations that configure a `firebase:` section.
-> TODO make that dependency optional in frugal-iot-logger, so small boards can skip it.
-
----
-
 ## Open questions
 
 Things this guide currently states with less confidence than the rest, to be resolved by
 following it on real hardware. Please correct them in place, and delete them from this list, as
 they get settled.
 
-**Part A, to check while installing**
+**To check while installing**
 
-1. **`.local` from an Android phone** (step A2, A4) - confirmed working from a laptop (with the
+1. **`.local` from an Android phone** (steps 3, 4) - confirmed working from a laptop (with the
    local-network permission granted on a Mac) and from an iPhone. Android is expected to fail, which
-   is what the note in A4 assumes; worth confirming on a real Android phone.
+   is what the note in step 4 assumes; worth confirming on a real Android phone.
 
 **Needs information I do not have**
 
-2. **Pi Zero 2 W** (Part B) - the original Zero W has now been installed on, and Part B is written from
-    that. The Zero 2 W is untested: being 64-bit it should avoid the sqlite3 compile entirely, which is
-    the slow part, but it has the same 512 MB and so probably still needs the swap file.
+2. **Pi Zero 2 W** - the Zero W notes come from a real install; the Zero 2 W is untested. Being
+    64-bit it should take the 64-bit image and avoid the `sqlite3` compile entirely, which is the slow
+    part, but it has the same 512 MB and so probably still needs the swap file in step 3.
 3. **Bridging to the shared server** — the local broker could optionally bridge to
     naturalinnovation.org so data also reaches the shared server. Not covered here; a later task.
 4. **Organization naming** — this guide sets up exactly one organization named `dev`, because that
@@ -809,4 +793,5 @@ What the guide has actually been proven against — add a row for each run:
 
 | Date | Board | OS image | Node | Server | Result |
 | --- | --- | --- | --- | --- | --- |
-| 2026-08-16 | Pi 4 Model B, 4GB | Raspberryy Pi OS Lite 64-bit, Debian 13.6 (trixie) | 20.19.2 and npm 9.2.0, both from `apt` | frugal-iot-server 0.3.5 from npm | Steps A1-A9 completed, plus upgrade over top.  Dashboard reached over `frugaliot.local` from a Mac (Chrome, after allowing local network access) and from an iPhone, MQTT status *connected*. A10 (HTTPS/OTA) not exercised.
+| 2026-08-17 | Pi Zero W (original), 512 MB | Raspberry Pi OS Lite **32-bit**, Debian 13 (trixie), kernel 6.18.39+rpt-rpi-v6 | 20.19.2 and npm 9.2.0, both from `apt` — they run on ARMv6 | frugal-iot-server 0.3.5 from npm | Steps 1-8 completed. `sqlite3` had to be compiled: about 40 minutes, after `build-essential python3-dev python3-setuptools` (without setuptools it fails on `distutils`). A 2 GB swap file was required — zram alone was not enough and the board locked up hard without it — and `npm install` was run with `--maxsockets 1`. Step 9 (sensor nodes) not exercised on this board, but the broker publish/subscribe tests in step 6 passed. |
+| 2026-08-16 | Pi 4 Model B, 4GB | Raspberryy Pi OS Lite 64-bit, Debian 13.6 (trixie) | 20.19.2 and npm 9.2.0, both from `apt` | frugal-iot-server 0.3.5 from npm | Steps 1-9 completed, plus upgrade over top.  Dashboard reached over `frugaliot.local` from a Mac (Chrome, after allowing local network access) and from an iPhone, MQTT status *connected*. 10 (HTTPS/OTA) not exercised.

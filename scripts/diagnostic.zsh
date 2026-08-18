@@ -55,7 +55,7 @@ for c in node npm sqlite3 zsh mosquitto mosquitto_passwd mosquitto_sub; do
     esac
   else
     item "$c: NOT INSTALLED"
-    [[ $c == (node|npm|sqlite3) ]] && problem "$c is not installed - see INSTALLATION.md step A3"
+    [[ $c == (node|npm|sqlite3) ]] && problem "$c is not installed - see INSTALLATION.md step 3"
   fi
 done
 
@@ -113,7 +113,7 @@ for f in /etc/mosquitto/conf.d/*(N); do
   item "  ${f}: $(fileinfo $f)"
   grep -nE '^[[:space:]]*(listener|protocol|password_file|allow_anonymous)' $f 2>/dev/null | sed 's/^/      /'
 done
-[[ -z "$(print -r -- /etc/mosquitto/conf.d/*(N))" ]] && problem "Nothing in /etc/mosquitto/conf.d - the Frugal IoT config was never copied there (step A5)"
+[[ -z "$(print -r -- /etc/mosquitto/conf.d/*(N))" ]] && problem "Nothing in /etc/mosquitto/conf.d - the Frugal IoT config was never copied there (step 5)"
 
 # Which password file does the running configuration actually name?
 # mosquitto's include_dir only loads files ending in .conf, so look at exactly those, last one wins
@@ -133,12 +133,12 @@ else
   item "no password_file line found in any mosquitto configuration"
   problem "No password_file configured - the broker would allow anonymous access or reject everything"
 fi
-# The copy in this installation is what step A5 tells you to put into /etc - if the two disagree,
+# The copy in this installation is what step 5 tells you to put into /etc - if the two disagree,
 # either the copy never happened or the installed package is older than the instructions.
 if [[ -f extras/mosquitto.conf ]]; then
   item "this installation's extras/mosquitto.conf names: $(grep -hE '^[[:space:]]*password_file' extras/mosquitto.conf 2>/dev/null | awk '{print $2}')"
   if [[ -n "$CONFIGURED_PWFILE" ]] && ! diff -q extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf >/dev/null 2>&1; then
-    problem "extras/mosquitto.conf here differs from /etc/mosquitto/conf.d/frugal-iot.conf - if you followed step A5 with an older installed package, copy it again after upgrading"
+    problem "extras/mosquitto.conf here differs from /etc/mosquitto/conf.d/frugal-iot.conf - if you followed step 5 with an older installed package, copy it again after upgrading"
   fi
 fi
 item "candidate locations, whether or not configured:"
@@ -203,13 +203,13 @@ if have systemctl; then
     print -r -- "  --- last 20 journal lines ---"
     journalctl -u frugaliot -n 20 --no-pager 2>&1 | sed 's/^/      /'
   else
-    item "no frugaliot service installed yet (step A8 not reached)"
+    item "no frugaliot service installed yet (step 8 not reached)"
   fi
 else
   item "systemctl not available on this machine"
 fi
 
-section "Name resolution (step A2, A4)"
+section "Name resolution (steps 3, 4)"
 # The broker URL in config.d/mqtt.yaml has to resolve from every machine that uses it - this one,
 # and whatever browser or node talks to it.
 BROKER_URL=$(grep -h '^broker:' config.d/mqtt.yaml 2>/dev/null | awk '{print $2}')
@@ -230,9 +230,9 @@ fi
 MYADDRS=$( (have ip && ip -4 -o addr show scope global | awk '{print $2"="$4}') 2>/dev/null | tr '\n' ' ')
 item "this machine's addresses: ${MYADDRS:-(could not determine)}"
 
-section "Broker authentication (steps A5, A6)"
+section "Broker authentication (steps 5, 6)"
 if have mosquitto_sub; then
-  # A wrong password must be refused - that is the check in step A5
+  # A wrong password must be refused - that is the check in step 5
   WRONGOUT=$(mosquitto_sub -h localhost -u nobody -P wrong -t '#' -W 2 2>&1)
   if [[ "$WRONGOUT" == *"not authorised"* ]]; then
     item "wrong password: correctly refused"
@@ -255,7 +255,7 @@ if have mosquitto_sub; then
     ORGOUT=$(mosquitto_sub -h localhost -u "$ORG" -P "$ORG_PW" -t '#' -W 2 2>&1)
     if [[ "$ORGOUT" == *"not authorised"* ]]; then
       item "organization $ORG: REFUSED by the broker"
-      problem "Organization '$ORG' cannot log in to the broker - its password in $f does not match the broker's password file (step A6)"
+      problem "Organization '$ORG' cannot log in to the broker - its password in $f does not match the broker's password file (step 6)"
     elif [[ "$ORGOUT" == *"Connection refused"* ]]; then
       item "organization $ORG: broker not answering"
     else
@@ -266,14 +266,14 @@ else
   item "mosquitto_sub not installed - cannot test broker logins (sudo apt install mosquitto-clients)"
 fi
 
-section "Web server (step A7)"
+section "Web server (step 7)"
 WEBPORT=$(grep -h '^port:' config.d/server.yaml 2>/dev/null | awk '{print $2}')
 [[ -z "$WEBPORT" ]] && WEBPORT=8080
 if have curl; then
   HOMECODE=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost:${WEBPORT}/ 2>/dev/null)
   if [[ "$HOMECODE" == "000" ]]; then
     item "nothing is answering on port ${WEBPORT} - the server is not running"
-    item "  (expected if you have not reached step A7 yet; otherwise start it, or see the frugaliot service below)"
+    item "  (expected if you have not reached step 7 yet; otherwise start it, or see the frugaliot service below)"
   else
     item "GET /            -> ${HOMECODE} (expect 200)"
     item "GET /config.json -> $(curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost:${WEBPORT}/config.json 2>/dev/null) (expect 401 when not logged in)"
@@ -283,7 +283,7 @@ else
   item "curl not installed - cannot test the web server"
 fi
 
-section "Logged data (step A9)"
+section "Logged data (step 9)"
 if [[ -d data ]]; then
   DATADIRS=(data/*(N/))
   if (( ${#DATADIRS} )); then
@@ -291,7 +291,7 @@ if [[ -d data ]]; then
       item "${d}: $(find $d -type f 2>/dev/null | wc -l | tr -d ' ') files, newest $(ls -t $d/**/*(N.om[1]) 2>/dev/null | head -1)"
     done
   else
-    item "data/ is empty - no readings logged yet, which is expected until a node reports (step A9)"
+    item "data/ is empty - no readings logged yet, which is expected until a node reports (step 9)"
   fi
 fi
 
