@@ -232,6 +232,25 @@ What each is for:
   Python's `distutils`, removed in Python 3.12, and setuptools puts an importable `distutils` back.
   Without it step 4 ends in `ModuleNotFoundError: No module named 'distutils'`.
 
+Now two settings that make the SD card last longer. A card wears out from being written to, and
+these are the two places the system writes constantly without being asked to:
+
+```
+# Cap the systemd journal, which by default is allowed to grow to a tenth of the card
+sudo mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nSystemMaxUse=16M\nSystemMaxFileSize=4M\n' | sudo tee /etc/systemd/journald.conf.d/frugal-iot.conf
+sudo systemctl restart systemd-journald
+
+# Swap out to the card only when there is genuinely no alternative
+echo 'vm.swappiness=1' | sudo tee /etc/sysctl.d/99-frugal-iot-swappiness.conf
+sudo sysctl --system | grep swappiness
+```
+
+The `grep` should print `vm.swappiness = 1`. Both survive a reboot. There is more about what wears a
+card out, and how to see whether yours is being written to hard, under
+[Wear and tear on the SD card](#wear-and-tear-on-the-sd-card) — but nothing else there needs doing
+during the install.
+
 > **Pi Zero W: add swap before going on.** 512 MB is not enough to unpack what step 4 downloads, and
 > running out does not fail cleanly — the board stops answering SSH and ping, and has to have its
 > power pulled. Raspberry Pi OS enables zram, which is **not** sufficient here, because compressed
@@ -251,8 +270,9 @@ What each is for:
 > `/etc/fstab` entry only matters later, so that the swap comes back after a reboot rather than
 > having to be turned on by hand. Go straight on to step 4.
 >
-> Swapping to an SD card is slow. That is the trade: the install takes longer, but it finishes
-> instead of hanging.
+> Swapping to an SD card is slow, and wears it. That is the trade: the install takes longer, but it
+> finishes instead of hanging. The `vm.swappiness=1` set above keeps the swap file available for
+> emergencies like this one without it being used routinely afterwards.
 
 ### 4. Install the Frugal IoT server
 
@@ -360,6 +380,12 @@ sudo cp extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf
 
 (Everything in `/etc/mosquitto/conf.d/` is read in addition to the packaged
 `/etc/mosquitto/mosquitto.conf`, which keeps its own settings for logging and persistence.)
+
+That file also turns off the broker's per-connection logging, because a node on a weak signal
+reconnects constantly and each of those lines is a write to the SD card. Nothing is lost — the
+readings themselves are recorded by the server, and everything else the broker says, including why
+it refused to start, still goes to `/var/log/mosquitto/mosquitto.log`. If you are chasing a node
+that keeps dropping off the network, comment out `connection_messages false` and restart the broker.
 
 That configuration names a password file, and Mosquitto will not start if the file is missing, so
 create an empty one. The accounts inside it get created for you in the next step:
@@ -686,29 +712,19 @@ knowing about, because turning one of them back on for debugging and forgetting 
 | Readings held in memory and written out periodically instead of one at a time | `flushseconds:` in `config.d/logger.yaml` | `300` (5 minutes) |
 | A line logged for every web request | `morgan:` in `config.d/server.yaml` | `false` |
 | Old readings compressed, and deleted if the disk fills | `housekeeping:` in `config.d/server.yaml` | compress after 2 days, never delete, keep 10% free |
-| A line logged for every device connect and disconnect | `connection_messages` in `extras/mosquitto.conf` | commented out — uncomment to stop them |
+| A line logged for every device connect and disconnect | `connection_messages` in `extras/mosquitto.conf` | `false` |
+| A capped systemd journal, and swapping only as a last resort | `/etc/systemd/journald.conf.d/` and `/etc/sysctl.d/`, both set in step 3 | 16 MB journal, `vm.swappiness=1` |
+
+Nothing in that table needs doing — step 3 and step 5 set all of it up. It is here because turning
+one of them back on for debugging and then forgetting is easy to do.
 
 `flushseconds` is the one with a cost attached: readings that have not been written out yet are only
 in memory, so pulling the power loses up to five minutes of them. Stopping the server properly
 (`sudo service frugaliot stop`, or a restart) writes them out first, and so does looking at a graph.
 
-Two things outside Frugal IoT are worth setting on a Pi, once:
-
-```
-# Cap the systemd journal, which otherwise grows to 10% of the disk
-sudo mkdir -p /etc/systemd/journald.conf.d
-printf '[Journal]\nSystemMaxUse=16M\nSystemMaxFileSize=4M\n' | sudo tee /etc/systemd/journald.conf.d/frugal-iot.conf
-sudo systemctl restart systemd-journald
-
-# Swap out to the card only when there is genuinely no alternative
-echo 'vm.swappiness=1' | sudo tee /etc/sysctl.d/99-frugal-iot-swappiness.conf
-sudo sysctl -p /etc/sysctl.d/99-frugal-iot-swappiness.conf
-```
-
 On a Pi 4 there should be very little swapping in any case — the server and Mosquitto together are a
 small load for 1 GB or more. The Pi Zero W is the one to watch, since step 3 adds a 2 GB swap file to
-get through the install; `vm.swappiness=1` keeps it there for emergencies without it being used
-routinely. To see what is actually happening on your board:
+get through the install. To see what is actually happening on your board:
 
 ```
 cd ~/frugal-iot
