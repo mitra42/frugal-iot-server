@@ -431,19 +431,18 @@ other account.
 Frugal IoT groups devices as **organization → project → device**. Create yours:
 
 ```
-npx --no frugal-iot-addorganization dev "My Farm" you@example.com +61123456789 "<broker-password>"
+npx --no frugal-iot-addorganization myfarm "My Farm" you@example.com +61123456789 "<broker-password>"
 ```
 
 The arguments are: organization id, display name, your email, your phone (`+` and digits only),
-and a password. That one command writes `config.d/organizations/dev.yaml`, creates a login account
-named after the organization (`dev`), grants it admin rights, creates its OTA directory, **and adds
+and a password. That one command writes `config.d/organizations/myfarm.yaml`, creates a login account
+named after the organization (`myfarm`), grants it admin rights, creates its OTA directory, **and adds
 the organization's account to the broker's password file** — which is why the broker had to be
 installed first.
 
-* **Organization id `dev`** — must be 1–10 lower-case letters or digits. It becomes the first part
+* **Organization id `myfarm`** — must be 1–10 lower-case letters or digits. It becomes the first part
   of every MQTT topic, so it must match what your sensor nodes are configured to publish to.
-  `dev` is the default in the Frugal IoT node firmware, so it is the safe choice for a first install.
-* **The password** goes into `config.d/organizations/dev.yaml` as `mqtt_password` and into the
+* **The password** goes into `config.d/organizations/myfarm.yaml` as `mqtt_password` and into the
   broker's password file, so it is a *machine* credential: the server's logger, your sensor nodes,
   and any browser showing this organization's dashboard all authenticate to the broker with it.
   Treat it as shared, not personal.
@@ -454,36 +453,36 @@ Tell Mosquitto to re-read the password file, so the new account works:
 sudo systemctl restart mosquitto
 ```
 
-**Give your login its own password.** That command set the `dev` *web login* password to the same
+**Give your login its own password.** That command set the `myfarm` *web login* password to the same
 string as the broker password. They serve completely different purposes, so change the login one
 now to something only you know — the broker credential is unaffected, and nothing needs to be kept
 in step:
 
 ```
-npx --no frugal-iot-setpassword dev "<your-own-login-password>"
+npx --no frugal-iot-setpassword myfarm "<your-own-login-password>"
 ```
 
 **Now the full broker test.** In your SSH session subscribe as the organization, using the broker
 password you chose above:
 
 ```
-mosquitto_sub -h localhost -u dev -P '<broker-password>' -t '#' -v
+mosquitto_sub -h localhost -u myfarm -P '<broker-password>' -t '#' -v
 ```
 
 It should sit there silently — no error, no exit. Open a **second** SSH session to the Pi and
 publish something:
 
 ```
-mosquitto_pub -h localhost -u dev -P '<broker-password>' -t 'dev/test/hello' -m '42'
+mosquitto_pub -h localhost -u myfarm -P '<broker-password>' -t 'myfarm/test/hello' -m '42'
 ```
 
-`dev/test/hello 42` appearing in the first window proves the account, the password file and the
+`myfarm/test/hello 42` appearing in the first window proves the account, the password file and the
 port 1883 listener your sensor nodes use are all working. The WebSocket listener on 9012 gets
 exercised by the browser in step 7. Leave the subscriber running if you like — it is a useful
 window onto what your nodes are doing. (`Ctrl-C` stops it.)
 
 If you get `Connection Refused: not authorised`, the password does not match the one in
-`config.d/organizations/dev.yaml`, or Mosquitto has not re-read the file since it changed.
+`config.d/organizations/myfarm.yaml`, or Mosquitto has not re-read the file since it changed.
 `npx --no frugal-iot-diagnostic` checks this for every organization you have, and reports which ones the
 broker actually accepts.
 
@@ -507,7 +506,7 @@ It lists each configuration file as it reads it, then:
 readYamlConfigFile ./config.yaml
 readYamlConfigDir ./config.d
     ... one line per configuration file ...
-Broker ws://frugaliot.local:9012 - organizations: dev
+Broker ws://frugaliot.local:9012 - organizations: myfarm
 Doing OTA updates at /ota_update from /home/pi/frugal-iot/ota
 Serving /node_modules from ./node_modules
 User Database exists
@@ -519,16 +518,16 @@ Mounted API routes at /api
 Added API error handler
 Serving /data from ./data
 Server starting on port 8080
-mqtt dev connecting
-mqtt dev connect
-Subscribing topic dev/# 0
+mqtt myfarm connecting
+mqtt myfarm connect
+Subscribing topic myfarm/# 0
 ```
 
 Check the `Broker` line names your own broker and your organization. The lines that matter most are
-the last three: `mqtt dev connect` means the server reached the broker and authenticated, and
-`Subscribing topic dev/#` means it is listening for your nodes. If instead you see repeated
-`mqtt dev close`, `offline`, or `Not authorized`, the broker URL or the password is wrong — recheck
-`config.d/mqtt.yaml` and that the password in `config.d/organizations/dev.yaml` matches the `dev`
+the last three: `mqtt myfarm connect` means the server reached the broker and authenticated, and
+`Subscribing topic myfarm/#` means it is listening for your nodes. If instead you see repeated
+`mqtt myfarm close`, `offline`, or `Not authorized`, the broker URL or the password is wrong — recheck
+`config.d/mqtt.yaml` and that the password in `config.d/organizations/myfarm.yaml` matches the `myfarm`
 broker account.
 
 Once nodes are reporting, each reading is logged as it arrives, so this output keeps scrolling.
@@ -545,7 +544,7 @@ http://frugaliot.local:8080
 > local networks"* the first time. **Allow it** — without that permission the browser cannot look up
 > `frugaliot.local`, nor reach the broker at that name, so the page and the live data both fail.
 
-You land on the Frugal IoT home page. Click **Dashboard**, and log in as username `dev` with the
+You land on the Frugal IoT home page. Click **Dashboard**, and log in as username `myfarm` with the
 login password you set with `frugal-iot-setpassword` — not the broker password. (`superuser` and its
 password work too.)
 
@@ -557,7 +556,7 @@ actually resolve: a phone that cannot look up `.local` names needs the Pi's IP a
 
 Until a sensor node reports in there will be no data to look at, but the dashboard should load.
 
-> Anything wrong here — the server not starting, `mqtt dev close` instead of `connect`, the page not
+> Anything wrong here — the server not starting, `mqtt myfarm close` instead of `connect`, the page not
 > loading, the MQTT status not reaching *connected* — is worth a `npx --no frugal-iot-diagnostic` in
 > another terminal before digging in by hand. It tests the same chain from the Pi's side: broker
 > logins, the three ports, and the web server.
@@ -586,7 +585,7 @@ systemctl status frugaliot
 > `sudo systemctl restart frugaliot`. `WorkingDirectory` is the important one: it is where the
 > server looks for its configuration and database.
 
-To watch its log output, which is where the `mqtt dev connect` and incoming-reading messages now go:
+To watch its log output, which is where the `mqtt myfarm connect` and incoming-reading messages now go:
 
 ```
 journalctl -u frugaliot -f
@@ -607,7 +606,7 @@ frugal_iot.configure_mqtt("frugaliot.naturalinnovation.org", "dev", "public");
 and point it at your Pi instead:
 
 ```cpp
-frugal_iot.configure_mqtt("frugaliot.local", "dev", "<broker-password>");
+frugal_iot.configure_mqtt("frugaliot.local", "myfarm", "<broker-password>");
 ```
 
 The three arguments are the broker's host, the organization, and that organization's broker
@@ -623,7 +622,7 @@ the login password. Then rebuild and flash the node as usual.
 You can confirm nodes are reporting without involving the UI, using the subscriber from step 6:
 
 ```
-mosquitto_sub -h localhost -u dev -P '<broker-password>' -t '#' -v
+mosquitto_sub -h localhost -u myfarm -P '<broker-password>' -t '#' -v
 ```
 
 Every reading from every node should scroll past. Seeing anything here also proves the broker's
@@ -672,12 +671,53 @@ it whenever its own clock looks implausible (a date far in the past). Not accura
 but close enough for sensor data.
 
 ---
-### Known limitation: Wear and tear on SD card
+### Wear and tear on the SD card
 
-SD cards have a limited lifetime, and Frugal-IoT is writing
-logs to them, there is development work needed to reduce that,
-until then prepare for a SD card failure at some point though
-we haven't seen any yet.
+SD cards wear out from being written to, and a server recording sensor readings writes all the time.
+We have not yet seen a card fail, but plan for one eventually: keep a copy of `config.d/` and
+`frugal-iot.db` somewhere else, and treat the readings in `data/` as valuable but not irreplaceable.
+
+A new installation is set up to write as little as it reasonably can, and the settings are worth
+knowing about, because turning one of them back on for debugging and forgetting is easy to do:
+
+| What | Where | Shipped as |
+| ---- | ----- | ---------- |
+| A line logged for every MQTT message received | `verbose:` in `config.d/logger.yaml` | `false` |
+| Readings held in memory and written out periodically instead of one at a time | `flushseconds:` in `config.d/logger.yaml` | `300` (5 minutes) |
+| A line logged for every web request | `morgan:` in `config.d/server.yaml` | `false` |
+| Old readings compressed, and deleted if the disk fills | `housekeeping:` in `config.d/server.yaml` | compress after 2 days, never delete, keep 10% free |
+| A line logged for every device connect and disconnect | `connection_messages` in `extras/mosquitto.conf` | commented out — uncomment to stop them |
+
+`flushseconds` is the one with a cost attached: readings that have not been written out yet are only
+in memory, so pulling the power loses up to five minutes of them. Stopping the server properly
+(`sudo service frugaliot stop`, or a restart) writes them out first, and so does looking at a graph.
+
+Two things outside Frugal IoT are worth setting on a Pi, once:
+
+```
+# Cap the systemd journal, which otherwise grows to 10% of the disk
+sudo mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nSystemMaxUse=16M\nSystemMaxFileSize=4M\n' | sudo tee /etc/systemd/journald.conf.d/frugal-iot.conf
+sudo systemctl restart systemd-journald
+
+# Swap out to the card only when there is genuinely no alternative
+echo 'vm.swappiness=1' | sudo tee /etc/sysctl.d/99-frugal-iot-swappiness.conf
+sudo sysctl -p /etc/sysctl.d/99-frugal-iot-swappiness.conf
+```
+
+On a Pi 4 there should be very little swapping in any case — the server and Mosquitto together are a
+small load for 1 GB or more. The Pi Zero W is the one to watch, since step 3 adds a 2 GB swap file to
+get through the install; `vm.swappiness=1` keeps it there for emergencies without it being used
+routinely. To see what is actually happening on your board:
+
+```
+cd ~/frugal-iot
+npx --no frugal-iot-diagnostic
+```
+
+and read the **Wear on the SD card** section, which reports how much has been written since boot,
+whether the machine is swapping, and whether each of the settings above is in force. Run it twice a
+few days apart — the interesting number is the rate, not the total.
 
 ## When something does not work
 
@@ -754,10 +794,17 @@ sudo cp extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf && sudo syst
 sudo cp extras/frugaliot.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart frugaliot
 ```
 
-> It does not compare `config.yaml`, `config.d/mqtt.yaml` or `config.d/server.yaml`, because those
-> hold your own settings and would differ every time. If a release note mentions a new setting in
-> one of them, compare it yourself:
+> It does not compare `config.yaml`, `config.d/mqtt.yaml`, `config.d/logger.yaml` or
+> `config.d/server.yaml`, because those hold your own settings and would differ every time. If a
+> release note mentions a new setting in one of them, compare it yourself:
 > `diff config.d/server.yaml node_modules/frugal-iot-server/config.d/server.yaml`
+
+Because your own configuration is left alone, an upgraded server goes on behaving exactly as it did,
+which for the settings under [Wear and tear on the SD card](#wear-and-tear-on-the-sd-card) means it
+goes on writing as often as it did. A server that has been running since before those settings
+existed keeps logging every message and every web request, and writing every reading as it arrives —
+deliberately, since quietening somebody's server without being asked is not a thing an upgrade should
+do. On a Pi, compare the two files above and copy across the settings you want.
 
 Your organizations, accounts, database and logged data are untouched by an upgrade — they live in
 this directory, not in `node_modules`.
@@ -783,7 +830,7 @@ they get settled.
     part, but it has the same 512 MB and so probably still needs the swap file in step 3.
 3. **Bridging to the shared server** — the local broker could optionally bridge to
     naturalinnovation.org so data also reaches the shared server. Not covered here; a later task.
-4. **Organization naming** — this guide sets up exactly one organization named `dev`, because that
+4. **Organization naming** — this guide sets up exactly one organization named `myfarm`, because that
     is the node firmware's default. Is that the right default for a farm installation, or should the
     guide encourage a meaningful organization id (which then has to be set in the node firmware too)?
 

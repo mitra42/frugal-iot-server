@@ -295,6 +295,84 @@ if [[ -d data ]]; then
   fi
 fi
 
+section "Wear on the SD card"
+# An SD card wears out from being written to, and a server logging sensor readings writes constantly
+# unless told not to. This reports how much is actually being written and whether the settings that
+# reduce it are in force. There is no threshold to compare against - run it twice a few days apart
+# and look at the rate.
+if [[ -r /proc/diskstats && -r /proc/uptime ]]; then
+  # Field 10 of each line is sectors written, and a sector is 512 bytes. Take the whole card rather
+  # than a partition (mmcblk0, not mmcblk0p2) so the boot partition and swap are included too.
+  ROOTDEV=$( (have findmnt && findmnt -no SOURCE / 2>/dev/null) || print -r -- "" )
+  ROOTDISK=${${ROOTDEV:t}%p[0-9]*}      # /dev/mmcblk0p2 -> mmcblk0
+  [[ -z "$ROOTDISK" ]] && ROOTDISK=mmcblk0
+  WRITTEN=$(awk -v d="$ROOTDISK" '$3 == d {print $10}' /proc/diskstats 2>/dev/null)
+  UPSECS=$(awk '{print int($1)}' /proc/uptime 2>/dev/null)
+  if [[ -n "$WRITTEN" && -n "$UPSECS" && "$UPSECS" -gt 0 ]]; then
+    item "device:      /dev/${ROOTDISK}"
+    item "written:     $(awk -v s="$WRITTEN" 'BEGIN {printf "%.1f MB", s*512/1048576}') since boot, over $(awk -v u="$UPSECS" 'BEGIN {printf "%.1f", u/3600}') hours"
+    item "  that is:   $(awk -v s="$WRITTEN" -v u="$UPSECS" 'BEGIN {printf "%.1f MB/hour", s*512/1048576/(u/3600)}')"
+  else
+    item "could not read write counters for /dev/${ROOTDISK} from /proc/diskstats"
+  fi
+else
+  item "no /proc/diskstats on this machine - write counters are Linux only"
+fi
+
+# Swapping to an SD card wears it fast. On a Pi 4 there should be little or none; a Pi Zero W may
+# need some. See INSTALLATION.md, "Wear and tear on the SD card".
+if have free; then
+  item "swap:        $(free -h | awk '/^Swap:/ {print $3 " used of " $2}')"
+fi
+if [[ -r /proc/sys/vm/swappiness ]]; then
+  SWAPPINESS=$(< /proc/sys/vm/swappiness)
+  item "swappiness:  ${SWAPPINESS} (1 means swap only when there is no alternative)"
+fi
+have swapon && item "swap areas:  $(swapon --show=NAME,TYPE,SIZE,USED --noheadings 2>/dev/null | tr '\n' ';' || print -r -- '(none)')"
+
+# The journal is the other thing that writes on every event, if it is kept on disk at all
+if [[ -d /var/log/journal ]]; then
+  item "journal:     stored on disk in /var/log/journal - every logged line is a write"
+  have journalctl && item "  using:     $(journalctl --disk-usage 2>/dev/null | sed 's/^Archived and active journals take up //')"
+else
+  item "journal:     kept in RAM only (no /var/log/journal), so it costs no writes"
+fi
+
+# The settings that decide how much gets logged in the first place
+if [[ -f config.d/logger.yaml ]]; then
+  VERBOSE=$(sed -n 's/^verbose:[[:space:]]*//p' config.d/logger.yaml 2>/dev/null | head -1)
+  FLUSHSECS=$(sed -n 's/^flushseconds:[[:space:]]*//p' config.d/logger.yaml 2>/dev/null | head -1)
+  item "logger verbose:      ${VERBOSE:-not set, so on - a line logged per message received}"
+  item "logger flushseconds: ${FLUSHSECS:-not set, so readings are written as they arrive}"
+fi
+if [[ -f config.d/server.yaml ]]; then
+  MORGANSET=$(sed -n 's/^morgan:[[:space:]]*//p' config.d/server.yaml 2>/dev/null | head -1)
+  item "server morgan:       ${MORGANSET:-not set, so on - a line logged per HTTP request}"
+fi
+if [[ -f /etc/mosquitto/conf.d/frugal-iot.conf ]]; then
+  if grep -qE '^[[:space:]]*connection_messages[[:space:]]+false' /etc/mosquitto/conf.d/frugal-iot.conf 2>/dev/null; then
+    item "mosquitto connections: not logged"
+  else
+    item "mosquitto connections: logged - every connect and disconnect is a write"
+  fi
+fi
+if [[ -e "$MOSQUITTO_LOG" ]]; then
+  item "mosquitto log size:  $(fileinfo $MOSQUITTO_LOG | awk '{print $3, $4}')"
+else
+  item "mosquitto log size:  no log file at ${MOSQUITTO_LOG}"
+fi
+
+# How much the readings themselves are taking up, and whether the old ones have been compressed
+if [[ -d data ]]; then
+  CSVCOUNT=$(find data -name '*.csv' 2>/dev/null | wc -l | tr -d ' ')
+  GZCOUNT=$(find data -name '*.csv.gz' 2>/dev/null | wc -l | tr -d ' ')
+  item "readings:    ${CSVCOUNT} csv files and ${GZCOUNT} compressed, $(du -sh data 2>/dev/null | awk '{print $1}') in total"
+  # Filenames are the date, so the earliest name is the oldest day held. Both suffixes stripped
+  # separately, because BSD sed (macOS) has no "\?" for an optional group.
+  OLDEST=$(find data \( -name '*.csv' -o -name '*.csv.gz' \) 2>/dev/null | sed 's|.*/||; s|\.gz$||; s|\.csv$||' | sort | head -1)
+  [[ -n "$OLDEST" ]] && item "  oldest day: ${OLDEST}"
+fi
+
 section "Summary"
 if (( ${#PROBLEMS} == 0 )); then
   item "No problems detected by these checks."

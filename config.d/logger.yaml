@@ -4,6 +4,22 @@
 # BUT this doesnt work yet - since there are permissions issues if login ot local server then get from production
 # url:  https://frugaliot.naturalinnovation.org/data
 url: /data
+
+# Report every message received on the console, and so into the systemd journal - one line per
+# message, which is one disk write per message. Off here because the usual installation runs from
+# an SD card, where writes wear the card out; turn it on while working out why a node's readings
+# are not appearing, and turn it back off afterwards. A server that does not have this setting at
+# all reports messages, so upgrading never quietens a machine that was talking before.
+verbose: false
+
+# How often the readings collected in memory are written out to the CSV files under data/, in
+# seconds. Writing each reading as it arrives is what wears an SD card out, so they are gathered
+# up and written in one go. The cost is that pulling the power loses up to this much data, since
+# what has not been written yet is only in memory; a clean shutdown or restart writes it out
+# first, and so does anything reading the data back over /data. 0, or leaving this out altogether,
+# writes each reading as it arrives, which is what versions before this one did.
+flushseconds: 300
+
 #TODO add info that server should use when launching logger
 #TODO add info that logger uses for its own configuraton
 #TODO see https://github.com/mitra42/frugal-iot-server/issues/7 and

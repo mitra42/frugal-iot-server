@@ -112,6 +112,8 @@ import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
 
 import { access, constants, createReadStream, mkdir, readdir, readFile, rm } from 'fs'; // https://nodejs.org/api/fs.html
+import { createGunzip } from 'zlib'; // https://nodejs.org/api/zlib.html - for serving compressed readings
+import { startHousekeeping } from './lib/housekeeping.js';
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
 import multer from 'multer'; // https://www.npmjs.com/package/multer
@@ -679,11 +681,20 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     // each organization's mqtt_password, which should not be going to the console and the journal.
     console.log("Broker", config.mqtt.broker, "- organizations:", Object.keys(config.organizations).join(", ") || "(none)");
     // Could genericize config defaults
-    if (!config.morgan) {
-      config.morgan = ':method :url :req[range] :status :res[content-length] :response-time ms :req[referer]'
+    // HTTP request logging. "morgan: false" in config.d/server.yaml turns it off completely, which
+    // matters on a machine running from an SD card: every request logged is a line to the journal,
+    // and so a write that wears the card. Absent means log, so an existing server is unaffected by
+    // this setting arriving. The older top-level config.yaml setting still works if anyone set it.
+    let morganFormat = (config.server.morgan !== undefined) ? config.server.morgan : config.morgan;
+    if (morganFormat === false) {
+      console.log("Not logging HTTP requests (morgan: false in config.d/server.yaml)");
+    } else {
+      if (!morganFormat || (morganFormat === true)) { // Unset, or "morgan: true" meaning just turn it on
+        morganFormat = ':method :url :req[range] :status :res[content-length] :response-time ms :req[referer]'
+      }
+      // Seems to be writing to syslog which is being cycled.
+      app.use(morgan(morganFormat)); // see https://www.npmjs.com/package/morgan )
     }
-    // Seems to be writing to syslog which is being cycled.
-    app.use(morgan(config.morgan)); // see https://www.npmjs.com/package/morgan )
 
     if (config.server.otadir.startsWith("./")) {
       config.server.otadir = process.cwd() + config.server.otadir.substring(1);
@@ -1004,6 +1015,10 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
 
         // Serve frugal-iot-logger data at /data but configure where to get them.
         console.log("Serving /data from", config.server.datadir);
+        // Nothing ever removed old readings, so a server left running filled its disk - which on a
+        // field node takes the whole machine down. This compresses days gone by and, if asked to,
+        // removes the oldest ones. See lib/housekeeping.js for what the settings mean.
+        startHousekeeping(config.server.datadir, config.server.housekeeping);
         //TODO-N89 should be authenticated to correct org
         const routerData = express.Router();
         app.use('/data', routerData);
@@ -1014,7 +1029,39 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             res.locals.org = req.url.split("/")[1];
             next(); }, //
           can_READ,
-          (req,res,next) => { console.log("/data handler authenticated by session for", req.url); next(); },
+          // Nothing logged here on purpose - morgan already reports the URL and status of this same
+          // request, and on an SD card each duplicated line is another write.
+          // The logger holds recent readings in memory rather than writing each one to the card as
+          // it arrives, so write them out before serving the files, or today's would be short of
+          // the last few minutes. Reading data is rare compared with recording it, and this costs
+          // nothing when there is nothing waiting.
+          // The guard is for an installation whose logger predates flush() - it would rather serve
+          // data a few minutes out of date than fail the request
+          (req, res, next) => { if (mqttLogger.flush) { mqttLogger.flush(() => next()); } else { next(); } },
+          // Readings from days gone by get compressed (see lib/housekeeping.js) but are still
+          // asked for by their ".csv" name, so answer one of those with the ".csv.gz" if that is
+          // what is on disk. A browser decompresses a gzip Content-Encoding itself, so the client
+          // needed no change; anything that says it does not want gzip - curl, by default - gets
+          // it decompressed here instead.
+          (req, res, next) => {
+            if (!req.path.endsWith('.csv')) { next(); return; }
+            // req.path comes from the URL, so it has to be checked before being used as a path
+            const wanted = path.resolve(config.server.datadir, '.' + path.normalize(req.path));
+            if (!wanted.startsWith(path.resolve(config.server.datadir) + path.sep)) { next(); return; }
+            access(wanted, constants.R_OK, (err) => {
+              if (!err) { next(); return; } // Not compressed - serve it in the ordinary way
+              access(wanted + '.gz', constants.R_OK, (err1) => {
+                if (err1) { next(); return; } // Neither exists - let express.static give the 404
+                res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+                if (req.acceptsEncodings('gzip')) {
+                  res.setHeader('Content-Encoding', 'gzip');
+                  createReadStream(wanted + '.gz').pipe(res);
+                } else {
+                  createReadStream(wanted + '.gz').pipe(createGunzip()).pipe(res);
+                }
+              });
+            });
+          },
           express.static(config.server.datadir, {immutable: false})
         );
 

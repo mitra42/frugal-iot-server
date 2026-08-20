@@ -17,6 +17,11 @@
 # graphable  true if can be displayed on a graph
 # wireable true,false, generally only  controls are wireable
 # wired not valid in this context, it will come from MQTT broker
+# duplicates  when to bother recording a reading: significantvalue is how much it has to have moved
+#   since the last one recorded, significantdate how long (in milliseconds) since that one, and a
+#   reading that meets neither is dropped. Every float, int or bool with "rw: r" is logged whether
+#   or not it says "log: true", so every one of them wants a rule here - without one each reading
+#   is written to the SD card as it arrives, which wears the card out.
 # Note battery gets special cased
 # See https://www.iana.org/assignments/senml/senml.xhtml for units
 altitude:
@@ -40,6 +45,11 @@ analog:
   rw:       r
   graphable:  true
   log:      true
+  # A raw ADC reading with no declared range, so this threshold is a guess - lower it if real
+  # changes are being missed, raise it if the graph is mostly noise
+  duplicates:
+    significantdate: 900000
+    significantvalue: 10
 aqi:
   leaf:     aqi
   name:     AQI
@@ -113,6 +123,10 @@ button:
   display:  toggle
   color:    black
   rw:       r
+  # A press changes the value, so it is still recorded - this only drops the repeats in between
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
 color:
   leaf:     color
   name:     Color
@@ -163,6 +177,10 @@ controlouttoggle:
   color:    black
   rw:       r
   wireable: true
+  # Read-only bool, so logged by default - match the "out" and "on" topics it stands in for
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
 course:
   leaf:     course
   name:     Course
@@ -656,6 +674,11 @@ wifibars:
   max:      4
   color:    blue
   rw:       r
+  # Logged, because an int that is read-only is logged unless told otherwise. Only 5 values, so
+  # any change is worth recording and nothing else is
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
 wifissid:
   leaf:     wifissid
   name:     SSID

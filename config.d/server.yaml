@@ -1,4 +1,11 @@
 port: 8080
+
+# Log every HTTP request. Off here because the usual installation runs from an SD card, where each
+# line logged is a write and writes wear the card out. Set it to true (or to a morgan format
+# string) while debugging. A server whose server.yaml does not mention morgan at all logs requests,
+# so this setting arriving in a new release never quietens a machine that was logging before.
+morgan: false
+
 #Production mode
 nodemodulesdir: ./node_modules
 htmldir: ./node_modules/frugal-iot-client
@@ -10,3 +17,20 @@ privatedir: ./private
 publicdir: ./public
 datadir: ./data
 otadir: ./ota
+
+# Looking after the readings in datadir, once a day. Readings are one file per topic per day and
+# nothing used to remove them, so a server left running would eventually fill its disk and stop.
+housekeeping:
+  # Compress days older than this. A day's file never changes once the day is over, and they
+  # compress to about a third. Nothing else needs to know - the server answers a request for a
+  # ".csv" with the ".csv.gz" when that is what it has. Never less than 2 days, whatever is set
+  # here, because the logger is still writing to today's file and possibly yesterday's.
+  compressafterdays: 2
+  # Delete readings older than this many days. 0 keeps them for ever, which is the default -
+  # deleting is not something to start doing to somebody's data without being asked.
+  deleteafterdays: 0
+  # Whatever the setting above, if the disk falls below this percentage free, the oldest days are
+  # deleted until it is back above. This is the safety net that stops a full card taking the
+  # machine down; set it to 0 to turn even that off and let the disk fill.
+  freespacepercent: 10
+  # enabled: false      # turns all of the above off
