@@ -6,12 +6,21 @@ port: 8080
 # so this setting arriving in a new release never quietens a machine that was logging before.
 morgan: false
 
-#Production mode
-nodemodulesdir: ./node_modules
+# Where the web client is. Installed with npm it is a dependency, so it is here:
 htmldir: ./node_modules/frugal-iot-client
-# Development mode (uncomment these two, and comment out the two above, when working on the client)
+# To work on the client, either point this at your checkout of it
 #htmldir: ../frugal-iot-client
-#nodemodulesdir: ../frugal-iot-client/node_modules
+# or, better, leave this line alone and link the checkout in, which needs no edit here and so
+# nothing to remember to change back:
+#   cd ../frugal-iot-client && npm link
+#   cd ../frugal-iot-server && npm link frugal-iot-client
+#
+# nodemodulesdir is where the libraries the client loads (chart.js, luxon ...) are served from.
+# It does not normally need setting: the server looks inside htmldir first and then here, which
+# covers both an npm install (libraries hoisted to this directory) and a checkout (libraries in
+# the checkout's own node_modules). Set it only if yours are somewhere else again.
+#nodemodulesdir: ./node_modules
+
 # The path to the private directory is relative to the server's working directory.
 privatedir: ./private
 publicdir: ./public

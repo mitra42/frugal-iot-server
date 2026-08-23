@@ -747,12 +747,31 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         });
     });
 
-    // Serve Node modules at /node_modules but configure where to get them.
-    console.log("Serving /node_modules from", config.server.nodemodulesdir);
+    // Serve Node modules at /node_modules - the libraries the web client loads, such as chart.js
+    // and luxon, which it asks for by that path.
+    //
+    // Two places to look, because where those libraries sit depends on how the client got here:
+    //  - installed with npm, they are hoisted to this directory's own node_modules alongside the
+    //    client, and there is no node_modules inside the client at all;
+    //  - working from a checkout of the client (whether htmldir points at it, or node_modules holds
+    //    an "npm link" symlink to it), they are in that checkout's own node_modules, and npm has
+    //    removed the hoisted copies as no longer needed.
+    // Both are offered, the client's own first, and express falls through to the next when a file is
+    // not in the one before. So neither layout needs configuring, and getting it wrong is not a
+    // thing that can happen.
+    // Both default to where npm puts things, so a server.yaml that says nothing about either still
+    // works, and a missing setting does not turn into an obscure error from express.static
+    if (!config.server.nodemodulesdir) config.server.nodemodulesdir = './node_modules';
+    if (!config.server.htmldir) config.server.htmldir = './node_modules/frugal-iot-client';
+    const clientNodeModules = path.join(config.server.htmldir, 'node_modules');
+    console.log("Serving /node_modules from", clientNodeModules, "then", config.server.nodemodulesdir);
     const routerNM = express.Router();
     app.use('/node_modules', routerNM);
     //routerData.use('/', (req, res, next) => { console.log("NM:", req.url); next(); });
-    routerNM.use(express.static(config.server.nodemodulesdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}));
+    routerNM.use(
+      express.static(clientNodeModules, {immutable: true, maxAge: 1000 * 60 * 60 * 24}),
+      express.static(config.server.nodemodulesdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24})
+    );
 
     openOrCreateDatabase((err, db) => {
       if (err) {
