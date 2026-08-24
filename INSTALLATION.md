@@ -705,6 +705,125 @@ That section will cover: a DNS name for the Pi, port forwarding on the router, n
 proxy in front of port 8080, and certificates from Let's Encrypt via certbot. Both require the Pi
 to have internet access, which is the opposite of the offline case this guide is aimed at.
 
+### 11. Optional: bridge this Pi to a production server
+
+Everything above gives a self-contained Pi. This step also relays its readings to a production
+Frugal IoT server, so the same nodes appear on a dashboard elsewhere and can be controlled from
+it, while the Pi carries on working on its own whenever the link is down. Skip it if you do not
+want that — nothing else depends on it.
+
+The relaying is done by the broker, not by the server: Mosquitto has a "bridge" feature for
+connecting to another broker, and the server, the logger and the nodes need no configuration
+change at all. This installation ships an example bridge configuration in
+`extras/mosquitto-bridge.conf.example`, which explains each setting in place; this section is the
+surrounding work.
+
+**What you get, and what you do not.** While the link is up, readings appear on production within
+a second or so. While it is down, the Pi records everything as usual and production simply has a
+gap — the readings taken during an outage never reach it. That is a deliberate choice: the
+alternative is for the broker to hold them and deliver the backlog on reconnect, but production
+timestamps each reading as it arrives, so a day's backlog would arrive claiming to have happened
+in the instant the link returned. A gap is honest; that would not be. Controls are treated the
+other way round, and *are* queued, so turning something on from production while the Pi is offline
+takes effect when it reconnects.
+
+#### On the production server
+
+**Add a listener for bridges.** A Mosquitto bridge speaks MQTT or MQTT-over-TLS and cannot use
+WebSockets, so the existing `wss://` path that browsers and servers use cannot carry this. Add to
+production's Mosquitto configuration:
+
+```
+listener 8883
+protocol mqtt
+certfile /etc/letsencrypt/live/<prod-host>/fullchain.pem
+keyfile  /etc/letsencrypt/live/<prod-host>/privkey.pem
+```
+
+and open 8883 on the firewall.
+
+> **The certificate permissions are what usually goes wrong here.** Mosquitto runs as the
+> `mosquitto` user and Let's Encrypt keys are readable only by root, so the broker fails to start
+> with a permission error on `privkey.pem`. Either add `mosquitto` to a group granted read access
+> to `/etc/letsencrypt/live` and `/etc/letsencrypt/archive`, or have a certbot deploy hook copy the
+> two files somewhere owned by `mosquitto`. Whichever you choose, check it again after the next
+> certificate renewal, which is when a copy-based approach goes stale.
+
+**Create an account for each Pi**, rather than sharing the organization's account. The organization
+password is handed to every browser that logs in, so it is not a secret; a per-Pi account can be
+restricted to one site's topics and revoked on its own.
+
+```
+sudo mosquitto_passwd -b /var/lib/mosquitto/passwords bridge-<site> '<password>'
+sudo systemctl restart mosquitto
+```
+
+**Restrict what that account can do.** This is the part to plan for, because Mosquitto's ACL file
+is deny-by-default: the moment production names an `acl_file`, every existing account that has no
+entry in it stops working. So the file has to grant the existing organizations what they already
+have, in the same change that restricts the new bridge accounts:
+
+```
+# Existing organization accounts: unchanged - each already works only within its own org topic
+pattern readwrite %u/#
+
+# Each Pi reaches only its own site
+user bridge-<site>
+topic readwrite <org>/<project>/#
+```
+
+Add `acl_file /etc/mosquitto/aclfile` to production's configuration and restart. Then check an
+existing organization can still log in, *before* connecting any Pi — a broken ACL file locks out
+every node and dashboard at once, and the reason appears only in Mosquitto's own log.
+
+#### On the Pi
+
+```
+sudo cp extras/mosquitto-bridge.conf.example /etc/mosquitto/conf.d/frugal-iot-bridge.conf
+sudo nano /etc/mosquitto/conf.d/frugal-iot-bridge.conf
+```
+
+Replace every `<...>` placeholder: the production hostname, the account and password you just
+created, and the organization id in each of the four `topic` lines. Then:
+
+```
+sudo systemctl restart mosquitto
+```
+
+It has to be a restart. Mosquitto does not pick up bridges on a reload signal, so `reload` appears
+to succeed and changes nothing. The restart briefly disconnects every node, which they recover from
+on their own.
+
+> The file goes into `/etc/mosquitto/conf.d/` and not into this installation's `config.d/`, because
+> it holds a password for production. Everything under `config.d/` is served to any logged-in
+> browser by `/config.json`, so a credential put there would not stay private.
+
+#### Check it
+
+```
+npx --no frugal-iot-diagnostic
+```
+
+The **Bridge to a production server** section names the bridge, lists what it relays, and reports
+whether it is connected. `CONNECTED` means the link is up. `DOWN`, or a report that it has never
+connected, means the address, the credentials or the certificate is wrong — and Mosquitto's own log,
+quoted earlier in the same output, says which.
+
+Then confirm at the far end: log in to production's dashboard and look for this Pi's nodes. They
+should appear within a couple of minutes, which is however long it takes each node to next report.
+
+**One oddity worth expecting.** Each time the bridge reconnects, the most recent value of every
+reading is re-sent to production and recorded there with the reconnect time rather than the time
+it was measured. That is one row per topic per outage, and it happens because nodes publish
+readings retained. The `duplicates:` rules in `config.d/schema/topics.yaml` absorb it when the
+value has not moved and the outage was short; after a long outage the row is written.
+
+**The clock matters more once a Pi is bridged**, because its readings now sit alongside
+production's. A bridged Pi has internet access whenever the link is up, so it sets its time from
+the network and the problem below mostly goes away — but it still comes up after a power cut
+believing whatever it last saved, and anything recorded before it reaches a time server carries
+that wrong time.
+
 ### Known limitation: the clock on an offline Pi
 
 A Raspberry Pi has no battery-backed clock. While it has internet access it sets its time from the

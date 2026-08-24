@@ -266,6 +266,53 @@ else
   item "mosquitto_sub not installed - cannot test broker logins (sudo apt install mosquitto-clients)"
 fi
 
+section "Bridge to a production server (optional)"
+# A bridge relays this Pi's readings to a production server - see
+# extras/mosquitto-bridge.conf.example. It is configured by a "connection" line in one of
+# mosquitto's own config files, so most installations have none, which is not a problem.
+BRIDGECONFS=(/etc/mosquitto/mosquitto.conf(N) /etc/mosquitto/conf.d/*.conf(N))
+BRIDGENAMES=""
+(( ${#BRIDGECONFS} )) && BRIDGENAMES=$(grep -hE '^[[:space:]]*connection[[:space:]]' $BRIDGECONFS 2>/dev/null | awk '{print $2}')
+if [[ -z "$BRIDGENAMES" ]]; then
+  item "no bridge configured - readings stay on this Pi"
+else
+  for b in ${(f)BRIDGENAMES}; do item "configured bridge: $b"; done
+  # What it is set to relay and where. remote_password is deliberately not among these.
+  item "its settings:"
+  grep -hE '^[[:space:]]*(address|remote_username|remote_clientid|topic|cleansession|restart_timeout|notifications)[[:space:]]' $BRIDGECONFS 2>/dev/null | sed 's/^/      /'
+  # Whether it is actually up, rather than what the configuration hoped for. With "notifications"
+  # left on, the bridge publishes a retained 1 or 0 here each time it connects or drops.
+  if have mosquitto_sub; then
+    # Reading $SYS needs a broker login, so borrow the first organization that has one
+    STATEORG=""; STATEPW=""
+    for f in config.d/organizations/*.yaml(N); do
+      STATEPW=$(sed -n 's/^mqtt_password:[[:space:]]*//p' "$f" 2>/dev/null | head -1 | tr -d '"'"'"'')
+      if [[ -n "$STATEPW" ]]; then STATEORG=${f:t:r}; break; fi
+    done
+    if [[ -z "$STATEORG" ]]; then
+      item "live state: no organization credentials here to read it with"
+    else
+      STATEOUT=$(mosquitto_sub -h localhost -u "$STATEORG" -P "$STATEPW" -v -t '$SYS/broker/connection/+/state' -W 2 2>&1 | grep -E '/state ')
+      if [[ -z "$STATEOUT" ]]; then
+        item "live state: the broker reported nothing - the bridge has never connected since it started"
+        problem "A bridge is configured but has not reported its state - check 'address' is reachable and see the mosquitto log above"
+      else
+        for line in ${(f)STATEOUT}; do
+          BNAME=${${(s:/:)${line%% *}}[4]}
+          if [[ "${line##* }" == "1" ]]; then
+            item "live state: ${BNAME} is CONNECTED to production"
+          else
+            item "live state: ${BNAME} is DOWN - this Pi is recording locally only"
+            problem "Bridge '${BNAME}' is not connected to production - readings since it dropped will not appear there"
+          fi
+        done
+      fi
+    fi
+  else
+    item "mosquitto_sub not installed - cannot check whether the bridge is up"
+  fi
+fi
+
 section "Web server (step 7)"
 WEBPORT=$(grep -h '^port:' config.d/server.yaml 2>/dev/null | awk '{print $2}')
 [[ -z "$WEBPORT" ]] && WEBPORT=8080

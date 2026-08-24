@@ -1,0 +1,130 @@
+# Bridging this Pi's broker to a production Frugal IoT server
+#
+# Optional. Without this file the Pi is self-contained: nodes publish to the broker here, the
+# logger records the readings here, and the dashboard here shows them. Adding it also relays
+# everything to a production server, so the same nodes appear on a dashboard elsewhere and can be
+# controlled from it, while the Pi carries on working on its own whenever the link is down.
+#
+# This is a Mosquitto "bridge" - the broker's own feature for connecting to another broker. The
+# server, the logger and the nodes know nothing about it and need no configuration change.
+#
+# To use it:
+#   sudo cp extras/mosquitto-bridge.conf.example /etc/mosquitto/conf.d/frugal-iot-bridge.conf
+#   sudo nano /etc/mosquitto/conf.d/frugal-iot-bridge.conf     # replace every <...> below
+#   sudo systemctl restart mosquitto
+#
+# It has to be a restart, not a reload: Mosquitto does not pick up bridges on a reload signal.
+# That briefly disconnects every node, which they recover from on their own.
+#
+# The file goes in /etc/mosquitto/conf.d/ rather than in this installation, because it holds a
+# password for the production broker. Everything under config.d/ here is served to any logged-in
+# browser by /config.json, so a credential put there would not stay private.
+
+# ============ The connection ============
+
+# Names the bridge. Anything, but it appears in the log, so make it recognisable.
+connection to-prod
+
+# The production broker's plain-MQTT-over-TLS address. Not the wss:// URL the browsers and the
+# server use - a Mosquitto bridge speaks MQTT or MQTT-over-TLS and cannot use WebSockets, so
+# production needs a listener on 8883 for this. Port 1883 would work on a trusted LAN, but sends
+# the password below in clear, so over the internet use 8883 and keep the TLS lines further down.
+address <prod-host>:8883
+
+# The account this Pi uses on the production broker. Give each Pi its own, rather than sharing the
+# organization's account: the organization password is handed to every browser that logs in, so it
+# is not a secret, and a per-Pi account can be restricted to just this site's topics and revoked
+# on its own.
+remote_username <bridge-account>
+remote_password <bridge-password>
+
+# The client id this Pi presents to production, and the name production uses when it reports the
+# state of this bridge (see "notifications" below). One per Pi, or two Pis will disconnect each
+# other in a loop as each takes over the other's session.
+remote_clientid <bridge-account>
+
+# Verify production's certificate against the system CA store, which is what a Let's Encrypt
+# certificate on production needs - no certificate has to be copied onto this Pi. Delete both
+# lines, and use port 1883 above, only on a network you trust end to end.
+bridge_cafile /etc/ssl/certs/ca-certificates.crt
+bridge_insecure false
+
+# How long to wait before retrying, in seconds, doubling from the first number up to the second.
+# A Pi on a weak or intermittent link keeps retrying for as long as it takes; the cap stops a
+# flapping connection from hammering production.
+restart_timeout 5 60
+
+# Keep production's copy of our subscriptions across a dropped connection. This is the default,
+# and it matters: with "true" instead, Mosquitto re-subscribes on every reconnect and production
+# re-sends every retained message each time, which on a flaky link means a burst of duplicated
+# readings after every blip. Nodes publish nearly everything retained, so that burst is large.
+cleansession false
+
+# Publish a retained "1" or "0" to $SYS/broker/connection/<remote_clientid>/state on both brokers
+# whenever the link comes up or goes down. This is how "npx --no frugal-iot-diagnostic" reports
+# whether the bridge is connected, and it also lets production see which sites are reachable.
+# The default is true; it is written out here because it is useful rather than incidental.
+notifications true
+
+# Uncomment if production refuses the bridge's connection or logs a denied publish to $SYS. Once
+# production has an acl_file, writing to $SYS may not be permitted, and this stops trying: the
+# state is then published only to the broker here, which is all the diagnostic script reads. What
+# is lost is production's view of whether this site is reachable.
+#notifications_local_only true
+
+# Not set, and worth knowing why: local_username / local_password. The broker here requires
+# authentication, but a bridge's local side is internal to the broker and does not go through it.
+# Verified on mosquitto 2.0.21 - an anonymous publish is refused while the bridge still forwards.
+
+# ============ What gets relayed ============
+#
+# Replace <org> in all four lines with the organization id - the first element of every topic, and
+# the name of the file in config.d/organizations/. One set of four lines per organization on this
+# Pi. To relay only some projects, replace "<org>/" with "<org>/<project>/" and add "+/" where a
+# level is now missing, or repeat the block per project.
+#
+# Frugal IoT topics come in five shapes, and each line below picks out one or two of them. "+"
+# matches exactly one level, so counting levels is what separates them:
+#
+#   <org>/<project>                                        the "quick discover" announcement
+#   <org>/<project>/<node>/<module>/<field>                a reading
+#   <org>/<project>/<node>/<module>/<field>/<parameter>    a reading's min, max, colour, wiring
+#   <org>/<project>/<node>/set/<module>/<field>            a control
+#   <org>/<project>/<node>/set/<module>/<field>/<parameter>
+#
+# Readings, at five levels. These are the only topics the logger writes to disk, so this is the
+# one line where a topic must not be matched twice - each extra copy would be another row in the
+# CSV files at the far end.
+#
+# The "0" is the QoS, and it is doing real work. At 0, anything published while production is
+# unreachable is simply dropped: production's history has a gap for the outage and this Pi's is
+# complete. At 1 the broker would instead queue it all up and deliver it on reconnect, where
+# production stamps each reading with the time it arrived - so an outage would come back as a
+# whole day's readings all claiming to have happened at the moment the link returned, which is
+# worse than a gap because it looks like real data. Leave this at 0.
+topic <org>/+/+/+/+ out 0
+
+# The quick discover announcement, so production learns which nodes live here. Sent periodically
+# and not retained, so nothing accumulates while the link is down.
+topic <org>/+ out 0
+
+# Parameters - the min, max, colour and wiring a node announces once at startup. The dashboard
+# needs them to draw a node properly, and the logger never records them.
+topic <org>/+/+/+/+/+ out 0
+
+# Controls, in both directions and at QoS 1. Both directions, because a control can be set from
+# either dashboard and both brokers need to know. QoS 1 because here queueing is exactly what is
+# wanted: a control set on production while this Pi is offline is held and delivered when it comes
+# back, which is the same reason nodes publish these retained.
+#
+# At six levels this overlaps the parameter line above, so some controls reach production twice.
+# That is deliberate - it is the harmless place to put the overlap, since a repeated control
+# carries the same value and the logger discards anything with "set" in it. There is no way to
+# write "six levels but not a control", as MQTT patterns cannot exclude.
+topic <org>/+/+/set/# both 1
+
+# Loop protection is Mosquitto's "try_private", on by default, which tells production that this is
+# a bridge and not an ordinary client so that it never echoes our own messages back at us. Both
+# ends must be Mosquitto for that to hold - it was measured working between 2.0.21 and itself.
+# TODO revisit if production ever moves to a different broker, or if a third broker is ever
+# bridged into the same topics, as neither case is covered by that protection.
