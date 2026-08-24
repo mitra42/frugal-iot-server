@@ -1,0 +1,27 @@
+# Files in this repository that are deliberately left out of the npm package.
+#
+# "files" in package.json is an allow-list, so anything not named there is left out whether or not
+# that was intended. scripts/check-published-files.js compares the two and reports anything left
+# out that is not listed here - so this file is what lets that report stay short enough to read.
+#
+# When it names something new, either add it to "files" in package.json (if installers need it) or
+# add it here with a line saying why. Blank lines and #comments are ignored; "*" matches within a
+# path segment and "**" across segments.
+
+# --- Never publish: this installation's own secrets ---
+# Organization configs hold mqtt_password, and the broker password file holds its hashes. Both are
+# in git, which is its own problem, but they must certainly not go to npm as well.
+config.d/organizations/*.yaml
+extras/mosquitto_passwords
+
+# --- Development-only: no use to somebody installing the server ---
+.gitignore
+claude.md
+create-favicon.js
+jest.config.js
+vitest.config.js
+test/**
+
+# --- Placeholders ---
+# Keeps the ota directory present in a clone; a real installation gets one from frugal-iot-init
+ota/README.md

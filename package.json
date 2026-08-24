@@ -13,7 +13,7 @@
     "express": "^5.2.1",
     "express-session": "^1.19.0",
     "frugal-iot-client": "^1.3.13",
-    "frugal-iot-logger": "^1.1.18",
+    "frugal-iot-logger": "^1.1.19",
     "hash-wasm": "^4.12.0",
     "js-yaml": "^4.2.0",
     "morgan": "^1.11.0",
@@ -68,7 +68,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check-schema": "node scripts/check-schema.js",
-    "prerelease": "zsh scripts/prerelease.zsh"
+    "prerelease": "zsh scripts/prerelease.zsh",
+    "check-files": "node scripts/check-published-files.js"
   },
   "type": "module",
   "version": "0.3.7"

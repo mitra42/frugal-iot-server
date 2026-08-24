@@ -134,11 +134,20 @@ Before publishing, run:
 ```
 npm run prerelease
 ```
-It checks the sensor schema, copies it into the examples that ship with `frugal-iot-logger`, and
-refuses if the package is wired to a local checkout - a `file:` dependency, an `npm link`, a
-switched import or a switched `htmldir` - or if it requires a version of the client or logger that
-has not been published yet. `npm publish` packages your working tree, so also look at
-`npm pack --dry-run`, remembering that `files` in `package.json` is an allow-list.
+It checks the sensor schema and copies it into the examples that ship with `frugal-iot-logger`, sets
+the service worker's cache version from the client version this release installs, and refuses if:
+- the package is wired to a local checkout - a `file:` dependency, an `npm link`, a switched import
+  or a switched `htmldir`;
+- it requires a version of the client or logger that has not been published (a warning if published
+  but not the newest, since a fresh install resolves to the newest anyway while an existing one may
+  not move);
+- anything git ignores would be published. `files` in `package.json` is an allow-list, which fails
+  closed, but a file sitting in one of the listed directories goes out whether or not you meant it
+  to - which is how a working copy of the user database was published in 0.3.2.
+
+It also lists anything in the repository that would *not* be published and is not already accounted
+for in `scripts/not-published.txt`, so a newly added file that installers need does not go missing
+unnoticed. `npm run check-files` runs just that part.
 
 `npm run check-schema` on its own reports sensor topics that do not say whether they are logged, or
 that are logged with no rule about how often - both of which are easy to add by accident and
