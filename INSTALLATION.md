@@ -40,6 +40,33 @@ Any of these work. What differs is only how long the install takes, and how much
 A Zero W runs the server perfectly well once installed. It is *installing* that is slow, because a
 single 1 GHz core has to unpack several hundred packages and compile one of them.
 
+## The short way: one script
+
+Steps 3 to 8 below can be done for you. Once you can ssh into the Pi (steps 1 and 2, which need a
+person with an SD card):
+
+```
+curl -fsSLO https://raw.githubusercontent.com/mitra42/frugal-iot-server/main/scripts/install-pi.sh
+bash install-pi.sh --org myfarm --name "My Farm" --email you@example.com --phone +61123456789
+```
+
+It asks for anything it needs that you did not pass, generates the passwords, says what it is doing
+as it goes, and stops at the first thing that fails - leaving a log, and telling you to run
+`frugal-iot-diagnostic`. Running it again after a failure carries on rather than starting over,
+which matters on a Pi Zero W where one step takes about 40 minutes. `--dry-run` checks the arguments
+and shows the plan without touching the machine, and `--yes` makes it ask nothing at all.
+
+Fetch it with `curl -O` and then run it, rather than piping curl into bash - piped, it has no
+terminal to ask questions at.
+
+It finishes with a live server and a tested broker. It cannot do step 9, pointing your nodes at it,
+because a node learns its broker by being flashed with it - so it prints the settings to give them.
+Nor step 10, HTTPS.
+
+The steps below are what it does, in the same order, if you would rather do it by hand or need to
+understand what went wrong.
+
+---
 ### 0. What you need before you start
 
 **Hardware**
