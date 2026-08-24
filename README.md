@@ -3,7 +3,8 @@
 ## Installation
 
 For a self-contained server on a Raspberry Pi - including the MQTT broker, and starting from a
-blank SD card - see [INSTALLATION.md](INSTALLATION.md).
+blank SD card - see [INSTALLATION.md](INSTALLATION.md), which also has a script that does the whole
+thing in one go once you can ssh in.
 
 On a unix box that is already running ...
 
