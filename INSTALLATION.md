@@ -50,7 +50,6 @@ curl -fsSLO https://raw.githubusercontent.com/mitra42/frugal-iot-server/main/scr
 bash install-pi.sh --org myfarm --name "My Farm" --email you@example.com --phone +61123456789
 ```
 
-<<<<<<< HEAD
 It asks for anything it needs that you did not pass, says what it is doing as it goes, and stops at
 the first thing that fails - leaving a log, and telling you to run `frugal-iot-diagnostic`. Running
 it again after a failure carries on rather than starting over, which matters on a Pi Zero W where one
@@ -67,13 +66,6 @@ have no way of knowing it.
 **It tells you whether a reboot is needed**, rather than leaving you to wonder — it notices a kernel
 or boot-firmware package in the upgrade, the images in `/boot` changing underneath it, and
 `/var/run/reboot-required`. If none of those happened it says so, and there is nothing more to do.
-=======
-It asks for anything it needs that you did not pass, generates the passwords, says what it is doing
-as it goes, and stops at the first thing that fails - leaving a log, and telling you to run
-`frugal-iot-diagnostic`. Running it again after a failure carries on rather than starting over,
-which matters on a Pi Zero W where one step takes about 40 minutes. `--dry-run` checks the arguments
-and shows the plan without touching the machine, and `--yes` makes it ask nothing at all.
->>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
 
 Fetch it with `curl -O` and then run it, rather than piping curl into bash - piped, it has no
 terminal to ask questions at.
