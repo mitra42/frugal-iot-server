@@ -32,7 +32,11 @@ set -Eeuo pipefail
 
 ORG_ID=""; ORG_NAME=""; ORG_EMAIL=""; ORG_PHONE=""
 BROKER_PW=""; SUPER_PW=""; LOGIN_PW=""; BROKER_HOST=""
+<<<<<<< HEAD
 INSTALL_DIR=""; RUN_USER=""; ASSUME_YES=0; DRY_RUN=0; RANDOM_PASSWORDS=0
+=======
+INSTALL_DIR=""; RUN_USER=""; ASSUME_YES=0; DRY_RUN=0
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
 
 usage() {
   cat <<USAGE
@@ -44,18 +48,28 @@ Usage: bash install-pi.sh [options]
   --email <address>    contact address for the organization
   --phone <number>     contact phone, "+" and digits only
   --broker-password    the machine credential shared by the server, nodes and dashboards.
+<<<<<<< HEAD
   --superuser-password password for this server's administrator login.
   --login-password     web login password for the organization's own account, which is a different
                        thing from the broker credential above and should not be the same string.
                        Any of these three not given is asked for, and generated if you just press
                        Enter, or if there is no terminal to ask at.
+=======
+                       Generated if not given.
+  --superuser-password password for this server's administrator login. Generated if not given.
+  --login-password     web login password for the organization's own account. Generated if not
+                       given, and always different from the broker password.
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
   --broker-host <host> what the browser and the nodes should call this Pi.
                        Default: this Pi's hostname with ".local". Use an IP address if you will
                        view the dashboard on Android, which cannot resolve ".local" names.
   --dir <path>         where to install. Default: ~/frugal-iot of the user running this.
   --user <name>        account to own and run the server. Default: whoever invoked this.
   --yes                never ask anything; invent whatever was not given.
+<<<<<<< HEAD
   --random-passwords   generate the passwords instead of asking, even at a terminal.
+=======
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
   --dry-run            work out what would be done, check the arguments, and stop before
                        changing anything. Also the way to see the generated passwords first.
   --help
@@ -77,7 +91,10 @@ while (( $# )); do
     --user)                RUN_USER="${2:-}"; shift 2 ;;
     --yes|-y)              ASSUME_YES=1; shift ;;
     --dry-run)             DRY_RUN=1; shift ;;
+<<<<<<< HEAD
     --random-passwords)    RANDOM_PASSWORDS=1; shift ;;
+=======
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
     --help|-h)             usage 0 ;;
     *) echo "Unknown option: $1" >&2; usage 1 ;;
   esac
@@ -170,6 +187,7 @@ trap 'on_error $LINENO' ERR
 
 randpw() { ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16 ); }
 
+<<<<<<< HEAD
 REBOOT_REASONS=()
 
 # Size and modification time of every kernel and initrd image, so that the upgrade replacing one can
@@ -222,6 +240,8 @@ ask_password() { # ask_password <variable name> <what it is for>
   done
 }
 
+=======
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
 ask() { # ask <variable name> <prompt> [generated]
   local var=$1 prompt=$2 generate=${3:-}
   local current="${!var}"
@@ -289,10 +309,16 @@ ask ORG_NAME  "Organization display name (e.g. My Farm)" || exit 1
 ask ORG_EMAIL "Contact email" || exit 1
 ask ORG_PHONE "Contact phone ('+' and digits only)" || exit 1
 [[ "$ORG_PHONE" =~ ^[+]?[0-9]+$ ]] || { echo "Phone must be '+' and digits only: '${ORG_PHONE}'" >&2; exit 1; }
+<<<<<<< HEAD
 # Asked for in the order they matter. Each may be typed, passed as an option, or generated.
 ask_password SUPER_PW  "the superuser login (this server's administrator)"
 ask_password LOGIN_PW  "the ${ORG_ID} web login"
 ask_password BROKER_PW "the ${ORG_ID} broker credential, shared by the nodes and dashboards"
+=======
+ask BROKER_PW "" generate || exit 1
+ask SUPER_PW  "" generate || exit 1
+ask LOGIN_PW  "" generate || exit 1
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
 [[ -n "$BROKER_HOST" ]] || BROKER_HOST="$(hostname).local"
 
 info "install into:  ${INSTALL_DIR}  (owned by ${RUN_USER})"
@@ -312,9 +338,13 @@ $( (( NEEDS_SWAP )) && echo "  * add a 2G swap file, because this board has unde
   * create the superuser login and the ${ORG_ID} organization, and test the broker
   * install and start the frugaliot service, running as ${RUN_USER}
 
+<<<<<<< HEAD
 Passwords it would use. A generated one is different on every run, so pass it or type it if you
 want this exact set. All of them are shown here because a dry run writes no log; a real run prints
 only the generated ones, so the ones you chose stay out of the log:
+=======
+Passwords it would use (given, or generated just now - they change on each run unless you pass them):
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
 $(printf '  %-22s %s\n' "superuser login" "${SUPER_PW}" "${ORG_ID} web login" "${LOGIN_PW}" "${ORG_ID} broker" "${BROKER_PW}")
 PLAN
   exit 0
@@ -324,6 +354,7 @@ fi
 
 step "Updating the operating system"
 sudo_ apt-get update -qq
+<<<<<<< HEAD
 # What is about to be upgraded, asked for before doing it: "-s" simulates, and each package it would
 # install shows up as an "Inst" line. Doing it this way rather than reading the real output means the
 # upgrade itself can stay quiet.
@@ -361,6 +392,13 @@ else
   ok "no reboot needed: the kernel running now is the one on disk"
 fi
 
+=======
+# No reboot here even if this brings a new kernel, so that the run can continue unattended; the
+# summary at the end says to reboot.
+sudo_ env DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq
+ok "system up to date"
+
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
 step "Installing the packages the server needs"
 PACKAGES=(nodejs npm sqlite3 zsh curl)
 (( NEEDS_BUILD_TOOLS )) && PACKAGES+=(build-essential python3-dev python3-setuptools)
@@ -588,6 +626,7 @@ systemctl is-enabled --quiet frugaliot && ok "will start again at boot"
 
 IP_ADDR="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 
+<<<<<<< HEAD
 # Only the generated ones are worth printing - and printing a password you typed would put it in the
 # log for no reason
 was_generated() { local v; for v in ${GENERATED[@]+"${GENERATED[@]}"}; do [[ "$v" == "$1" ]] && return 0; done; return 1; }
@@ -602,6 +641,8 @@ else
     installed here is already running."
 fi
 
+=======
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
 cat <<SUMMARY
 
 =======================================================================
@@ -611,6 +652,7 @@ cat <<SUMMARY
  Dashboard      http://${BROKER_HOST}:${PORT}/
                 http://${IP_ADDR:-this-pi}:${PORT}/     (if .local does not resolve for you)
 
+<<<<<<< HEAD
  Logins         superuser / $(shown SUPER_PW)
                 ${ORG_ID} / $(shown LOGIN_PW)
 
@@ -620,6 +662,17 @@ cat <<SUMMARY
 
  Installed in   ${INSTALL_DIR}, running as ${RUN_USER}
  Log of this run ${LOG}   (readable only by you; any generated password above is in it)
+=======
+ Logins         superuser / ${SUPER_PW}
+                ${ORG_ID} / ${LOGIN_PW}
+
+ Broker         ws://${BROKER_HOST}:9012        for browsers
+                ${BROKER_HOST}:1883             for sensor nodes
+                user ${ORG_ID}, password ${BROKER_PW}
+
+ Installed in   ${INSTALL_DIR}, running as ${RUN_USER}
+ Log of this run ${LOG}   (contains the passwords above - readable only by you)
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
 
  Still to do:
 
@@ -627,10 +680,18 @@ cat <<SUMMARY
     flashed with it, which happens on your workstation. Build each node's firmware with:
         broker    ${BROKER_HOST}
         org       ${ORG_ID}
+<<<<<<< HEAD
         password  $(shown BROKER_PW)
     They appear on the dashboard by themselves once they connect.
 
 ${REBOOT_TEXT}
+=======
+        password  ${BROKER_PW}
+    They appear on the dashboard by themselves once they connect.
+
+ 2. Reboot, if the system upgrade brought a new kernel:  sudo reboot
+    The server and broker both come back by themselves.
+>>>>>>> f1b105cbdec2eb972247bbc08181a6c9366e8b09
 
  3. HTTPS, if you want over-the-air firmware updates - ESP32 requires it for those.
     See INSTALLATION.md step 10.
