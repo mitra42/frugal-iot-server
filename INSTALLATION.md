@@ -730,24 +730,74 @@ takes effect when it reconnects.
 #### On the production server
 
 **Add a listener for bridges.** A Mosquitto bridge speaks MQTT or MQTT-over-TLS and cannot use
-WebSockets, so the existing `wss://` path that browsers and servers use cannot carry this. Add to
-production's Mosquitto configuration:
+WebSockets, so the existing `wss://` path that browsers and servers use cannot carry this. It needs
+a TLS listener of its own on 8883, and the sensible certificate to give it is the one the web
+server already uses for the same hostname — one certificate and one renewal, rather than two.
+
+Find where that certificate actually is, rather than assuming: certbot's own layout under
+`/etc/letsencrypt/live/` is only one of several, and a wildcard certificate covering more than one
+domain is often installed by hand somewhere else entirely.
+
+```
+sudo grep -rn 'SSLCertificateFile\|SSLCertificateKeyFile' /etc/apache2/   # Apache
+sudo nginx -T 2>/dev/null | grep ssl_certificate                          # nginx
+```
+
+Take the paths for the vhost serving this server's hostname — `sudo apache2ctl -S` says which
+vhost that is — and add to production's Mosquitto configuration:
 
 ```
 listener 8883
 protocol mqtt
-certfile /etc/letsencrypt/live/<prod-host>/fullchain.pem
-keyfile  /etc/letsencrypt/live/<prod-host>/privkey.pem
+certfile <the SSLCertificateFile path>
+keyfile  <the SSLCertificateKeyFile path>
 ```
 
-and open 8883 on the firewall.
+then open 8883 on the firewall.
 
-> **The certificate permissions are what usually goes wrong here.** Mosquitto runs as the
-> `mosquitto` user and Let's Encrypt keys are readable only by root, so the broker fails to start
-> with a permission error on `privkey.pem`. Either add `mosquitto` to a group granted read access
-> to `/etc/letsencrypt/live` and `/etc/letsencrypt/archive`, or have a certbot deploy hook copy the
-> two files somewhere owned by `mosquitto`. Whichever you choose, check it again after the next
-> certificate renewal, which is when a copy-based approach goes stale.
+> **`certfile` must contain the intermediate certificate as well as the server's own**, or bridges
+> will refuse to connect even though browsers are happy — a browser can often fill in a missing
+> intermediate from cache and a bridge never can. `sudo grep -c 'BEGIN CERTIFICATE' <certfile>`
+> should report 2 or more. If it reports 1, concatenate the issuer's chain onto a copy and point
+> `certfile` at that.
+
+> **The key's permissions are what usually goes wrong.** Unlike a web server, which reads its key
+> as root at startup, Mosquitto drops to the `mosquitto` user *first* and reads the key afterwards,
+> so a key left `root:root 0600` stops the broker starting:
+>
+> ```
+> Error: Unable to load server key file "...". Check keyfile.
+> OpenSSL Error[0]: error:8000000D:system library::Permission denied
+> ```
+>
+> On Debian the tidy fix is the `ssl-cert` group, which exists for exactly this and which
+> `/etc/ssl/private` is already set up to admit:
+>
+> ```
+> sudo adduser mosquitto ssl-cert
+> sudo chgrp ssl-cert <keyfile>
+> sudo chmod 640 <keyfile>
+> ```
+>
+> The web server is unaffected — root still reads the key as before. If you would rather not widen
+> access to a directory holding keys for other domains, copy the certificate and key into
+> `/etc/mosquitto/certs` owned `mosquitto:mosquitto` instead, and refresh that copy on renewal.
+
+**Add one line to however this certificate gets renewed:**
+
+```
+systemctl reload mosquitto
+```
+
+Mosquitto keeps the certificate it loaded at startup, so without this the broker goes on serving
+the old one until it happens to be restarted, and bridges start failing once it expires. A reload
+is enough — it picks up a replaced certificate without dropping a single connection. Where that
+line goes depends on how the certificate is renewed: a certbot deploy hook in
+`/etc/letsencrypt/renewal-hooks/deploy/`, `acme.sh`'s `--reloadcmd`, or, if the certificate is
+installed by hand, the written procedure for doing that.
+
+> Note the asymmetry with the Pi end below: a *certificate* change needs only `reload`, but adding
+> or changing a *bridge* needs a full `restart`, because Mosquitto does not reload bridges.
 
 **Create an account for each Pi**, rather than sharing the organization's account. The organization
 password is handed to every browser that logs in, so it is not a secret; a per-Pi account can be
@@ -912,6 +962,8 @@ broken. It covers most of the checks scattered through this guide, in one pass:
 * whether Mosquitto and the `frugaliot` service are running, with the last lines of the journal
   **and of Mosquitto's own log**, which is where its startup errors actually appear
 * whether the broker refuses a wrong password, and accepts each organization's real one
+* whether a bridge to a production server is configured, what it relays, and whether it is
+  connected right now (step 11) — the bridge password is not printed
 * whether ports 1883, 9012 and 8080 are listening, and whether the web server answers
 * whether the broker host in `config.d/mqtt.yaml` resolves from this machine
 * how much data the logger has written
@@ -926,6 +978,30 @@ Two things to know:
 If you have not reached step 4 yet, the command does not exist. Copy
 [scripts/diagnostic.zsh](https://github.com/mitra42/frugal-iot-server/blob/main/scripts/diagnostic.zsh)
 to the Pi and run `zsh diagnostic.zsh` instead.
+
+### A topic that will not go away
+
+Nodes publish almost everything **retained**, meaning the broker keeps the last value and gives it
+to every new subscriber — which is how a dashboard shows a reading immediately instead of waiting
+for the next one. The catch is that a topic published by mistake outlives the mistake. Misspell a
+field, rename a module, flash a node with the wrong id, and that topic sits on the broker for ever,
+appearing on every dashboard. Fixing the node does not remove it, and neither does restarting the
+broker: the only way is to publish an empty message to that exact topic.
+
+```
+cd ~/frugal-iot
+npx --no frugal-iot-clearretained 'myfarm/lotus/+/sht/temperture/#'
+```
+
+Quote the pattern or the shell will expand it. That lists what is retained and changes nothing;
+add `--delete` to the same command to remove it.
+
+> Look before deleting. A node's `min`, `max`, `color` and `wired` settings are retained messages
+> too, and they are how the dashboard knows how to draw it — delete those and the node has to be
+> restarted before it looks right again. A pattern of just `#` is refused outright.
+
+On a Pi that is bridged to a production server (step 11), deleting here deletes there too: the
+bridge forwards the empty message like any other.
 
 ---
 
