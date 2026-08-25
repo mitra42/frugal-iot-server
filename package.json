@@ -28,7 +28,9 @@
     "frugal-iot-addorganization": "scripts/addorganization.zsh",
     "frugal-iot-setpassword": "scripts/setpassword.zsh",
     "frugal-iot-diagnostic": "scripts/diagnostic.zsh",
-    "frugal-iot-clearretained": "scripts/clearretained.zsh"
+    "frugal-iot-clearretained": "scripts/clearretained.zsh",
+    "frugal-iot-addbridge-prod": "scripts/addbridge-prod.zsh",
+    "frugal-iot-addbridge-pi": "scripts/addbridge-pi.zsh"
   },
   "description": "Frugal IoT client and server",
   "//files": "An allowlist, not an ignore list - anything not named here is never published, so a stray file (a database backup, a credential) cannot leak by default. Check with: npm pack --dry-run",

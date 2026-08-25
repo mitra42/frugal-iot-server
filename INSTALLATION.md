@@ -718,6 +718,17 @@ change at all. This installation ships an example bridge configuration in
 `extras/mosquitto-bridge.conf.example`, which explains each setting in place; this section is the
 surrounding work.
 
+It comes in three parts, and only the first is a one-off:
+
+* **11a — preparing a production server to accept bridges.** A TLS listener, a certificate, and an
+  access-control file. Done once for a given production server, and not again until there is
+  another one.
+* **11b — authorizing this Pi on that server.** One command, run there, once per Pi.
+* **11c — pointing this Pi at it.** One command, run here, once per Pi.
+
+If someone has already done 11a for the server you are bridging to — the usual case once the first
+Pi is working — **start at 11b**.
+
 **What you get, and what you do not.** While the link is up, readings appear on production within
 a second or so. While it is down, the Pi records everything as usual and production simply has a
 gap — the readings taken during an outage never reach it. That is a deliberate choice: the
@@ -727,7 +738,10 @@ in the instant the link returned. A gap is honest; that would not be. Controls a
 other way round, and *are* queued, so turning something on from production while the Pi is offline
 takes effect when it reconnects.
 
-#### On the production server
+#### 11a. Preparing a production server to accept bridges
+
+Once per production server, not per Pi — and someone has probably already done it for
+`frugaliot.naturalinnovation.org`. If so, skip to 11b.
 
 **Add a listener for bridges.** A Mosquitto bridge speaks MQTT or MQTT-over-TLS and cannot use
 WebSockets, so the existing `wss://` path that browsers and servers use cannot carry this. It needs
@@ -799,54 +813,106 @@ installed by hand, the written procedure for doing that.
 > Note the asymmetry with the Pi end below: a *certificate* change needs only `reload`, but adding
 > or changing a *bridge* needs a full `restart`, because Mosquitto does not reload bridges.
 
-**Create an account for each Pi**, rather than sharing the organization's account. The organization
-password is handed to every browser that logs in, so it is not a secret; a per-Pi account can be
-restricted to one site's topics and revoked on its own.
+**Turn on access control.** Without it, any account that can log in to the broker can publish and
+subscribe anywhere on it, so a per-Pi account would be no more confined than the organization's
+own. This is the part to plan carefully, because Mosquitto's ACL file is **deny-by-default**: the
+moment the broker names an `acl_file`, every existing account with no entry in it stops working.
+So the file that restricts new bridge accounts has to grant the existing organizations what they
+already have, in the same change.
 
 ```
-sudo mosquitto_passwd -b /var/lib/mosquitto/passwords bridge-<site> '<password>'
-sudo systemctl restart mosquitto
-```
+sudo tee /etc/mosquitto/aclfile >/dev/null <<'EOF'
+# Deny-by-default: an account with no rule here can connect but reach no topic at all.
 
-**Restrict what that account can do.** This is the part to plan for, because Mosquitto's ACL file
-is deny-by-default: the moment production names an `acl_file`, every existing account that has no
-entry in it stops working. So the file has to grant the existing organizations what they already
-have, in the same change that restricts the new bridge accounts:
-
-```
-# Existing organization accounts: unchanged - each already works only within its own org topic
+# Each organization reaches only its own topic tree. "%u" is the connecting account name, and the
+# first element of every Frugal IoT topic is the organization id - so this is what the nodes,
+# dashboards and the server's own logger already do. It just stops being optional.
 pattern readwrite %u/#
-
-# Each Pi reaches only its own site
-user bridge-<site>
-topic readwrite <org>/<project>/#
+EOF
+sudo chmod 644 /etc/mosquitto/aclfile
 ```
 
-Add `acl_file /etc/mosquitto/aclfile` to production's configuration and restart. Then check an
-existing organization can still log in, *before* connecting any Pi — a broken ACL file locks out
-every node and dashboard at once, and the reason appears only in Mosquitto's own log.
-
-#### On the Pi
+`chmod 644` matters: like the password file and the TLS key, the broker reads this *after* dropping
+to the `mosquitto` user, so a root-only file stops it starting. Then name it in the configuration
+and restart:
 
 ```
-sudo cp extras/mosquitto-bridge.conf.example /etc/mosquitto/conf.d/frugal-iot-bridge.conf
-sudo nano /etc/mosquitto/conf.d/frugal-iot-bridge.conf
-```
-
-Replace every `<...>` placeholder: the production hostname, the account and password you just
-created, and the organization id in each of the four `topic` lines. Then:
-
-```
+echo 'acl_file /etc/mosquitto/aclfile' | sudo tee /etc/mosquitto/conf.d/zy-frugal-iot-acl.conf
 sudo systemctl restart mosquitto
 ```
 
-It has to be a restart. Mosquitto does not pick up bridges on a reload signal, so `reload` appears
-to succeed and changes nothing. The restart briefly disconnects every node, which they recover from
+Check every existing organization can still log in **before** connecting any Pi — a wrong ACL file
+locks out every node and dashboard at once, and the reason appears only in Mosquitto's own log. On a
+Frugal IoT server the quickest check is its journal, which logs one line per organization:
+
+```
+sudo journalctl -u frugaliot -n 40 --no-pager | grep -iE "mqtt |not authoris"
+```
+
+Every organization should show `connect` and none should show `not authorized`. To back the change
+out, delete `/etc/mosquitto/conf.d/zy-frugal-iot-acl.conf` and restart.
+
+Nothing needs adding here per Pi: `frugal-iot-addbridge-prod` in 11b appends each bridge's own rule.
+
+> One thing this costs: `pattern readwrite %u/#` also denies `$SYS`, so the production broker can no
+> longer tell anyone which bridges are currently connected. The Pi still reports its own bridge
+> state to `frugal-iot-diagnostic`, which is where you would look anyway, so this is a fair trade —
+> but it is why production's dashboard cannot show a site as up or down.
+
+#### 11b. Authorizing this Pi (run on the production server)
+
+Once per Pi. On the production server, from its own directory:
+
+```
+npx --no frugal-iot-addbridge-prod <org-id> <site-name>
+```
+
+The site name only distinguishes one Pi from another within an organization — `northfield`,
+`shed`, `village2` — and becomes part of the account name. The script creates the broker account,
+adds its access-control rule, reloads the broker, and prints both the password and the exact
+command to run in 11c.
+
+Three things it checks, because each of them is a way this quietly fails:
+
+* **The organization must already exist on the production server**, or the readings will arrive at
+  its broker and nothing will record them — that server's logger subscribes per organization,
+  driven by the files in its `config.d/organizations/`. If it is missing, add it there first with
+  `frugal-iot-addorganization`, using the *same* organization id as this Pi.
+* **Each Pi gets its own account**, rather than sharing the organization's. The organization's
+  broker password is handed to every browser that logs in, so it is not a secret; a per-Pi account
+  can be confined to one site and revoked on its own.
+* **An existing account is left alone.** Re-running it for a site that already has one is refused
+  rather than quietly issuing a new password, which would stop that Pi relaying without anyone
+  touching it.
+
+The password is shown once and is not stored anywhere you can read back — copy it before you lose
+the output.
+
+#### 11c. Bridging this Pi (run on the Pi)
+
+Once per Pi. Run the command 11b printed, from this installation's directory:
+
+```
+cd ~/frugal-iot
+npx --no frugal-iot-addbridge-pi --org <org-id> --host <prod-host> --account bridge-<site-name>
+```
+
+It asks for the password rather than taking it on the command line, so it stays out of your shell
+history. Then it checks the far end is reachable and that its certificate is valid for that name,
+writes `/etc/mosquitto/conf.d/frugal-iot-bridge.conf`, restarts the broker, and reports whether the
+bridge actually connected.
+
+The restart is unavoidable: Mosquitto does not pick up bridges on a reload signal, so `reload`
+appears to succeed and changes nothing. It briefly disconnects every node, which they recover from
 on their own.
 
-> The file goes into `/etc/mosquitto/conf.d/` and not into this installation's `config.d/`, because
-> it holds a password for production. Everything under `config.d/` is served to any logged-in
-> browser by `/config.json`, so a credential put there would not stay private.
+> The configuration goes into `/etc/mosquitto/conf.d/` and not into this installation's
+> `config.d/`, because it holds a password for the production server. Everything under `config.d/`
+> is served to any logged-in browser by `/config.json`, so a credential put there would not stay
+> private. The file is written mode 600 for the same reason.
+
+To undo it: `sudo rm /etc/mosquitto/conf.d/frugal-iot-bridge.conf && sudo systemctl restart
+mosquitto`. The Pi goes back to being self-contained and keeps everything it has recorded.
 
 #### Check it
 

@@ -1,0 +1,215 @@
+#!/usr/bin/env zsh
+#
+# Authorize a Raspberry Pi to bridge into this server. RUN THIS ON THE PRODUCTION SERVER.
+#
+# A bridge relays a Pi's readings to this server, so the same nodes appear on a dashboard here and
+# can be controlled from here, while the Pi carries on working on its own when the link is down.
+# This end of it is one broker account and one access-control rule. The Pi end is a configuration
+# file, written by the companion script - "frugal-iot-addbridge-pi", run on the Pi.
+#
+# Each Pi gets its own account rather than sharing the organization's, for two reasons: the
+# organization's broker password is handed to every browser that logs in, so it is not a secret;
+# and a per-Pi account can be confined to one site's topics and revoked without disturbing anyone.
+#
+# Run from the server's own directory, the one holding frugal-iot.db.
+#
+# Usage:
+#   npx --no frugal-iot-addbridge-prod <org-id> <site-name> [password]
+#   scripts/addbridge-prod.zsh <org-id> <site-name> [password]
+# Example:
+#   npx --no frugal-iot-addbridge-prod myfarm northfield
+#
+# The site name only distinguishes one Pi from another within an organization, and becomes part of
+# the account name ("bridge-northfield"). With no password given, a strong one is generated and
+# printed - it is needed once, to type into the Pi.
+#
+# This assumes the server has already been set up to accept bridges at all: a TLS listener on 8883
+# with a certificate. That is a one-off, and INSTALLATION.md step 11 covers it.
+
+set -euo pipefail
+
+SCRIPT_NAME=$0
+
+usage() {
+  echo "Usage: ${SCRIPT_NAME} <org-id> <site-name> [password]" >&2
+  echo "Example: ${SCRIPT_NAME} myfarm northfield" >&2
+  exit 1
+}
+
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  usage
+fi
+
+ORG_ID=$1
+SITE=$2
+PASSWORD=${3:-}
+
+if [[ ! "$ORG_ID" =~ ^[a-z0-9]{1,10}$ ]]; then
+  echo "Error: org id must be 1-10 lower-case letters/digits, got '${ORG_ID}'" >&2
+  exit 1
+fi
+# The site name ends up in an account name and in an ACL file, so keep it to something that cannot
+# be mistaken for syntax in either
+if [[ ! "$SITE" =~ ^[a-z0-9-]{1,20}$ ]]; then
+  echo "Error: site name must be 1-20 lower-case letters, digits or hyphens, got '${SITE}'" >&2
+  exit 1
+fi
+
+ACCOUNT="bridge-${SITE}"
+CONFIG_FILE="config.d/organizations/${ORG_ID}.yaml"
+
+# The organization has to exist here, or the readings will arrive and nothing will record them:
+# this server's logger subscribes per organization, driven by these files.
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  echo "Error: no ${CONFIG_FILE} - organization '${ORG_ID}' is not configured on this server." >&2
+  echo "Its readings would arrive at the broker and nothing would record them. Add it first:" >&2
+  echo "  npx --no frugal-iot-addorganization ${ORG_ID} \"<name>\" <email> <phone> \"<password>\"" >&2
+  exit 1
+fi
+
+if ! command -v mosquitto_passwd >/dev/null; then
+  echo "Error: mosquitto_passwd not found - is mosquitto installed on this machine?" >&2
+  exit 1
+fi
+
+# Which files the running broker actually uses, rather than where they usually are. Only ".conf"
+# files in conf.d are read, and the last setting wins.
+MOSQ_CONFS=(/etc/mosquitto/mosquitto.conf(N) /etc/mosquitto/conf.d/*.conf(N))
+if (( ${#MOSQ_CONFS} == 0 )); then
+  echo "Error: no mosquitto configuration found in /etc/mosquitto" >&2
+  exit 1
+fi
+# Read one setting out of the broker's configuration. Two things to be careful of: a conf.d file
+# can be root-only (a bridge configuration holds a password, so it should be), which makes grep
+# fail rather than return nothing - and under "set -e" a failing command substitution would end
+# this script silently, before it had printed anything at all. Hence "|| true" and the sudo retry.
+mosq_setting() {
+  local out
+  out=$(grep -hE "^[[:space:]]*$1[[:space:]]" "${MOSQ_CONFS[@]}" 2>/dev/null | tail -1 | awk '{print $2}') || true
+  if [[ -z "$out" ]] && command -v sudo >/dev/null; then
+    out=$(sudo grep -hE "^[[:space:]]*$1[[:space:]]" "${MOSQ_CONFS[@]}" 2>/dev/null | tail -1 | awk '{print $2}') || true
+  fi
+  print -r -- "$out"
+}
+PWFILE=$(mosq_setting password_file)
+ACLFILE=$(mosq_setting acl_file)
+
+if [[ -z "$PWFILE" ]]; then
+  echo "Error: no password_file in the mosquitto configuration - this broker is not using accounts." >&2
+  exit 1
+fi
+if [[ ! -e "$PWFILE" ]]; then
+  echo "Error: mosquitto names ${PWFILE} as its password file but it does not exist." >&2
+  exit 1
+fi
+
+# The account names in the password file. Needs the same sudo retry as the settings above: the
+# password file is normally mode 600 owned by the broker's own user, so reading it as anyone else
+# silently returns nothing - which would look exactly like "this account does not exist yet".
+account_exists() {
+  local names
+  names=$(cut -d: -f1 "$PWFILE" 2>/dev/null) || true
+  if [[ -z "$names" ]] && command -v sudo >/dev/null; then
+    names=$(sudo cut -d: -f1 "$PWFILE" 2>/dev/null) || true
+  fi
+  print -r -- "$names" | grep -qx "$1"
+}
+
+# Refuse to rotate the password of a bridge that is presumably working: the Pi holds the old one,
+# and it would stop relaying the moment this changed without anyone touching the Pi.
+if account_exists "$ACCOUNT"; then
+  echo "Error: account '${ACCOUNT}' already exists in ${PWFILE}." >&2
+  echo "If a Pi is already using it, leave it alone. To give it a new password, run" >&2
+  echo "mosquitto_passwd as the owner of that file - as root it rewrites the file owned by root," >&2
+  echo "and the broker, which reads it as the mosquitto user, then will not start:" >&2
+  echo "  sudo -u \"\$(stat -c '%U' ${PWFILE})\" mosquitto_passwd -b ${PWFILE} ${ACCOUNT} '<new password>'" >&2
+  echo "and then update /etc/mosquitto/conf.d/frugal-iot-bridge.conf on that Pi to match." >&2
+  exit 1
+fi
+
+if [[ -z "$PASSWORD" ]]; then
+  # Unlike the organization's broker password, this one is never given to a browser - it lives only
+  # in a root-owned file on the Pi - so it can and should be a real one.
+  # The subshell turns pipefail off: head closes the pipe after 24 characters, tr is killed by
+  # SIGPIPE, and with pipefail on that failure would end this script before it printed anything.
+  # install-pi.sh's randpw does the same for the same reason.
+  PASSWORD=$( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24 )
+  GENERATED=true
+else
+  GENERATED=false
+fi
+
+# Run mosquitto_passwd as whoever owns the password file, the same way addorganization.zsh does.
+# Running it as root instead rewrites the file owned by root, and mosquitto drops to the mosquitto
+# user *before* reading it - so the broker then cannot read its own password file and refuses to
+# start, with an error that says nothing about ownership. mosquitto_passwd also writes a temporary
+# backup beside the file, so it needs the directory and not only the file.
+MOSQ_PASSWD_CMD=(mosquitto_passwd)
+if [[ ! -w "${PWFILE:h}" || ( -e "$PWFILE" && ! -w "$PWFILE" ) ]]; then
+  if command -v sudo >/dev/null; then
+    # stat's spelling differs between Linux (-c) and BSD/macOS (-f)
+    PWFILE_OWNER=$(stat -c '%U' "$PWFILE" 2>/dev/null || stat -f '%Su' "$PWFILE" 2>/dev/null || true)
+    if [[ -n "$PWFILE_OWNER" && "$PWFILE_OWNER" != "$(id -un)" && "$PWFILE_OWNER" != "root" ]]; then
+      MOSQ_PASSWD_CMD=(sudo -u "$PWFILE_OWNER" mosquitto_passwd)
+    else
+      MOSQ_PASSWD_CMD=(sudo mosquitto_passwd)
+    fi
+  fi
+fi
+
+echo "Creating broker account ${ACCOUNT} in ${PWFILE} ..."
+if ! $MOSQ_PASSWD_CMD -b "$PWFILE" "$ACCOUNT" "$PASSWORD"; then
+  echo "Error: mosquitto_passwd failed - nothing has been changed." >&2
+  exit 1
+fi
+
+# The access control rule. Without one the account can connect and reach nothing at all, because a
+# mosquitto acl_file is deny-by-default.
+if [[ -n "$ACLFILE" ]]; then
+  if [[ ! -e "$ACLFILE" ]]; then
+    echo "Error: mosquitto names ${ACLFILE} as its ACL file but it does not exist." >&2
+    echo "The account has been created but cannot reach anything until that is sorted out." >&2
+    exit 1
+  fi
+  if sudo grep -qE "^[[:space:]]*user[[:space:]]+${ACCOUNT}[[:space:]]*$" "$ACLFILE"; then
+    echo "ACL rule for ${ACCOUNT} is already in ${ACLFILE} - leaving it alone."
+  else
+    echo "Adding ACL rule to ${ACLFILE} ..."
+    sudo tee -a "$ACLFILE" >/dev/null <<EOF
+
+# Pi bridge for site "${SITE}", confined to its organization's topics
+user ${ACCOUNT}
+topic readwrite ${ORG_ID}/#
+EOF
+  fi
+else
+  echo ""
+  echo "NOTE: this broker has no acl_file, so ${ACCOUNT} can reach every topic on it, not just"
+  echo "  ${ORG_ID}/#. That is how the broker already treats every other account, so this is no"
+  echo "  worse than what is there - but see INSTALLATION.md step 11 for restricting it."
+fi
+
+# password_file and acl_file are both re-read on a reload, so nothing needs to be disconnected.
+echo "Reloading mosquitto ..."
+sudo systemctl reload mosquitto || {
+  echo "Warning: reload failed - the account exists but the broker has not re-read the files." >&2
+  echo "  Try: sudo systemctl restart mosquitto" >&2
+}
+
+echo ""
+echo "Done. On the Pi at site '${SITE}', run:"
+echo ""
+echo "  npx --no frugal-iot-addbridge-pi --org ${ORG_ID} --host $(hostname -f 2>/dev/null || hostname) --account ${ACCOUNT}"
+echo ""
+echo "It will ask for this password:"
+echo ""
+echo "  ${PASSWORD}"
+echo ""
+if [[ "$GENERATED" == true ]]; then
+  echo "That was generated just now and is not stored anywhere you can read it back - copy it before"
+  echo "you lose this output. If it does get lost, set a new one with:"
+  echo "  sudo -u \"\$(stat -c '%U' ${PWFILE})\" mosquitto_passwd -b ${PWFILE} ${ACCOUNT} '<new password>'"
+  echo "and use that on the Pi instead."
+fi
+echo "Check the host name above is one the Pi can reach, and that it is the name on the"
+echo "certificate - the Pi verifies it."
