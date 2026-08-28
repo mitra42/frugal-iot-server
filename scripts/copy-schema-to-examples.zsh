@@ -32,13 +32,17 @@ if (( ! ${#DIRS} )); then
   exit 0
 fi
 
+# Every yaml in the schema directory, rather than a list to keep in step - devices.yaml was added
+# and left behind once already.
+FILES=("${SCHEMA}"/*.yaml(N:t))
+if (( ! ${#FILES} )); then
+  echo "  No yaml files in ${SCHEMA}"
+  exit 0
+fi
+
 COPIED=0
 for d in $DIRS; do
-  for f in topics.yaml modules.yaml; do
-    if [[ ! -f "${SCHEMA}/${f}" ]]; then
-      echo "  ${SCHEMA}/${f} does not exist - skipped"
-      continue
-    fi
+  for f in $FILES; do
     if cmp -s "${SCHEMA}/${f}" "${d}/${f}"; then
       echo "  same     ${d#${LOGGER}/}/${f}"
     else

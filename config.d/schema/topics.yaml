@@ -535,9 +535,10 @@ pressure:
   name:     Pressure
   type:     float
   display:  bar
-  min:      0
-  max:      99
+  min:      300
+  max:      1100
   width:    6
+  units:    hPa
   color:    blue
   rw:       r
   log:      true
@@ -635,7 +636,7 @@ soil:
     significantvalue: 1
   graphable:  true
   calibrate:  true
-  units:    "%RH"
+  units:    "%"
 temperature:
   leaf:     temperature
   name:     Temperature

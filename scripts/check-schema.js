@@ -21,12 +21,25 @@
  *  - A module topic overriding a field that its topic does not define, which is usually a
  *    misspelling.
  *
+ *  - A float or exponential topic with no "width", or one too small to hold its own min..max. Width
+ *    is what decides how many decimals a reading is shown to; without it the UI guesses.
+ *
+ *  - A numeric topic with no "units". Often right - plenty of readings are dimensionless - but
+ *    worth a look, because the UI has nothing to put after the number.
+ *
+ * And, separately, things that are never deliberate and so count as errors:
+ *
+ *  - A devices.yaml entry naming a module, or a leaf within a module, that does not exist. That
+ *    silently loses a row from a card, with nothing to say why.
+ *
  * Usage:
  *   node scripts/check-schema.js                     # checks ./config.d/schema
  *   node scripts/check-schema.js <dir> [<dir> ...]   # each dir holding topics.yaml and modules.yaml
+ *   node scripts/check-schema.js --resolve <otakey>  # which devices.yaml entry that OTA key uses
  *
- * Exits 0 whatever it finds, so it can run from a prerelease script without blocking a release for
- * something that may well be deliberate. Exits 1 only if it could not read a schema at all.
+ * Exits 0 for warnings, so it can run from a prerelease script without blocking a release for
+ * something that may well be deliberate. Exits 1 for an error, or if it could not read a schema.
+ * Both callers guard it with "|| true", so neither blocks on either.
  */
 
 import yaml from 'js-yaml';
@@ -36,6 +49,8 @@ import path from 'path';
 // The types the logger records when a topic does not say - keep in step with shouldLog() in
 // frugal-iot-logger/index.js
 const TYPES_LOGGED_BY_DEFAULT = ['float', 'int', 'bool'];
+// The types with decimals to decide, and so the ones that need a width
+const NUMERIC_TYPES = ['float', 'exponential'];
 
 function loadYaml(file) {
   if (!existsSync(file)) return null;
@@ -48,9 +63,11 @@ function loadYaml(file) {
  */
 function checkSchemaDir(dir) {
   const topics = loadYaml(path.join(dir, 'topics.yaml'));
-  if (topics === null) return [`${dir}/topics.yaml does not exist`];
+  if (topics === null) return { warnings: [`${dir}/topics.yaml does not exist`], errors: [], missing: true };
   const modules = loadYaml(path.join(dir, 'modules.yaml')) || {};
+  const devices = loadYaml(path.join(dir, 'devices.yaml')) || {};
   const warnings = [];
+  const errors = [];
 
   for (const [name, topic] of Object.entries(topics)) {
     if (!topic || (typeof topic !== 'object')) {
@@ -76,6 +93,28 @@ function checkSchemaDir(dir) {
       warnings.push(`topic "${name}" has a "duplicates" rule setting neither significantvalue nor`
         + ` significantdate, so it does nothing`);
     }
+    // Width decides the decimals a reading is shown to, derived as width - intWidth - 1 where
+    // intWidth comes from min..max. Only a float has decimals to decide.
+    const hasDecimals = NUMERIC_TYPES.includes(topic.type);
+    if (hasDecimals && (topic.width === undefined)) {
+      warnings.push(`topic "${name}" is a ${topic.type} with no "width", so the UI has to guess how`
+        + ` many decimals to show. Width counts every character including the sign and the point.`);
+    }
+    if (!hasDecimals && (topic.width !== undefined)) {
+      warnings.push(`topic "${name}" is a ${topic.type}, which has no decimals, so "width" does nothing`);
+    }
+    if (hasDecimals && (topic.width !== undefined)) {
+      const intWidth = Math.max(String(Math.trunc(topic.min ?? 0)).length,
+                                String(Math.trunc(topic.max ?? 0)).length);
+      if (topic.width < intWidth) {
+        warnings.push(`topic "${name}" has width ${topic.width} but its range needs ${intWidth}`
+          + ` characters before any decimal point, so values will overflow it`);
+      }
+    }
+    if (hasDecimals && (topic.units === undefined)) {
+      warnings.push(`topic "${name}" has no "units" - fine if it is dimensionless, but the UI has`
+        + ` nothing to put after the number`);
+    }
   }
 
   // A module topic can override any field of the topic it is built from. A field the topic does not
@@ -98,30 +137,102 @@ function checkSchemaDir(dir) {
       }
     }
   }
-  return warnings;
+  // A device entry picks the rows on a card, by twig (module/leaf) or by bare control module id.
+  // Naming something that does not exist loses a row silently, so these are errors not warnings.
+  for (const [key, device] of Object.entries(devices)) {
+    for (const listName of ['front', 'summary']) {
+      for (const entry of ((device && device[listName]) || [])) {
+        const [moduleName, leaf] = entry.split('/');
+        const module = modules[moduleName];
+        if (!module) {
+          errors.push(`devices "${key}" ${listName} names module "${moduleName}", which is not in modules.yaml`);
+        } else if (leaf !== undefined) {
+          const leaves = ((module.topics) || []).map((t) => t.leaf);
+          if (!leaves.includes(leaf)) {
+            errors.push(`devices "${key}" ${listName} names "${entry}", but module "${moduleName}"`
+              + ` has ${leaves.length ? leaves.join(', ') : 'no leaves'}`);
+          }
+        } else if (!moduleName.startsWith('control')) {
+          warnings.push(`devices "${key}" ${listName} names module "${moduleName}" with no leaf.`
+            + ` Only a control module renders as a whole - did you mean a "${moduleName}/leaf" twig?`);
+        }
+      }
+    }
+    // Longest match wins, so this is not a fault - but it is worth knowing which entry a key lands on
+    const shadowed = Object.keys(devices).filter((k) => (k !== key) && k.startsWith(key));
+    if (shadowed.length) {
+      warnings.push(`devices "${key}" is also a prefix of ${shadowed.join(', ')}; the longest match`
+        + ` wins, so those take precedence for their own keys`);
+    }
+  }
+
+  // summary is opt-out - a module contributes unless it says otherwise
+  for (const [moduleName, module] of Object.entries(modules)) {
+    if (module && (module.summary === true)) {
+      warnings.push(`module "${moduleName}" sets "summary: true", which is already the default -`
+        + ` only "summary: false" does anything`);
+    }
+  }
+
+  return { warnings, errors };
 }
 
-const dirs = (process.argv.length > 2) ? process.argv.slice(2) : ['config.d/schema'];
+// Which devices.yaml entry an OTA key uses: exact device id, then exact key, then longest prefix.
+function resolveDeviceEntry(devices, otakey) {
+  if (devices[otakey]) return [otakey, 'an exact match'];
+  const prefixes = Object.keys(devices).filter((k) => otakey.startsWith(k));
+  if (!prefixes.length) return [null, 'no match, so the defaults apply'];
+  const longest = prefixes.sort((a, b) => b.length - a.length)[0];
+  return [longest, prefixes.length > 1 ? `the longest of ${prefixes.length} matching prefixes` : 'a prefix'];
+}
+
+const argv = process.argv.slice(2);
+const resolveAt = argv.indexOf('--resolve');
+if (resolveAt !== -1) {
+  const otakey = argv[resolveAt + 1];
+  const dir = argv.find((a, i) => !a.startsWith('--') && (i !== resolveAt + 1)) || 'config.d/schema';
+  if (!otakey) {
+    console.error('--resolve needs an OTA key, e.g. --resolve sht30_c3_pico');
+    process.exit(1);
+  }
+  const devices = loadYaml(path.join(dir, 'devices.yaml')) || {};
+  const [entry, how] = resolveDeviceEntry(devices, otakey);
+  console.log(`${otakey} uses ${entry ? `the "${entry}" entry` : 'no entry'} (${how})`);
+  process.exit(0);
+}
+
+const dirs = argv.length ? argv : ['config.d/schema'];
 let unreadable = 0;
-let total = 0;
+let totalWarnings = 0;
+let totalErrors = 0;
 
 for (const dir of dirs) {
-  const warnings = checkSchemaDir(dir);
-  if ((warnings.length === 1) && warnings[0].endsWith('does not exist')) {
+  const { warnings, errors, missing } = checkSchemaDir(dir);
+  if (missing) {
     console.error(`${dir}: ${warnings[0]}`);
     unreadable++;
     continue;
   }
-  if (!warnings.length) {
+  if (!warnings.length && !errors.length) {
     console.log(`${dir}: nothing to report`);
     continue;
   }
-  console.log(`${dir}: ${warnings.length} thing(s) worth a look`);
-  for (const w of warnings) console.log(`  ${w}`);
-  total += warnings.length;
+  if (warnings.length) {
+    console.log(`${dir}: ${warnings.length} thing(s) worth a look`);
+    for (const w of warnings) console.log(`  ${w}`);
+  }
+  if (errors.length) {
+    console.log(`${dir}: ${errors.length} thing(s) that cannot be right`);
+    for (const e of errors) console.log(`  ERROR ${e}`);
+  }
+  totalWarnings += warnings.length;
+  totalErrors += errors.length;
 }
 
-if (total) {
-  console.log(`\n${total} warning(s) - these are for you to decide about, nothing has been changed.`);
+if (totalWarnings) {
+  console.log(`\n${totalWarnings} warning(s) - these are for you to decide about, nothing has been changed.`);
 }
-process.exit(unreadable ? 1 : 0);
+if (totalErrors) {
+  console.log(`${totalErrors} error(s) - a card will silently lose a row until these are fixed.`);
+}
+process.exit((unreadable || totalErrors) ? 1 : 0);

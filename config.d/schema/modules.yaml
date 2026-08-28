@@ -31,24 +31,18 @@ bme280:
     - leaf: temperature
     - leaf: humidity
     - leaf: pressure
-      max:  1100
-      min:  300
 bme680:
   name: "BME680"
   topics:
     - leaf: temperature
     - leaf: humidity
     - leaf: pressure
-      max:  1100
-      min:  300
     - leaf: gas
 bmp280:
   name: "BMP280"
   topics:
     - leaf: temperature
     - leaf: pressure
-      max:  1100
-      min:  300
 button:
   summary: false   # transient - a press is not a state worth a summary line
   name: Button
@@ -166,7 +160,6 @@ frugal_iot:
     - leaf:     description
     - leaf:     lastseen
 gps:
-  summary: false   # a lat/lon pair says nothing at a glance
   name: GPS
   topics:
     - leaf:     latitude
