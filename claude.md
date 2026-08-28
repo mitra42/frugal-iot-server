@@ -186,6 +186,27 @@ readData('/path/to/file', (err, result) => {
 });
 ```
 
+### Shell scripts
+
+Everything in `scripts/` is zsh, except `install-pi.sh`, which is bash on purpose: a freshly
+flashed Pi has no zsh, and that script is what installs it.
+
+Four things have caused real bugs here, more than once each:
+
+* **`set -euo pipefail` plus command substitution kills the script silently.** A pipeline that
+  "fails" harmlessly ends the run before it has printed anything — `grep` finding no match,
+  `mosquitto_sub -W` timing out (it *always* exits non-zero), `head -c` closing the pipe on `tr`.
+  Write `X=$(...) || true` wherever the failure is expected, or wrap in `( set +o pipefail; ... )`
+  the way `install-pi.sh`'s `randpw` does.
+* **Reading a root-only file as an ordinary user returns nothing, not a visible error.**
+  `cut -d: -f1 /var/lib/mosquitto/passwords` as `pi` is empty, which looks exactly like "that
+  account does not exist". Retry with `sudo` whenever the first attempt comes back empty.
+* **zsh has special parameters.** `USERNAME` and `HOST` are tied to the real user and machine, so
+  assigning to them does not do what it looks like — a script that set `USERNAME` connected to the
+  broker as the login user instead. Name them `BROKER_USER`, `BROKER_HOST`.
+* **BSD sed (macOS) has no `\b`.** A word-boundary substitution silently does nothing on a
+  workstation while working on the Pi. Use python for anything that has to run on both.
+
 ## Development Notes
 
 ### Starting the Server
@@ -260,9 +281,22 @@ The server uses SQLite for user management and permissions:
 ## Common Development Tasks
 
 ### Adding a New Organization
-1. Create `config.d/organizations/{org}.yaml`
-2. Add entries to database `permissions` table
-3. Restart server
+
+```
+npx --no frugal-iot-addorganization <org-id> "<name>" <email> <phone> "<broker-password>"
+sudo systemctl reload mosquitto     # re-reads the password file, drops nothing
+sudo systemctl restart frugaliot    # organizations are only read at startup
+```
+
+Run from the server's own directory. The script writes `config.d/organizations/{org}.yaml`, creates
+the OTA directory, creates a login user, adds its `permissions` rows, and sets the organization's
+password in the broker's password file — that last step is the one most easily forgotten when doing
+this by hand, and without it the server's own logger cannot connect as the new organization.
+
+The same string becomes both the login password and the broker password. They are entirely
+different things: the broker password is handed to every logged-in browser (see **Credentials**
+under MQTT below) so it is not a secret, while the login password is. Change the login one
+afterwards with `npx --no frugal-iot-setpassword <org-id> "<real password>"`.
 
 ### Adding a New Device
 - Device connects to MQTT broker
@@ -270,7 +304,13 @@ The server uses SQLite for user management and permissions:
 - Device appears in UI under its organization/project
 
 ### Modifying Routes
-All routes are defined in `frugal-iot-server.js` (main file with ~913 lines)
+
+Most routes are defined in `frugal-iot-server.js` — the dashboard, login and registration,
+`/config.json`, `/data`, `/private`, and OTA.
+
+The platform-to-platform API of API.md is not there: it is a router built by
+`createAPIRouter()` in `lib/api-routes.js` (`/platforms/*`, `/farms/*`, `/devices/*` and its own
+`/data`), mounted under a prefix by the main file. Add an API endpoint there, not here.
 
 ### Updating OTA Binaries
 - Upload via admin dashboard (`POST /ota_update`)
@@ -309,6 +349,78 @@ All routes are defined in `frugal-iot-server.js` (main file with ~913 lines)
 - Logger runs in same process.
 - Session state stored server-side
 - No built-in caching layer (consider adding for historical data queries)
+
+## MQTT, Mosquitto and bridges
+
+Measured on mosquitto 2.0.21 (Pi) and 2.0.20 (production), not read off a web page. Each of these
+was got wrong first.
+
+### What mosquitto reads, and as whom
+
+Mosquitto reads its **configuration** as root and *then* drops to the `mosquitto` user. So a config
+file may be mode 600 root — the bridge one should be, since it holds a password. But it reads the
+**TLS key**, the **password file** and the **ACL file** *after* dropping, so all three must be
+readable by the `mosquitto` user or the broker refuses to start, with an error that says nothing
+about ownership (`Unable to load server key file ... Permission denied`).
+
+The same trap makes `mosquitto_passwd` dangerous: run as root it rewrites the password file owned
+by root, and the broker can then no longer read it. Run it as the file's owner — `addorganization.zsh`
+and `addbridge-prod.zsh` both work out who that is.
+
+### Reload versus restart
+
+* A replaced **certificate** is picked up by `systemctl reload`, dropping no connections.
+* The **password file** and **ACL file** are re-read on reload too.
+* **Bridges are not.** Adding or changing one needs a full restart, briefly dropping every node.
+
+### Bridges
+
+* A bridge speaks MQTT or MQTT-over-TLS only — **it cannot use WebSockets**, and `address` takes no
+  URL scheme. The `wss://` endpoint browsers use cannot carry one; production needs its own TLS
+  listener (8883).
+* `certfile` must contain the intermediate as well as the leaf. A browser can often fill in a
+  missing intermediate from cache; a bridge never can.
+* Loop protection is `try_private`, on by default, and works between two mosquittos. MQTT has no
+  hop count, so three brokers in a cycle — or a non-mosquitto peer — would loop for ever.
+* `cleansession` defaults to false and should stay there. `true` makes the remote re-send every
+  retained message on *every* reconnect, which on a flaky link is a burst of duplicate readings.
+* **The QoS on a `topic` line decides what an outage costs.** At 0, anything published while the
+  far end is unreachable is dropped — a gap. At 1 the broker queues it and delivers the backlog on
+  reconnect, where the receiving logger stamps every reading with its arrival time, so a day's
+  outage arrives claiming to have happened in one instant. A gap is honest; that is not. Readings
+  are bridged at QoS 0 deliberately.
+* Even at QoS 0, the last retained value of each topic is re-sent on reconnect — so expect one row
+  per topic per outage carrying the reconnect timestamp.
+* `notifications` (on by default) publishes a retained `1`/`0` to
+  `$SYS/broker/connection/<remote_clientid>/state` on **both** brokers. That is what
+  `frugal-iot-diagnostic` reads to say whether a bridge is up.
+
+### Access control
+
+`acl_file` is **deny-by-default**: naming one stops every account that has no rule in it, so the
+rule granting the existing organizations has to land in the same change as the one restricting a
+new account. `pattern readwrite %u/#` gives each account its own topic tree — and also denies
+`$SYS`, so a broker with an ACL can no longer tell anyone which bridges are connected.
+
+### What the logger does with what arrives
+
+* **Only five-level topics** (`org/project/node/module/field`) are written to disk. Sets, six-level
+  parameters and the two-level quickdiscover are all dropped by `shouldLog`. So duplicate delivery
+  only costs duplicate *rows* on that one shape — which is why the bridge's topic rules deliberately
+  put their unavoidable overlap on the `set` topics.
+* Readings are timestamped by the **receiving** server as they arrive, not by the node. Any replay
+  or backfill scheme has to deal with that.
+* Nodes publish nearly everything **retained, at QoS 1** — readings, and their min/max/colour/wiring
+  too. A topic published by mistake therefore outlives the mistake, and fixing the node does not
+  remove it; `frugal-iot-clearretained` publishes the empty message that does.
+
+### Credentials
+
+`/config.json` serves the whole configuration — `mqtt_password` included — to any logged-in browser
+(`unsafeCopyConfigFor` in frugal-iot-server.js). An organization's broker password is therefore
+**not a secret**, and nothing secret can live anywhere under `config.d/`. That is why a bridge's
+password goes in `/etc/mosquitto/conf.d/` instead, and why each Pi gets its own broker account
+rather than sharing the organization's.
 
 ## Troubleshooting
 
