@@ -255,6 +255,13 @@ function send_people_list(req, res) {
   });
 }
 
+// Sessions older than this hold that user's permissions from before the change - see the middleware
+// after passport.authenticate('session')
+const permissionsChangedAt = new Map(); // user id -> when it last changed
+function notePermissionsChanged(id) {
+  permissionsChangedAt.set(Number(id), Date.now());
+}
+
 function add_permission(id, capability, org, cb) {
   if ((id === undefined)
     || (capability === undefined) || (capability.length < 2)
@@ -267,6 +274,7 @@ function add_permission(id, capability, org, cb) {
       (cb) => db.get('SELECT COUNT(id) FROM permissions WHERE id = ? AND capability = ? AND org = ?', [id, capability, org], cb),
       (n_perms, cb) => { if (n_perms["COUNT(id)"] != 0) { cb(new Error("Duplicate permission")); } else { cb(null); }},
       (cb) => db.run(sqlAddPermission, [id, capability, org], cb),
+      (cb) => { notePermissionsChanged(id); cb(null); },
     ], cb);
   }
 }
@@ -278,6 +286,7 @@ function permissions_delete(id, capability, org, cb) {
   } else {
     waterfall([
       (cb) => db.get('DELETE FROM permissions WHERE id = ? AND capability = ? AND org = ?', [id,capability,org], cb),
+      (cb) => { notePermissionsChanged(id); cb(null); },
     ], cb);
   }
 }
@@ -806,6 +815,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
               email: user.email,
               phone: user.phone,
               permissions: user.permissions,
+              loginAt: Date.now(), // So a permission change can tell which sessions predate it
             });
           });
         });
@@ -821,6 +831,30 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
 
         // Check if have a session, and if so store in req.user, uses function defined in deserializeUser above
         app.use(passport.authenticate('session')); // Add user to req.user
+
+        // End any session that predates a change to that user's permissions.
+        //
+        // The session carries the permissions read at login, and can_READ, can_ADMIN and the rest
+        // read them from there - so without this a change takes effect only when the user next logs
+        // in. Granting is merely confusing; revoking is worse, because someone whose ADMIN has been
+        // taken away keeps it until their session ends.
+        //
+        // Rather than re-reading the table on every request to catch something this rare, note when
+        // a user's permissions changed and end the sessions older than that. They log in again,
+        // which is a small price for a change that happens a handful of times.
+        //
+        // In memory on purpose: express-session's default store keeps the sessions in this process
+        // too, so the two are lost together on a restart and neither can outlive the other.
+        app.use((req, res, next) => {
+          const changedAt = req.user && permissionsChangedAt.get(Number(req.user.id));
+          if (changedAt && (!req.user.loginAt || (changedAt > req.user.loginAt))) {
+            console.log("Permissions changed for", req.user.id, "- ending the session made before it");
+            // Carry on unauthenticated: a page redirects to login, /config.json answers 401 and the
+            // client redirects itself
+            return req.logout((err) => (err ? next(err) : next()));
+          }
+          next();
+        });
 
         // ===== API Integration: Farm IoT Interoperability Standard =====
         // Its tables are in frugal-iot-createdb.sql, already run by execSqlStart above, so there is
