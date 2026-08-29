@@ -898,11 +898,15 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           (req,res,next) => {
             console.log("Trying to login with redirect to",req.body.url);
             // This is ugly, but I cannot see how to pass the URL to passport.authenticate options
+            // Default the destination rather than trusting every caller to supply one: with no
+            // successRedirect, passport calls next() on success and the request 404s as
+            // "Cannot POST /login" - a confusing way to report a missing form field.
+            const returnTo = req.body.url || '/dashboard';
             passport.authenticate('local', {
               session: true,
               //failWithError: true,
-              failureRedirect: `${loginUrl}?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
-              successRedirect: req.body.url,
+              failureRedirect: `${loginUrl}?register=false&message=Incorrect+username+or+password&url=${returnTo}`,
+              successRedirect: returnTo,
               // In failure case will also be messages in the session which need clearing out TODO-N89
               //failureRedirect: `${loginUrl}?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
             })(req, res, next);
@@ -1055,6 +1059,16 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           },
           send_projects_list,
         );
+        // Log out and go back to the login page. There was no way to do this at all before, which
+        // matters more now that a permissions change ends the session and people log in again.
+        app.get('/logout', (req, res, next) => {
+          // With a url to come back to: without one, POST /login has no successRedirect, so on a
+          // *successful* login passport calls next(), nothing else handles POST /login, and express
+          // answers "Cannot POST /login" - which looks like a broken login rather than a missing
+          // parameter.
+          req.logout((err) => (err ? next(err) : res.redirect(`${loginUrl}?register=false&url=/dashboard`)));
+        });
+
         //  /dashboard is served statically, to logged in users //TODO-N89 restrict orgs to those have permissions for (maybe handled via /config.org )
         const routerDashboard = express.Router();
         app.use('/dashboard', routerDashboard);
