@@ -17,6 +17,7 @@
     "hash-wasm": "^4.12.0",
     "js-yaml": "^4.2.0",
     "morgan": "^1.11.0",
+    "mqtt": "^5.15.2",
     "multer": "^2.1.1",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
@@ -28,7 +29,7 @@
     "frugal-iot-addorganization": "scripts/addorganization.zsh",
     "frugal-iot-setpassword": "scripts/setpassword.zsh",
     "frugal-iot-diagnostic": "scripts/diagnostic.zsh",
-    "frugal-iot-clearretained": "scripts/clearretained.zsh",
+    "frugal-iot-clearretained": "scripts/clearretained.js",
     "frugal-iot-addbridge-prod": "scripts/addbridge-prod.zsh",
     "frugal-iot-addbridge-pi": "scripts/addbridge-pi.zsh"
   },

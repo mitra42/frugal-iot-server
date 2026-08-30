@@ -40,42 +40,6 @@ Any of these work. What differs is only how long the install takes, and how much
 A Zero W runs the server perfectly well once installed. It is *installing* that is slow, because a
 single 1 GHz core has to unpack several hundred packages and compile one of them.
 
-## The short way: one script
-
-Steps 3 to 8 below can be done for you. Once you can ssh into the Pi (steps 1 and 2, which need a
-person with an SD card):
-
-```
-curl -fsSLO https://raw.githubusercontent.com/mitra42/frugal-iot-server/main/scripts/install-pi.sh
-bash install-pi.sh --org myfarm --name "My Farm" --email you@example.com --phone +61123456789
-```
-
-It asks for anything it needs that you did not pass, says what it is doing as it goes, and stops at
-the first thing that fails - leaving a log, and telling you to run `frugal-iot-diagnostic`. Running
-it again after a failure carries on rather than starting over, which matters on a Pi Zero W where one
-step takes about 40 minutes. `--dry-run` checks the arguments and shows the plan without touching the
-machine.
-
-**Passwords** are asked for, not invented, unless you say otherwise: it prompts for each (twice, not
-echoed) and generates one if you just press Enter. Pass them as `--superuser-password`,
-`--login-password` and `--broker-password` to skip the prompts, `--random-passwords` to have all
-three generated, or `--yes` to ask nothing at all — which is what to use over ssh with no terminal.
-A password you chose is not written to the log; a generated one has to be, since otherwise you would
-have no way of knowing it.
-
-**It tells you whether a reboot is needed**, rather than leaving you to wonder — it notices a kernel
-or boot-firmware package in the upgrade, the images in `/boot` changing underneath it, and
-`/var/run/reboot-required`. If none of those happened it says so, and there is nothing more to do.
-
-Fetch it with `curl -O` and then run it, rather than piping curl into bash - piped, it has no
-terminal to ask questions at.
-
-It finishes with a live server and a tested broker. It cannot do step 9, pointing your nodes at it,
-because a node learns its broker by being flashed with it - so it prints the settings to give them.
-Nor step 10, HTTPS.
-
-The steps below are what it does, in the same order, if you would rather do it by hand or need to
-understand what went wrong.
 
 ---
 ### 0. What you need before you start
@@ -163,6 +127,7 @@ From your laptop's terminal:
 ```
 ssh pi@frugaliot.local
 ```
+> **Pi Zero W:** This can take a long time to connect, try `ping frugaliot.local` first to check it is alive
 
 Say `yes` to the fingerprint question, then give the password you set in Imager.
 
@@ -212,6 +177,44 @@ that does match, yet still does not connect, is a fault in the profile Imager wr
 the password — either way `nmtui` is the fix, and it is not worth more time than that.
 (`sudo nmcli device wifi list` shows each nearby network's SSID and whether it is WPA2 or WPA3;
 WPA3 cannot use a derived key at all.)
+
+## 3-8. The short way: one script
+
+Steps 3 to 8 below can be done for you. Once you can ssh into the Pi (steps 1 and 2, which need a
+person with an SD card):
+
+```
+curl -fSLO https://raw.githubusercontent.com/mitra42/frugal-iot-server/main/scripts/install-pi.sh
+bash install-pi.sh --org myfarm --name "My Farm" --email you@example.com --phone +61123456789
+```
+
+It asks for anything it needs that you did not pass, says what it is doing as it goes, and stops at
+the first thing that fails - leaving a log, and telling you to run `frugal-iot-diagnostic`. Running
+it again after a failure carries on rather than starting over, which matters on a Pi Zero W where one
+step takes about 40 minutes. `--dry-run` checks the arguments and shows the plan without touching the
+machine.
+
+**Passwords** are asked for, not invented, unless you say otherwise: it prompts for each (twice, not
+echoed) and generates one if you just press Enter. Pass them as `--superuser-password`,
+`--login-password` and `--broker-password` to skip the prompts, `--random-passwords` to have all
+three generated, or `--yes` to ask nothing at all — which is what to use over ssh with no terminal.
+A password you chose is not written to the log; a generated one has to be, since otherwise you would
+have no way of knowing it.
+
+**It tells you whether a reboot is needed**, rather than leaving you to wonder — it notices a kernel
+or boot-firmware package in the upgrade, the images in `/boot` changing underneath it, and
+`/var/run/reboot-required`. If none of those happened it says so, and there is nothing more to do.
+
+Fetch it with `curl -O` and then run it, rather than piping curl into bash - piped, it has no
+terminal to ask questions at.
+
+It finishes with a live server and a tested broker. It cannot do step 9, pointing your nodes at it,
+because a node learns its broker by being flashed with it - so it prints the settings to give them.
+Nor step 10, HTTPS.
+
+The steps below are what it does, in the same order, if you would rather do it by hand or need to
+understand what went wrong, otherwise skip to Step 9.
+
 
 ### 3. Update the operating system and install the prerequisites
 
@@ -726,9 +729,6 @@ It comes in three parts, and only the first is a one-off:
 * **11b — authorizing this Pi on that server.** One command, run there, once per Pi.
 * **11c — pointing this Pi at it.** One command, run here, once per Pi.
 
-If someone has already done 11a for the server you are bridging to — the usual case once the first
-Pi is working — **start at 11b**.
-
 **What you get, and what you do not.** While the link is up, readings appear on production within
 a second or so. While it is down, the Pi records everything as usual and production simply has a
 gap — the readings taken during an outage never reach it. That is a deliberate choice: the
@@ -740,8 +740,8 @@ takes effect when it reconnects.
 
 #### 11a. Preparing a production server to accept bridges
 
-Once per production server, not per Pi — and someone has probably already done it for
-`frugaliot.naturalinnovation.org`. If so, skip to 11b.
+Once per production server, not per Pi — and if bridging to `frugaliot.naturalinnovation.org`
+this has already been done. If so, skip to 11b.
 
 **Add a listener for bridges.** A Mosquitto bridge speaks MQTT or MQTT-over-TLS and cannot use
 WebSockets, so the existing `wss://` path that browsers and servers use cannot carry this. It needs
@@ -894,7 +894,7 @@ Once per Pi. Run the command 11b printed, from this installation's directory:
 
 ```
 cd ~/frugal-iot
-npx --no frugal-iot-addbridge-pi --org <org-id> --host <prod-host> --account bridge-<site-name>
+npx --no frugal-iot-addbridge-pi <org-id> <prod-host> bridge-<site-name>
 ```
 
 It asks for the password rather than taking it on the command line, so it stays out of your shell
@@ -1060,7 +1060,11 @@ npx --no frugal-iot-clearretained 'myfarm/lotus/+/sht/temperture/#'
 ```
 
 Quote the pattern or the shell will expand it. That lists what is retained and changes nothing;
-add `--delete` to the same command to remove it.
+add the word `delete` at the end of the same command to remove it.
+
+> `delete` is a bare word rather than a `--delete` flag on purpose. npm parses the command line of
+> an `npx` invocation itself and swallows any `--flag` it does not recognise, so `--delete` would
+> never reach the script and it would quietly list instead of deleting.
 
 > Look before deleting. A node's `min`, `max`, `color` and `wired` settings are retained messages
 > too, and they are how the dashboard knows how to draw it — delete those and the node has to be

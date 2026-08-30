@@ -206,6 +206,12 @@ Four things have caused real bugs here, more than once each:
   broker as the login user instead. Name them `BROKER_USER`, `BROKER_HOST`.
 * **BSD sed (macOS) has no `\b`.** A word-boundary substitution silently does nothing on a
   workstation while working on the Pi. Use python for anything that has to run on both.
+* **A script run through `npx` must take positional arguments.** npm parses the whole command line
+  itself, treats any `--flag` it does not recognise as an unknown config setting, and passes only
+  the *values* on — so `npx --no frugal-iot-foo --org myfarm` reaches the script as a bare
+  `myfarm`, and it reports an unexpected argument it never asked for. That is why every script
+  here takes positional arguments. `npx --no cmd -- --flag value` does work, but relies on whoever
+  is typing it knowing that.
 
 ## Development Notes
 

@@ -15,8 +15,13 @@
 # Run from the server's own directory, the one holding frugal-iot.db.
 #
 # Usage:
-#   npx --no frugal-iot-addbridge-pi --org <org-id> --host <prod-host> --account <account> [--replace]
+#   npx --no frugal-iot-addbridge-pi <org-id> <prod-host> <account>
 #   scripts/addbridge-pi.zsh --org myfarm --host prod.example.org --account bridge-northfield
+#
+# Both forms work. The positional one is the one to use with npx, because npm swallows any --flag
+# it does not recognise ("Unknown cli config") and passes only the values through, so
+# "npx ... --org myfarm" reaches this script as just "myfarm". Putting "--" before the flags also
+# works, but the positional form is harder to get wrong.
 #
 # The password is asked for rather than passed on the command line, so it does not end up in your
 # shell history. Give it with --password only for an unattended run.
@@ -26,12 +31,17 @@ set -euo pipefail
 SCRIPT_NAME=$0
 
 usage() {
-  echo "Usage: ${SCRIPT_NAME} --org <org-id> --host <prod-host> --account <account> [--port N] [--password PW] [--replace]" >&2
-  echo "Example: ${SCRIPT_NAME} --org myfarm --host prod.example.org --account bridge-northfield" >&2
+  echo "Usage: ${SCRIPT_NAME} <org-id> <prod-host> <account> [password]" >&2
+  echo "   or: ${SCRIPT_NAME} --org <org-id> --host <prod-host> --account <account> [--port N] [--password PW] [--replace]" >&2
+  echo "Example: ${SCRIPT_NAME} myfarm prod.example.org bridge-northfield" >&2
+  echo "" >&2
+  echo "Through npx, use the positional form: npm swallows unrecognised --flags and passes only" >&2
+  echo "their values on, so '--org myfarm' arrives here as just 'myfarm'." >&2
   exit 1
 }
 
 ORG_ID=""; PROD_HOST=""; ACCOUNT=""; PASSWORD=""; PROD_PORT=8883; REPLACE=false
+POSITIONAL=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,11 +51,30 @@ while [[ $# -gt 0 ]]; do
     --password) PASSWORD=${2:-}; shift 2 ;;
     --port)     PROD_PORT=${2:-}; shift 2 ;;
     --replace)  REPLACE=true; shift ;;
-    *) echo "Error: unexpected argument '$1'" >&2; usage ;;
+    -*) echo "Error: unknown option '$1'" >&2; usage ;;
+    *)  POSITIONAL+=("$1"); shift ;;
   esac
 done
 
-[[ -z "$ORG_ID" || -z "$PROD_HOST" || -z "$ACCOUNT" ]] && usage
+# Fill anything not given as a flag from the positional arguments, in the order the usage line
+# shows. This is what makes the npx form work: npm eats "--org" and hands us a bare "myfarm".
+# Written as "if" rather than "[[ ... ]] && X=Y", whose false case is a non-zero last command and
+# would end the script under "set -e".
+# Fill whichever are still empty, in the order the usage line shows them, consuming the
+# positionals in turn rather than by fixed position - so a half-and-half command line still lands
+# correctly. Done inline, not through a function returning its value: a command substitution runs
+# in a subshell, where the counter would advance and then be thrown away, giving every field the
+# same first positional.
+POS_N=1
+for _field in ORG_ID PROD_HOST ACCOUNT PASSWORD; do
+  if [[ -z "${(P)_field}" ]] && (( POS_N <= ${#POSITIONAL} )); then
+    typeset -g "${_field}"="${POSITIONAL[POS_N]}"
+    POS_N=$((POS_N + 1))
+  fi
+done
+unset _field
+
+if [[ -z "$ORG_ID" || -z "$PROD_HOST" || -z "$ACCOUNT" ]]; then usage; fi
 
 BRIDGE_CONF=/etc/mosquitto/conf.d/frugal-iot-bridge.conf
 
@@ -60,7 +89,8 @@ fi
 
 if [[ -e "$BRIDGE_CONF" && "$REPLACE" != true ]]; then
   echo "Error: ${BRIDGE_CONF} already exists - this Pi is already bridged." >&2
-  echo "Add --replace to overwrite it, or edit it by hand." >&2
+  echo "Add --replace to overwrite it, or edit it by hand. Through npx that flag needs a '--'" >&2
+  echo "ahead of it - 'npx --no frugal-iot-addbridge-pi -- --org ... --replace' - or npm eats it." >&2
   exit 1
 fi
 
