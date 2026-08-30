@@ -695,6 +695,101 @@ mosquitto_sub -h localhost -u myfarm -P '<broker-password>' -t '#' -v
 Every reading from every node should scroll past. Seeing anything here also proves the broker's
 port 1883 is reachable from off the Pi, which is what the nodes need.
 
+### 9a. Optional: outgoing mail, so people can reset a forgotten password
+
+Without this, a forgotten password can only be fixed by you, on the Pi, with
+`npx --no frugal-iot-setpassword <username> <new-password>`. The login page's "Forgot password?"
+link says "Password reset is not available on this server" rather than pretending to send anything.
+
+An offline Pi cannot send mail at all, so skip this unless it has internet access.
+
+Mail sent straight from a home broadband connection is almost always treated as spam, so this
+relays through somebody else's SMTP server rather than sending directly. Gmail is the usual choice
+and is written out in full below; any other provider works the same way.
+
+#### With Gmail
+
+Use a Google account you are willing to have the Pi send as. A separate account for the purpose is
+better than your own mailbox — the password ends up in a file on an SD card in a shed.
+
+**1. Turn on 2-Step Verification** on that account, at
+<https://myaccount.google.com/signinoptions/twosv>.
+
+This is not optional and it is where most people get stuck: **app passwords do not exist until
+2-Step Verification is on**. Until then the page in step 2 simply says the setting is not available,
+without explaining why.
+
+**2. Create an app password** at <https://myaccount.google.com/apppasswords>.
+
+Type a name for it — anything you will recognise later, such as `Frugal IoT Pi` — and create it.
+Google shows you **16 lowercase letters, in four groups of four**, once. Copy them now; you cannot
+come back and read it again, only delete it and make another.
+
+The groups are only there to make it readable. **Type it into the config with the spaces removed**,
+as one 16-character word.
+
+**3. Fill in `config.d/email.yaml`:**
+
+```yaml
+host: smtp.gmail.com
+port: 587
+user: yourname@gmail.com
+pass: "abcdefghijklmnop"          # the 16 characters from step 2, spaces removed
+from: Frugal IoT <yourname@gmail.com>
+```
+
+Things that catch people out with Gmail specifically:
+
+* **`from:` must be the same address as `user:`.** Gmail rewrites the sender to the account you
+  authenticated as, so a different address here does not fail — it quietly arrives as something
+  else, which is harder to diagnose than an error. (An address you have set up under Gmail's
+  "Send mail as" is the one exception.)
+* **`user:` is the full address**, including `@gmail.com`, not just the part before it.
+* **`Username and Password not accepted`** in the server's log means the login password was used
+  instead of an app password. Gmail has not accepted account passwords over SMTP for years.
+* **Port 465 also works** if 587 is blocked where the Pi is; the software works out the encryption
+  from the port number, so change nothing else.
+* **A free Gmail account can send around 500 messages a day.** Password resets will not come close.
+* **Google Workspace administrators can switch app passwords off** for a whole domain. If step 2
+  offers you nothing on a work account, that is why, and you will need a real SMTP relay instead.
+
+#### With any other provider
+
+The same four settings, with that provider's SMTP host:
+
+```yaml
+host: smtp.example.org
+port: 587           # 465 is implicit TLS, 587 and 25 are STARTTLS
+user: frugaliot@example.org
+pass: an-app-password-not-your-login-password
+from: Frugal IoT <frugaliot@example.org>
+```
+
+Fastmail, Zoho, Proton (via its bridge) and the rest all issue app passwords in much the same way,
+and for the same reason: one leaking off a Pi then costs you one mailbox rather than the account.
+
+#### Checking it, either way
+
+Restart the server and look at its output:
+
+* `Sending mail via smtp.gmail.com:587 as ...` — configured.
+* `Not sending mail (no host/from in config.d/email.yaml) ...` — it did not find a `host` and a
+  `from`, so the reset link will say it is unavailable.
+
+Then use "Forgot password?" on the login page with your own account. If the mail never arrives, the
+reason is in the server's log — the page deliberately gives the same answer whether or not the
+address is known to it, so it cannot be used to find out who has an account here.
+
+Two more things worth knowing:
+
+* `pass` sits in a file on the SD card in plain text. Give that mailbox nothing else to lose.
+* If the Pi is behind a proxy that does not set `X-Forwarded-Host`, the link in the mail will point
+  at the wrong address. Set `baseurl: https://your.address` in the same file.
+
+The reset code itself is stored nowhere — it is a hash of the account, its current password and the
+time, valid between five and ten minutes and dead the moment it is used. There is no table to
+maintain and nothing to clean up. Restarting the server invalidates any code already sent.
+
 ### 10. HTTPS and over-the-air firmware updates
 
 **To be written.** Everything above gives you a plain HTTP server on your local network, which is

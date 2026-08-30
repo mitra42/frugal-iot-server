@@ -56,7 +56,7 @@ copy_if_missing() {
 
 echo "Configuration:"
 copy_if_missing "${PKG}/config.yaml" "./config.yaml"
-for f in logger.yaml mqtt.yaml server.yaml; do
+for f in logger.yaml mqtt.yaml server.yaml email.yaml; do
   copy_if_missing "${PKG}/config.d/${f}" "./config.d/${f}"
 done
 # The schema describes the sensor types the software understands, so a release changing it matters

@@ -127,11 +127,35 @@ import sqlite3 from 'sqlite3'; // https://www.npmjs.com/package/sqlite3
 import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
 // import cookieParser from 'cookie-parser'; // https://www.npmjs.com/package/cookie-parser (note comment on https://www.npmjs.com/package/express-session that not needed and conflicts with session)
 import {waterfall, each} from 'async';
+import { mailInit, mailConfigured, sendMail } from './lib/mailer.js';
+import { resetCodeMake, resetCodeCheck, resetRateOk } from './lib/resetcode.js';
 // import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
 
 export let config; // Live binding - lib/api-routes.js reads the current value at request time
 let mqttLogger = new MqttLogger();
 const loginUrl = '/dashboard/login.html';
+
+// Back to the login page with something to say. A form POST can only be answered with a redirect
+// and there is no session to hang a message on, so it all goes in the query string, where
+// mqtt-login reads it as attributes. "mode" is which of the four forms to show;
+// "messagetype" is error or info, which is the difference between a red box and a green one.
+function loginRedirect(res, { mode = 'signin', message, messagetype, url }) {
+  const q = new URLSearchParams({ mode });
+  if (message) { q.set('message', message); }
+  if (messagetype) { q.set('messagetype', messagetype); }
+  if (url) { q.set('url', url); }   // Encoded here: a return url usually has a query string of its own
+  res.redirect(`${loginUrl}?${q}`);
+}
+// A password reset link carries its token in the query string, and everything that logs a URL goes
+// to the journal, which outlives the ten minutes the token is good for.
+function redactUrl(url) {
+  return String(url).replace(/([?&]code=)[^&]*/, '$1REDACTED');
+}
+// Where this server can be reached from outside, for the link in a reset email. Behind a proxy that
+// does not set X-Forwarded-Host there is nothing in the request to go on, hence the config override.
+function publicBase(req) {
+  return (config.email && config.email.baseurl) || `${req.protocol}://${req.get('host')}`;
+}
 
 const optionsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -459,10 +483,20 @@ function execSqlStart(cb) {
   });
 }
 
+// Look somebody up by whatever they typed into the one "Username or email" box on the login page.
+// Username first, so that a username with an "@" in it still works, then email - which is not
+// declared UNIQUE in the schema, so take the first match rather than assuming there is only one.
+function findUserByLogin(login, cb) {
+  db.get('SELECT * FROM users WHERE username = ?', [ login ], function(err, user) {
+    if (err || user || !String(login || '').includes('@')) { return cb(err, user); }
+    db.get('SELECT * FROM users WHERE email = ? COLLATE NOCASE', [ login ], cb);
+  });
+}
+
 // This verifies the user, and if successful returns a data structure via cb
 // see passport.authenticate('local'... for where it gets used
 passport.use(new LocalStrategy(function verify(username, password, cb) {
-  db.get('SELECT * FROM users WHERE username = ?', [ username ], function(err, user) {
+  findUserByLogin(username, function(err, user) {
     if (err) { return cb(err); }
     if (!user) { return cb(null, false, { message: 'Incorrect username or password+' }); }
     // TODO- - maybe just import pbkdf2 and timingSafeEqual ?
@@ -494,7 +528,8 @@ function loggedInOrRedirect(req, res, next) {
     next();
   } else {
     // If originalUrl is /private/index.html then req.url is just /index.html
-    res.redirect(307, `${loginUrl}?register=false&message=Please%20login&url=` + req.originalUrl);
+    const q = new URLSearchParams({ mode: 'signin', message: 'Please login', url: req.originalUrl });
+    res.redirect(307, `${loginUrl}?${q}`);
   }
 }
 function hasPermissions(user, org, permission) {
@@ -576,8 +611,9 @@ function shouldIBeLoggedIn(req, res, next) {
     // intact), encoded so its own query string can't corrupt this redirect's query string. Carry "lang"
     // over as its own top-level param (from req.query, not duplicated into "url") so login.html itself
     // renders in the right language.
-    const langParam = req.query.lang ? `&lang=${encodeURIComponent(req.query.lang)}` : '';
-    res.redirect(307, `${loginUrl}?register=false&message=Please%20login${langParam}&url=${encodeURIComponent(req.originalUrl)}`);
+    const q = new URLSearchParams({ mode: 'signin', message: 'Please login', url: req.originalUrl });
+    if (req.query.lang) { q.set('lang', req.query.lang); }
+    res.redirect(307, `${loginUrl}?${q}`);
   } else {
     next();
   }
@@ -689,6 +725,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     // Summarize rather than dumping the whole config: it is mostly the sensor schema, and it holds
     // each organization's mqtt_password, which should not be going to the console and the journal.
     console.log("Broker", config.mqtt.broker, "- organizations:", Object.keys(config.organizations).join(", ") || "(none)");
+    console.log(mailInit(config.email));
     // Could genericize config defaults
     // HTTP request logging. "morgan: false" in config.d/server.yaml turns it off completely, which
     // matters on a machine running from an SD card: every request logged is a line to the journal,
@@ -702,6 +739,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         morganFormat = ':method :url :req[range] :status :res[content-length] :response-time ms :req[referer]'
       }
       // Seems to be writing to syslog which is being cycled.
+      morgan.token('url', (req) => redactUrl(req.originalUrl || req.url)); // see redactUrl
       app.use(morgan(morganFormat)); // see https://www.npmjs.com/package/morgan )
     }
 
@@ -721,7 +759,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     // Just log the request for now
     // noinspection JSCheckFunctionSignatures
     app.use('/', (req, res, next) => {
-      console.log(req.url);
+      console.log(redactUrl(req.url));
       next();
     })
 
@@ -902,10 +940,13 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             // successRedirect, passport calls next() on success and the request 404s as
             // "Cannot POST /login" - a confusing way to report a missing form field.
             const returnTo = req.body.url || '/dashboard';
+            const failureQuery = new URLSearchParams({
+              mode: 'signin', messagetype: 'error',
+              message: 'Incorrect username or password', url: returnTo });
             passport.authenticate('local', {
               session: true,
               //failWithError: true,
-              failureRedirect: `${loginUrl}?register=false&message=Incorrect+username+or+password&url=${returnTo}`,
+              failureRedirect: `${loginUrl}?${failureQuery}`,
               successRedirect: returnTo,
               // In failure case will also be messages in the session which need clearing out TODO-N89
               //failureRedirect: `${loginUrl}?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
@@ -931,14 +972,96 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                     [username, hashedPassword, salt, organization, req.body.name, req.body.email, req.body.phone], (err) => {
                       if (err) {
                         console.log(err);
-                        res.redirect(`${loginUrl}?register=true&message=Registration%20failed&url=${req.body.url}`);
+                        loginRedirect(res, { mode: 'register', messagetype: 'error',
+                          message: 'Registration failed', url: req.body.url });
                       } else {
-                        res.redirect(`${loginUrl}?register=false&message=Registration%20successful%20-%20please%20login&url=${req.body.url}`);
+                        loginRedirect(res, { mode: 'signin', messagetype: 'info',
+                          message: 'Registration successful - please login', url: req.body.url });
                       }
                     });
                 }
               });
             }
+          });
+        });
+
+        // ---------- Forgotten password ----------
+        // Nothing is stored: the code is an HMAC over the account and a five-minute slot, so it
+        // expires by arithmetic and stops working the moment the password changes. See
+        // lib/resetcode.js. The mail carries both a link (a long token) and six digits to type.
+        app.post('/forgotpassword', (req, res) => {
+          const login = String(req.body.username || '').trim();
+          const url = req.body.url;
+          // The same answer whether or not the account exists, so this form cannot be used to find
+          // out who has an account here.
+          const sameAnswer = { mode: 'reset', messagetype: 'info', url,
+            message: 'If that account exists we have emailed a reset code' };
+          if (!mailConfigured()) {
+            return loginRedirect(res, { mode: 'signin', messagetype: 'error', url,
+              message: 'Password reset is not available on this server' });
+          }
+          if (!resetRateOk('send', login.toLowerCase())) {
+            return loginRedirect(res, { mode: 'forgot', messagetype: 'error', url,
+              message: 'Too many attempts - please wait a few minutes' });
+          }
+          findUserByLogin(login, (err, user) => {
+            if (err) { console.error("Looking up", login, "for a password reset:", err.message); }
+            if (!user || !user.email) { return loginRedirect(res, sameAnswer); }
+            const { code, token } = resetCodeMake(user);
+            const q = new URLSearchParams({ mode: 'reset', username: user.username, code: token });
+            if (url) { q.set('url', url); }
+            const link = `${publicBase(req)}${loginUrl}?${q}`;
+            const text = [
+              `Somebody asked to reset the Frugal IoT password for ${user.username}.`,
+              ``,
+              `Open this link:`,
+              link,
+              ``,
+              `or type this code into the reset form: ${code}`,
+              ``,
+              `Either works for the next ten minutes at most. If it was not you, ignore this mail -`,
+              `nothing has changed and nothing will until the code is used.`,
+            ].join('\n');
+            sendMail({ to: user.email, subject: 'Frugal IoT password reset', text }, (err) => {
+              // Still the same answer: telling them the mail failed would also tell an outsider
+              // that the account exists. It is logged loudly instead, because a server whose SMTP
+              // is broken looks from the outside exactly like one that is working.
+              if (err) { console.error("Could not send reset mail for", user.username, "-", err.message); }
+              loginRedirect(res, sameAnswer);
+            });
+          });
+        });
+        app.post('/resetpassword', (req, res) => {
+          const login = String(req.body.username || '').trim();
+          const url = req.body.url;
+          const notValid = { mode: 'reset', messagetype: 'error', url,
+            message: 'That code is not valid or has expired' };
+          if (!resetRateOk('check', login.toLowerCase())) {
+            return loginRedirect(res, { mode: 'reset', messagetype: 'error', url,
+              message: 'Too many attempts - please wait a few minutes' });
+          }
+          if (!req.body.password) { return loginRedirect(res, notValid); }
+          findUserByLogin(login, (err, user) => {
+            if (err) { console.error("Looking up", login, "to reset a password:", err.message); }
+            if (!user || !resetCodeCheck(user, String(req.body.code || '').trim())) {
+              return loginRedirect(res, notValid);
+            }
+            crypto.randomBytes(16, (err, salt) => {
+              if (err) { return res.status(500).send('Internal error 1101'); }
+              crypto.pbkdf2(req.body.password, salt, 310000, 32, 'sha256', (err, hashedPassword) => {
+                if (err) { return res.status(500).send('Internal error 1103'); }
+                db.run('UPDATE users SET hashed_password = ?, salt = ? WHERE id = ?',
+                  [hashedPassword, salt, user.id], (err) => {
+                    if (err) {
+                      console.error("Could not reset the password for", user.username, "-", err.message);
+                      return loginRedirect(res, notValid);
+                    }
+                    console.log("Password reset for", user.username);
+                    loginRedirect(res, { mode: 'signin', messagetype: 'info', url,
+                      message: 'Password reset - please sign in' });
+                  });
+              });
+            });
           });
         });
 
@@ -1066,7 +1189,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           // *successful* login passport calls next(), nothing else handles POST /login, and express
           // answers "Cannot POST /login" - which looks like a broken login rather than a missing
           // parameter.
-          req.logout((err) => (err ? next(err) : res.redirect(`${loginUrl}?register=false&url=/dashboard`)));
+          req.logout((err) => (err ? next(err) : loginRedirect(res, { url: '/dashboard' })));
         });
 
         //  /dashboard is served statically, to logged in users //TODO-N89 restrict orgs to those have permissions for (maybe handled via /config.org )

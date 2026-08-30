@@ -19,6 +19,7 @@
     "morgan": "^1.11.0",
     "mqtt": "^5.15.2",
     "multer": "^2.1.1",
+    "nodemailer": "^9.0.6",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
     "sqlite3": "^5.1.7"
@@ -39,6 +40,7 @@
     "frugal-iot-server.js",
     "frugal-iot-createdb.sql",
     "config.yaml",
+    "config.d/email.yaml",
     "config.d/logger.yaml",
     "config.d/mqtt.yaml",
     "config.d/server.yaml",
