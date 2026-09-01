@@ -1262,9 +1262,18 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             if (isUnsafe([req.body.organization, req.body.project, req.body.deviceid, req.body.otakey])) {
               return cb(new Error("Parameters may not contain '/'"));
             }
+            // An upload that names no organization is a different fault from one the user is not
+            // allowed to make, and without this they are indistinguishable: hasPermissions can
+            // never match an undefined org, so a form that fails to send the field reports itself
+            // as a permission problem and sends whoever is debugging it to the permissions table.
+            // Note multer fills req.body only from the parts that arrive before the file, so a
+            // field the form sends *after* the file is missing here too, even though it was sent.
+            if (!req.body.organization) {
+              return cb(new Error("No organization sent with the upload - the form must send an 'organization' field, ahead of the file"));
+            }
             // Shouldnt actually happen, as dashboard should only show compliant orgs, so this would be a hack (or bad timing)
             if (!hasPermissions(req.user, req.body.organization, "OTAUPDATE")) {
-              return cb(new Error("Permission denied to OTAUPDATE"));
+              return cb(new Error(`Permission denied to OTAUPDATE for organization '${req.body.organization}'`));
             }
             let dir;
             if (!req.body.otakey) {
