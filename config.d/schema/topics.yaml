@@ -423,7 +423,7 @@ lux:
   min:      0
   max:      65000
   width:    5
-  color:    yellow
+  color:    "#b8860b"
   log:      true
   rw:       r
   duplicates:
