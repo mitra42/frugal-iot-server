@@ -21,8 +21,8 @@
  O /config.json Return configuration info - depends on user's org
  O /data  Back files from logger for graphing
  A /dashboard serves dashboard via frugal-iot-client
- * /debug repurposed for development
- * /echo  Send back headers etc
+ X /debug repurposed for development - commented out, see the note by the route
+ X /echo  Send back headers etc - commented out, see the note by the route
  * /login (get) served under default handler - which might go away TODO-N89 make sure not hidden under dashboards Authentication
  * /login (post) login a user, & redirect (to dashboard typically)
  * /node_modules  Javascript libraries (from frugal-iot-client)
@@ -173,14 +173,19 @@ const responseHeaders = {
 };
 // ============ Helper functions ============
 // Note attribs is the otakey e.g. sht30_d1_mini
+// The four parameters come from the URL of a route with no login on it (devices call it), so they
+// are as untrusted as anything gets here. safeJoin drops any candidate that would leave otadir -
+// before this, `..` in a parameter could read a file called firmware.bin from anywhere the process
+// could reach. A dropped candidate is simply not looked for, which reads the same to the caller as
+// a file that is not there.
 function findMostSpecificFile(topdir, org, project, node, attribs, cb) {
   let possfiles = [
-    `${project}/${node}`, // Unlikely - if specify node, should be at the org level
-    `+/${node}`,
-    `${project}/${attribs}`,
-    `+/${attribs}`
+    [project, node], // Unlikely - if specify node, should be at the org level
+    ['+', node],
+    [project, attribs],
+    ['+', attribs]
     //TODO-C14 might want to accept other variants on Arduino like sht30.ini.bin
-    ].map(x => `${topdir}/${org}/${x}/firmware.bin`);
+    ].map(x => safeJoin(topdir, org, ...x, 'firmware.bin')).filter((x) => x);
   detectSeries(possfiles, (path, cb1) => {
       access(path, constants.R_OK, (err) => { cb1(null, !err); })},
     cb);
@@ -217,11 +222,20 @@ function startServer() {
   });
 }
 function isUnsafe(arr) {
-  return arr.some( x => x && x.includes("/"))
+  return arr.some( x => x && (x.includes("/") || x === ".." ))
 }
-// Dont let client supplied filepath go up directorey tree
-function sanitize(filepath) {
-  return filepath.replace(/[.][.]\//g, '/');
+// Build a path under topdir out of untrusted components, or return null if the result would not be
+// inside topdir. Resolve first and then ask where the answer landed: the reverse - looking for ".."
+// in the components and removing it - is what the two functions this replaced did, and both were
+// defeatable. A single-pass replace of "../" turns "....//" back into "../" rather than removing it,
+// and Express has already decoded "%2e%2e" and "..%2f" by the time a route sees them, so there is
+// nothing distinctive left to search for. Where the resolved path is cannot be argued with.
+// Callers must treat null as "refuse the request" - it is not a path.
+function safeJoin(topdir, ...parts) {
+  if (parts.some((x) => (x === undefined) || (x === null) || (x === ''))) return null;
+  const root = path.resolve(topdir);
+  const wanted = path.resolve(root, path.join(...parts.map(String)));
+  return ((wanted === root) || wanted.startsWith(root + path.sep)) ? wanted : null;
 }
 
 function adminUrl(req, message, lang) {
@@ -692,13 +706,18 @@ app.options('/', (req, res) => {
 
 // Start the recognition of specific URL paths
 
-app.get('/echo', (req, res) => {
-  res.status(200).json(req.headers);
-});
+// Both of these are commented out rather than deleted: each was added to debug one specific thing
+// and neither is needed in normal running. They sit here, above the session middleware, so nothing
+// authenticates them - /debug in particular listed every node, project and topic the logger knows
+// about to anyone who asked. Uncomment whichever is wanted while debugging, and comment it out
+// again afterwards.
+//app.get('/echo', (req, res) => {
+//  res.status(200).json(req.headers);
+//});
 // This /debug can be freely rewritten to help debug stuff, nothing should rely on what it does remaining constant
-app.get('/debug', (req, res) => {
-  res.status(200).json(mqttLogger.reportNodes());
-});
+//app.get('/debug', (req, res) => {
+//  res.status(200).json(mqttLogger.reportNodes());
+//});
 // Stick this as middleware to debug
 // noinspection JSUnusedLocalSymbols
 function debugRoutes(req, res, next) {
@@ -1093,8 +1112,11 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           loggedInOrFail,
           can_OTAUPDATE,
           (req,res) => {
-            let remainingpath = req.params.remainingpath.join('/');
-            let dirpath = `${config.server.otadir}/${req.params.org}/${sanitize(remainingpath)}`;
+            let dirpath = safeJoin(config.server.otadir, req.params.org, ...[].concat(req.params.remainingpath));
+            if (!dirpath) {
+              res.status(400).send("Bad path");
+              return;
+            }
             console.log("Deleting OTA file", dirpath);
             rm(dirpath, { recursive: true, force: true }, (err, unused) => {
               if (err) {
@@ -1119,8 +1141,11 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           loggedInOrFail,
           can_OTAUPDATE,
           (req,res) => {
-            let remainingpath = req.params.remainingpath.join('/');
-            let filepath = `${config.server.otadir}/${req.params.org}/${sanitize(remainingpath)}/firmware.bin`;
+            let filepath = safeJoin(config.server.otadir, req.params.org, ...[].concat(req.params.remainingpath), 'firmware.bin');
+            if (!filepath) {
+              res.status(400).send("Bad path");
+              return;
+            }
             console.log("Sending OTA file", filepath);
             res.sendFile(filepath, {}, (err) => {
               if (err) {
@@ -1215,8 +1240,23 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         // Important that these aren't cached, or the data will not be updated.
         routerData.use(
           loggedInOrRedirect,
+          // The organization for the permission check comes out of the path, and express.static
+          // resolves "." and ".." afterwards - so before this, a request naming one organization
+          // and reading another's file passed the check: /data/dev/../varta/x.csv was authorised as
+          // "dev" and served varta's file. Percent-encoding (%2e%2e, ..%2f) did the same, and a
+          // browser hides it by normalising the path itself - but curl --path-as-is, or any script
+          // writing its own request, does not. Decoding and normalising here means the organization
+          // checked is the one whose file express.static will actually reach.
           (req,res,next) => {
-            res.locals.org = req.url.split("/")[1];
+            let decoded;
+            try {
+              decoded = decodeURIComponent(req.path);
+            } catch (e) { // A malformed escape; nothing legitimate sends one
+              res.sendStatus(400);
+              return;
+            }
+            // path.posix, not path: a URL separator is "/" whoever is running the server.
+            res.locals.org = path.posix.normalize(decoded).split("/")[1];
             next(); }, //
           can_READ,
           // Nothing logged here on purpose - morgan already reports the URL and status of this same
@@ -1278,10 +1318,12 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             let dir;
             if (!req.body.otakey) {
               return cb(new Error("must specify either OTA key or Device ID"));
-            } else if (req.body.project) {
-              dir = `${config.server.otadir}/${req.body.organization}/${req.body.project}/${req.body.otakey}`;
             } else {
-              dir = `${config.server.otadir}/${req.body.organization}/+/${req.body.otakey}`;
+              dir = safeJoin(config.server.otadir, req.body.organization,
+                req.body.project || '+', req.body.otakey);
+              if (!dir) {
+                return cb(new Error("Parameters may not name a directory outside the OTA directory"));
+              }
             }
             mkdir(dir, {recursive: true}, (err, unusedpath) => {
               if (err) {
