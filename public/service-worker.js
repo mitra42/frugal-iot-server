@@ -20,37 +20,36 @@ const urlsToCache = [
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME)
-            .then(cache => {
-                console.log('Opened cache');
-                return cache.addAll(urlsToCache);
-            })
-    );
-});
-
-self.addEventListener('fetch', event => {
-    event.respondWith(
-        caches.match(event.request)
-            .then(response => {
-                if (response) {
-                    return response;
-                }
-                return fetch(event.request);
-            })
+            .then(cache => Promise.all(urlsToCache.map(url =>
+                // 'reload' bypasses the HTTP cache, which serves /node_modules immutable for a day -
+                // without it a same-day release caches the library it was meant to replace
+                fetch(new Request(url, {cache: 'reload'}))
+                    .then(response => response.ok
+                        ? cache.put(url, response)
+                        : Promise.reject(new Error(url + ' -> ' + response.status))))))
+            // Without this the new worker waits until every tab of the origin is closed at once.
+            // Reloading does not release the old one, so a release can stay invisible for days.
+            .then(() => self.skipWaiting())
     );
 });
 
 // Delete old caches during activation
 self.addEventListener('activate', event => {
-    const cacheWhitelist = [CACHE_NAME];
     event.waitUntil(
-        caches.keys().then(cacheNames => {
-            return Promise.all(
-                cacheNames.map(cacheName => {
-                    if (cacheWhitelist.indexOf(cacheName) === -1) {
-                        return caches.delete(cacheName);
-                    }
-                })
-            );
-        })
+        caches.keys()
+            .then(cacheNames => Promise.all(
+                cacheNames.filter(cacheName => cacheName !== CACHE_NAME)
+                    .map(cacheName => caches.delete(cacheName))))
+            // Take over the pages that are already open, rather than only ones opened from now on
+            .then(() => self.clients.claim())
+    );
+});
+
+self.addEventListener('fetch', event => {
+    event.respondWith(
+        // Scoped to CACHE_NAME: a bare caches.match searches every cache in the origin, so a
+        // leftover older cache answers first and the version bump achieves nothing
+        caches.match(event.request, {cacheName: CACHE_NAME})
+            .then(response => response || fetch(event.request))
     );
 });

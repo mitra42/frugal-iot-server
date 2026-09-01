@@ -197,6 +197,14 @@
 </div>
     <script>
       if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+            // The worker calls skipWaiting(), so a new one can take over a page whose scripts came
+            // from the old one. Reload once to get a consistent set - but not on a first install,
+            // where there was no previous controller and nothing is stale.
+            const hadController = !!navigator.serviceWorker.controller;
+            let reloading = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (hadController && !reloading) { reloading = true; location.reload(); }
+            });
             navigator.serviceWorker.register('/service-worker.js')
                 .then(reg => console.log('Service Worker registered'))
                 .catch(err => console.log('Service Worker registration failed', err));
