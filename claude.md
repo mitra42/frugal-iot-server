@@ -215,6 +215,12 @@ Four things have caused real bugs here, more than once each:
 
 ## Development Notes
 
+### Never commit
+
+Do not run `git commit` (or `git push`), for changes made by anyone. Every change - whether written
+by a person or by an assistant - is reviewed in a separate tool before being committed. Leave work
+in the working tree and say what was changed.
+
 ### Starting the Server
 
 ```bash
@@ -337,6 +343,13 @@ The platform-to-platform API of API.md is not there: it is a router built by
 
 - **frugal-iot-client** - UI client (separate GitHub repo)
 - **frugal-iot-logger** - MQTT listener and data logger
+- **frugal-iot** - the node firmware (ESP32/ESP8266). On this machine the working checkout is
+  `~/Documents/Arduino/frugal-iot-demo/lib/Frugal-IoT` - a library inside the PlatformIO project
+  `~/Documents/Arduino/frugal-iot-demo`, whose own `src/main.cpp` is the sketch under development.
+  This is always where the node code is. It is deliberately *not* alongside the other three repos
+  in `~/git/github_mitra42/`, and two nearby directories look like it but are not:
+  `~/Documents/Arduino/frugal-iot-OLD` is a stale checkout, and `~/temp/frugal-iot` is a server
+  *install*.
 - **Farm Platforms**: LiteFarm, FarmOS (integrating partners)
 - **Related IoT**: OurSci (another device platform)
 
