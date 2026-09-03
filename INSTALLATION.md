@@ -503,9 +503,9 @@ npx --no frugal-iot-addorganization myfarm "My Farm" you@example.com +6112345678
 
 The arguments are: organization id, display name, your email, your phone (`+` and digits only),
 and a password. That one command writes `config.d/organizations/myfarm.yaml`, creates a login account
-named after the organization (`myfarm`), grants it admin rights, creates its OTA directory, **and adds
-the organization's account to the broker's password file** — which is why the broker had to be
-installed first.
+named after the organization (`myfarm`), grants it admin, read and write rights, creates its OTA
+directory, **and adds the organization's account to the broker's password file** — which is why the
+broker had to be installed first.
 
 * **Organization id `myfarm`** — must be 1–10 lower-case letters or digits. It becomes the first part
   of every MQTT topic, so it must match what your sensor nodes are configured to publish to.
@@ -1222,6 +1222,32 @@ do. On a Pi, compare the two files above and copy across the settings you want.
 
 Your organizations, accounts, database and logged data are untouched by an upgrade — they live in
 this directory, not in `node_modules`.
+
+### One thing to do by hand after upgrading: grant WRITE
+
+Commanding a device through the API (`/devices/action`, `/devices/property`) now requires a **WRITE**
+permission, which is separate from READ and is *not* implied by ADMIN. New organizations get it
+automatically, but an upgrade does not touch your database, so on an existing server nobody has it
+yet and switching a relay on answers 401.
+
+Grant it from the dashboard — **Admin → People**, pick the person, choose `WRITE` — or in one
+statement, to everyone who already administers an organization:
+
+```
+sqlite3 frugal-iot.db "INSERT OR IGNORE INTO permissions (id, capability, org)
+  SELECT id, 'WRITE', org FROM permissions WHERE capability = 'ADMIN';"
+sudo systemctl restart frugaliot
+```
+
+Check who has it:
+
+```
+sqlite3 frugal-iot.db "SELECT id, org FROM permissions WHERE capability = 'WRITE';"
+```
+
+Do **not** grant WRITE to id `0`. That row means "every logged-in account", including anyone who has
+just registered themselves, and handing them write access is exactly what the WRITE check exists to
+prevent. (Read is a different matter — see the `(0, 'READ', ...)` rows, which are there on purpose.)
 
 ---
 

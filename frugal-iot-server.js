@@ -571,6 +571,20 @@ export function can_READ(req, res, next) {
     res.sendStatus(401);
   }
 }
+// Exported for reuse by lib/api-routes.js - reads org from req.params.org or res.locals.org, so callers must set one of those first.
+// Note WRITE is not implied by READ, or by ADMIN: an administrator who should also be able to change
+// a device needs a WRITE row of their own. Anything that changes a device must use this and not
+// can_READ - see the API's /devices/action, where using can_READ meant any reader could command any
+// device.
+export function can_WRITE(req, res, next) {
+  const org = req.params.org || res.locals.org;
+  if (req.isAuthenticated() && hasPermissions(req.user, org, "WRITE")) {
+    next();
+  } else {
+    console.log("Failing permission to Write", req.user, org);
+    res.sendStatus(401);
+  }
+}
 // Not used as check direct in Multer storage, (since Multer fills the body) but use as template for other permissions (and then delete this comment)
 // Exported for reuse by lib/api-routes.js - reads org from req.params.org, so callers without an :org URL segment must set it first.
 export function can_ADMIN(req, res, next) {

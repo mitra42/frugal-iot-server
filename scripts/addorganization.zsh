@@ -190,12 +190,17 @@ echo "Created user '${ORG_ID}' (id=${NEW_ID})"
 # OR IGNORE because permissions has a UNIQUE(id, capability, org) constraint, so a repeat of any of
 # these rows (e.g. on a database where id 1 is also the org's own account) would otherwise abort
 # the whole statement part-way through, leaving the organization with only some of its permissions.
+#
+# WRITE is deliberately NOT given to id 0 "everyone": that row would hand write access to every account
+# on the server, including a self-registered one, which is what can_WRITE exists to prevent.
 sqlite3 "$DB" "
 INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'ADMIN', '${ORG_ID}');
 INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'READ', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'WRITE', '${ORG_ID}');
 INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (0, 'READ', '${ORG_ID}');
 INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'ADMIN', '${ORG_ID}');
 INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'READ', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'WRITE', '${ORG_ID}');
 INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'OTAUPDATE', '${ORG_ID}');
 "
 echo "Added permissions for organization ${ORG_ID}"
