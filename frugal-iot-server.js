@@ -109,6 +109,7 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { ensureSecrets } from './lib/secrets.js';
+import { syncUser, syncUserById } from './lib/dynsec-server.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -318,6 +319,8 @@ function add_permission(id, capability, org, project, cb) {
       (n_perms, cb) => { if (n_perms["COUNT(id)"] != 0) { cb(new Error("Duplicate permission")); } else { cb(null); }},
       (cb) => db.run(sqlAddPermission, [id, capability, org, project], cb),
       (cb) => { notePermissionsChanged(id); cb(null); },
+      // The database has changed, so the broker's idea of this user is now stale. Best effort.
+      (cb) => { syncUserById(db, config, id, () => cb(null)); },
     ], cb);
   }
 }
@@ -331,6 +334,9 @@ function permissions_delete(id, capability, org, project, cb) {
     waterfall([
       (cb) => db.get('DELETE FROM permissions WHERE id = ? AND capability = ? AND org = ? AND project = ?', [id,capability,org,project], cb),
       (cb) => { notePermissionsChanged(id); cb(null); },
+      // Revoking has to reach the broker, or the credential already in a browser keeps working -
+      // which is the whole of SEC-1's second requirement.
+      (cb) => { syncUserById(db, config, id, () => cb(null)); },
     ], cb);
   }
 }
@@ -527,15 +533,24 @@ passport.use(new LocalStrategy(function verify(username, password, cb) {
         return cb(null, false, { message: 'Incorrect username or password*' });
       }
       db.all('SELECT * FROM permissions WHERE id = ? or id = 0', [ user.id ], function(err, permissions) {
-        // permissions is [{ id, capability, org }]
-        console.log("User",user.id, "with permissions", permissions.map(x => x.capability + " " +x.org).join(","));
+        // permissions is [{ id, capability, org, project }]
+        console.log("User",user.id, "with permissions", permissions.map(x => x.capability + " " +x.org + (x.project ? "/" + x.project : "")).join(","));
         if (err) {
           return cb(err);
         }
-        return cb(null, {
-          id: user.id, username: user.username, organization: user.organization,
-          name: user.name, email: user.email, phone: user.phone, permissions
-        }); // TO-ADD-REGISTRATION-FIELD
+        // Bring this user's broker account into line with what the database says, and get the
+        // credential their browser will use. Deliberately not fatal: if the broker cannot be
+        // reached the login still succeeds and the dashboard loses live data, which is far better
+        // than not being able to log in at all. The credential is derived, so it is returned either
+        // way and a later frugal-iot-rebuild-dynsec makes the broker agree.
+        syncUser(db, config, user, (serr, cred) => {
+          if (serr && !cred) console.log("No broker credential for", user.username, "-", serr.message);
+          return cb(null, {
+            id: user.id, username: user.username, organization: user.organization,
+            name: user.name, email: user.email, phone: user.phone, permissions,
+            mqtt_username: cred && cred.username, mqtt_password: cred && cred.password,
+          }); // TO-ADD-REGISTRATION-FIELD
+        });
       });
     });
   });
@@ -1102,8 +1117,15 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                       return loginRedirect(res, notValid);
                     }
                     console.log("Password reset for", user.username);
-                    loginRedirect(res, { mode: 'signin', messagetype: 'info', url,
-                      message: 'Password reset - please sign in' });
+                    // The broker credential is derived from the stored hash, so changing the
+                    // password changes it - which is a useful property (the old one dies by
+                    // itself) but only if the broker is told. They have to sign in again anyway,
+                    // and that would sync it too; doing it here means the old credential stops
+                    // working now rather than whenever they next appear.
+                    syncUserById(db, config, user.id, () => {
+                      loginRedirect(res, { mode: 'signin', messagetype: 'info', url,
+                        message: 'Password reset - please sign in' });
+                    });
                   });
               });
             });

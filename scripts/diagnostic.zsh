@@ -230,6 +230,85 @@ fi
 MYADDRS=$( (have ip && ip -4 -o addr show scope global | awk '{print $2"="$4}') 2>/dev/null | tr '\n' ' ')
 item "this machine's addresses: ${MYADDRS:-(could not determine)}"
 
+section "Broker access control"
+# An acl_file confines each account to its own organization's topics; without one, every account
+# that can log in reaches every topic on the broker. Reported here because a broker installed before
+# the ACL shipped will not have one, and nothing else says so.
+BROKER_CONF_FILES=(/etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*.conf(N))
+BROKER_SETTING=""
+broker_setting() {  # name -> value from the broker's own configuration, sudo only if needed
+  local v
+  v=$(grep -hE "^[[:space:]]*$1[[:space:]]" "${BROKER_CONF_FILES[@]}" 2>/dev/null | tail -1 | awk '{print $2}') || true
+  if [[ -z "$v" ]] && have sudo; then
+    v=$(sudo -n grep -hE "^[[:space:]]*$1[[:space:]]" "${BROKER_CONF_FILES[@]}" 2>/dev/null | tail -1 | awk '{print $2}') || true
+  fi
+  BROKER_SETTING="$v"
+}
+broker_setting acl_file; ACLFILE="$BROKER_SETTING"
+if [[ -z "$ACLFILE" ]]; then
+  item "acl_file: NOT SET - every account that can log in can reach every topic, across all organizations"
+  problem "The broker has no acl_file. Re-run the install script, or see INSTALLATION.md 'Turn on access control'"
+else
+  item "acl_file: $ACLFILE"
+  if [[ -r "$ACLFILE" ]] || { have sudo && sudo -n test -r "$ACLFILE" 2>/dev/null; }; then
+    ACLOWNER=$( (stat -c '%U:%G %a' "$ACLFILE" 2>/dev/null || sudo -n stat -c '%U:%G %a' "$ACLFILE" 2>/dev/null) || true)
+    item "  owner/mode: ${ACLOWNER:-unknown} (mosquitto reads it after dropping privileges, so it wants mosquitto:mosquitto 600)"
+  fi
+fi
+
+# The dynamic security plugin. install-pi.sh comments it out and carries on if the plugin is not
+# installed, so a broker can be working correctly and still not support per-user accounts - which is
+# worth saying plainly rather than leaving somebody to wonder why they cannot be created.
+broker_setting plugin; DYNPLUGIN="$BROKER_SETTING"
+broker_setting plugin_opt_config_file; DYNSTATE="$BROKER_SETTING"
+if [[ -z "$DYNPLUGIN" ]]; then
+  item "dynamic security: not configured - running on shared organization passwords (the fallback)"
+  item "  per-user and per-node broker accounts are unavailable until the plugin is enabled"
+  if [[ -n "$(print -rl -- /usr/lib/*/mosquitto_dynamic_security.so /usr/lib/mosquitto_dynamic_security.so(N) 2>/dev/null)" ]]; then
+    item "  the plugin IS installed on this machine, so re-running the install script would enable it"
+    problem "mosquitto's dynamic security plugin is installed but not configured - re-run install-pi.sh"
+  else
+    item "  the plugin is not installed on this machine either (mosquitto package does not ship it here)"
+  fi
+else
+  item "dynamic security: $DYNPLUGIN"
+  if [[ -n "$DYNSTATE" ]]; then
+    if [[ -e "$DYNSTATE" ]] || { have sudo && sudo -n test -e "$DYNSTATE" 2>/dev/null; }; then
+      item "  state file: $DYNSTATE"
+    else
+      item "  state file: $DYNSTATE MISSING - the broker will not start"
+      problem "The broker names a dynamic-security state file that does not exist: $DYNSTATE"
+    fi
+  fi
+  # Can the server actually drive it? That needs the admin credential frugal-iot-init recorded.
+  DYNUSER=$(sed -n 's/^dynsec_admin_user:[[:space:]]*//p' config.d/secrets.yaml 2>/dev/null | tr -d '"'"'"'' | head -1)
+  DYNPW=$(sed -n 's/^dynsec_admin_password:[[:space:]]*//p' config.d/secrets.yaml 2>/dev/null | tr -d '"'"'"'' | head -1)
+  if [[ -z "$DYNUSER" || -z "$DYNPW" ]]; then
+    item "  admin credential: not in config.d/secrets.yaml - the server cannot create accounts"
+    problem "dynamic security is enabled but config.d/secrets.yaml has no dynsec_admin_user/password"
+  elif have mosquitto_ctrl; then
+    if DYNOUT=$(mosquitto_ctrl -h localhost -u "$DYNUSER" -P "$DYNPW" dynsec listClients 2>&1 | grep -viE 'without encryption|visible on the network'); then
+      item "  admin credential works ($(print -r -- $DYNOUT | tr '\n' ' ' | cut -c1-60))"
+    else
+      item "  admin credential REJECTED by the broker"
+      problem "The dynsec admin credential in config.d/secrets.yaml does not work - the server cannot create accounts"
+    fi
+  else
+    item "  mosquitto_ctrl not installed - cannot test the admin credential"
+  fi
+  # Does the broker's state still match the database? Reporting drift is useful far more often than
+  # repairing it, which is why this runs "check" and never applies anything.
+  if [[ -f node_modules/frugal-iot-server/scripts/rebuild-dynsec.js ]]; then
+    DYNCHECK=$(node node_modules/frugal-iot-server/scripts/rebuild-dynsec.js check 2>&1) || true
+    if print -r -- "$DYNCHECK" | grep -q "matches the database"; then
+      item "  broker state matches the database"
+    else
+      print -r -- "$DYNCHECK" | sed 's/^/    /'
+      problem "The broker's accounts do not match the database - run: npx --no frugal-iot-rebuild-dynsec"
+    fi
+  fi
+fi
+
 section "Broker authentication (steps 5, 6)"
 if have mosquitto_sub; then
   # A wrong password must be refused - that is the check in step 5
