@@ -104,6 +104,63 @@ describe('buildConfigFor', () => {
   });
 });
 
+describe('what an organization block now contains', () => {
+  // SEC-1: the organization's shared broker password was served to everyone with READ, which made
+  // "may read" mean "may publish anything, anywhere in the organization". Browsers get their own
+  // derived credential instead.
+  it('withholds the organization mqtt_password', () => {
+    const out = buildConfigFor(config(), user(['READ', 'dev']));
+    expect(out.organizations.dev.mqtt_password).toBeUndefined();
+    expect(allStrings(out)).not.toContain('public');
+  });
+
+  it('still sends the rest of the organization', () => {
+    const out = buildConfigFor(config(), user(['READ', 'dev']));
+    expect(out.organizations.dev.name).toBe('Development');
+  });
+
+  it("serves the user's own broker credential instead", () => {
+    const u = { ...user(['READ', 'dev']), mqtt_username: 'user/fred', mqtt_password: 'derived' };
+    const out = buildConfigFor(config(), u);
+    expect(out.user.mqtt_username).toBe('user/fred');
+    expect(out.user.mqtt_password).toBe('derived');
+  });
+});
+
+describe('project filtering', () => {
+  const withProjects = () => {
+    const c = config();
+    c.organizations.dev.projects = { lotus: { nodes: {} }, magi: { nodes: {} } };
+    return c;
+  };
+
+  it('shows every project to a user with organization-wide READ', () => {
+    const out = buildConfigFor(withProjects(), user(['READ', 'dev']));
+    expect(Object.keys(out.organizations.dev.projects).sort()).toEqual(['lotus', 'magi']);
+  });
+
+  it('shows only the permitted project to a project-scoped user', () => {
+    const out = buildConfigFor(withProjects(), user(['READ', 'dev', 'lotus']));
+    expect(Object.keys(out.organizations.dev.projects)).toEqual(['lotus']);
+  });
+
+  it('shows the organization at all to a project-scoped user', () => {
+    // "may read anywhere in dev" is what decides whether dev appears
+    const out = buildConfigFor(withProjects(), user(['READ', 'dev', 'lotus']));
+    expect(out.organizations.dev).toBeDefined();
+  });
+
+  it('does not even reveal that the other projects exist', () => {
+    const out = buildConfigFor(withProjects(), user(['READ', 'dev', 'lotus']));
+    expect(JSON.stringify(out)).not.toContain('magi');
+  });
+
+  it('leaves an organization with no projects block alone', () => {
+    const out = buildConfigFor(config(), user(['READ', 'dev']));
+    expect(out.organizations.dev.projects).toBeUndefined();
+  });
+});
+
 describe('hasPermissions', () => {
   it('matches capability and organization', () => {
     expect(hasPermissions(user(['READ', 'dev']), 'dev', 'READ')).toBe(true);

@@ -913,6 +913,12 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
               email: user.email,
               phone: user.phone,
               permissions: user.permissions,
+              // The broker credential this user's browser will use, derived at login by
+              // lib/dynsec-server.js. Kept in the session because that is where the rest of the
+              // login's results live, and sessions are in memory - so it dies with the process and
+              // is derived again at the next login. /config.json serves it from here.
+              mqtt_username: user.mqtt_username,
+              mqtt_password: user.mqtt_password,
               loginAt: Date.now(), // So a permission change can tell which sessions predate it
             });
           });
