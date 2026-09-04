@@ -107,6 +107,7 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 
 // API Integration - Farm IoT Interoperability Standard
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
+import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -546,9 +547,9 @@ function loggedInOrRedirect(req, res, next) {
     res.redirect(307, `${loginUrl}?${q}`);
   }
 }
-function hasPermissions(user, org, permission) {
-  return user.permissions.some(x => x.capability == permission && x.org == org);
-}
+// hasPermissions now lives in lib/config-for-user.js and is re-exported here, because the config
+// filtering needs it and that had to be testable without booting a server.
+export { hasPermissions };
 // Like hasPermissions, but not org-scoped - true if the user has the capability on ANY org.
 function hasPermissionsAny(user, permission) {
   return user.permissions.some(x => x.capability == permission);
@@ -670,25 +671,9 @@ function addLoggedNodesToConfig() {
     });
   });
 }
-// Produce an "unsafe" copy of config, i.e. it is a subset of config but points to objects rather than copying. Don't change the result!
+// See lib/config-for-user.js - kept there so it can be tested without starting a server.
 function unsafeCopyConfigFor(user) {
-  let oo = {
-    organizations: {},
-    user: user, // All data in user and permissions is visible to the user
-  };
-  Object.entries(config).forEach(([key, value]) => {
-    if (key === 'organizations') {
-      // noinspection JSCheckFunctionSignatures
-      Object.entries(value).forEach(([orgid, org]) => {
-        if (hasPermissions(user, orgid, 'READ')) {
-          oo.organizations[orgid] = org;
-        }
-      });
-    } else {
-      oo[key] = value;
-    }
-  });
-  return oo;
+  return buildConfigFor(config, user);
 }
 // ============ End Helper functions ============
 
@@ -867,8 +852,21 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.set('trust proxy', 1); // trust first proxy - see note in https://www.npmjs.com/package/express-session
         // TODO-N89 note need to setup session store, defaults to memory store which is not good for production
         // TODO-N89 think about cookie timeout and add "keep me logged in on this device" option that controls it
+        // The secret signs the session cookie, so a known one would let anyone mint a validly-signed
+        // cookie. That alone is not a way in - the cookie carries only a session id and the session
+        // lives server-side, so a forged one names no session - but it was the express-session
+        // README's own 'keyboard cat', which is not a state to leave a server in.
+        // Generated per installation by frugal-iot-init into config.d/secrets.yaml. An installation
+        // that predates that file gets a random one for this run, which ends its sessions on every
+        // restart - noisy enough to notice, and no worse than the sessions being in memory anyway.
+        let sessionSecret = config.secrets && config.secrets.session_secret;
+        if (!sessionSecret) {
+          sessionSecret = crypto.randomBytes(32).toString('hex');
+          console.log("No session_secret in config.d/secrets.yaml - using a temporary one, so every",
+            "restart will log everyone out. Run: npx --no frugal-iot-init");
+        }
         app.use(session({
-          secret: 'keyboard cat', // TODO-N89 probably change, try changing this, hopefully should just require re-login
+          secret: sessionSecret,
           resave: false,
           saveUninitialized: false,
           cookie: { secure: 'auto' }  // TODO-N89 cant be secure: true while testing on HTTP
