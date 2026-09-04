@@ -109,8 +109,8 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { ensureSecrets } from './lib/secrets.js';
-import { syncUser, syncUserById, syncLoggers, syncNode } from './lib/dynsec-server.js';
-import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter } from './lib/enrol.js';
+import { syncUser, syncUserById, syncLoggers, syncNode, dropNode } from './lib/dynsec-server.js';
+import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode } from './lib/enrol.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -286,6 +286,21 @@ function get_people_list(org, cb) {
       })
     }});
 }
+// Which nodes have enrolled in an organization. No password, obviously - the point of the list is
+// to know what exists and to be able to forget one.
+const sqlNodesList = `
+  SELECT project, nodeid, lora, enrolled_at FROM nodes WHERE org = ? ORDER BY project, nodeid
+;`;
+function send_nodes_list(req, res) {
+  db.all(sqlNodesList, [req.params.org], (err, rows) => {
+    if (err) {
+      res.status(500).send(err.message);
+    } else {
+      res.status(200).json(rows); // [{ project, nodeid, lora, enrolled_at }]
+    }
+  });
+}
+
 function send_people_list(req, res) {
   // TODO-N89 list all People for an organization
   get_people_list(req.params.org, (err, people) => {
@@ -1280,6 +1295,52 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             });
           },
           send_people_list,
+        );
+        app.get('/nodes_list/:org',
+          loggedInOrFail,
+          can_ADMIN,  // Gets org from URL
+          send_nodes_list,
+        );
+        /*
+         * Forget a node, so it can enrol again and be issued a new credential.
+         *
+         * The same job as frugal-iot-resetnode, for somebody who administers an organization but has
+         * no shell on the server - which is most people who will need it. A node whose filesystem
+         * has been erased cannot prove it is itself, and this is what says "yes, it really is".
+         *
+         * POST, not GET, unlike the older admin routes beside it (/add_permission,
+         * /permissions_delete). Those are GETs that change things, which means a link or an image
+         * tag can trigger them against anybody with a live admin session - see SEC-17. Rather than
+         * add another, this one is a POST; the older ones want the same treatment together.
+         */
+        app.post('/node_reset/:org',
+          loggedInOrFail,
+          can_ADMIN,  // Gets org from URL - an organization admin may reset only their own nodes
+          express.json({ limit: '4kb' }),
+          (req, res) => {
+            const { project, nodeid } = req.body || {};
+            if (!project || !nodeid) {
+              return res.status(400).json({ error: 'project and nodeid are required' });
+            }
+            forgetNode(db, req.params.org, project, nodeid, (err, changes) => {
+              if (err) { return res.status(500).json({ error: err.message }); }
+              if (!changes) {
+                return res.status(404).json({ error: `No enrolled node ${project}/${nodeid}` });
+              }
+              console.log("Node reset by", req.user.username, "-", req.params.org, project, nodeid);
+              // Remove the broker account too. Best effort: enrolling recreates it, and
+              // frugal-iot-diagnostic reports anything left behind as drift.
+              dropNode(config, req.params.org, project, nodeid, (derr) => {
+                res.status(200).json({
+                  reset: `${req.params.org}/${project}/${nodeid}`,
+                  brokerAccountRemoved: !derr,
+                  message: derr
+                    ? 'Forgotten. The broker account could not be removed, which is harmless - enrolling replaces it.'
+                    : 'Forgotten. The node will enrol again and be issued a new credential.',
+                });
+              });
+            });
+          },
         );
         app.get('/projects_list/:org',
           loggedInOrFail,
