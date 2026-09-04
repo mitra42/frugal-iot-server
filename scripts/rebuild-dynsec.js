@@ -21,7 +21,7 @@ import { MqttLogger } from 'frugal-iot-logger';
 import { dynsecConnect } from '../lib/dynsec.js';
 import {
   readScopes, readPublics, readUserRows,
-  applyRolesAndGroups, applyUser, applyNode, checkRolesAndGroups,
+  applyRolesAndGroups, applyUser, applyNode, applyLogger, checkRolesAndGroups,
 } from '../lib/dynsec-sync.js';
 import { names } from '../lib/dynsec-plan.js';
 
@@ -81,6 +81,10 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
                     const want = userClientName(u.username);
                     if (!clients.includes(want)) differences.push(`client missing: ${want}`);
                   }
+                  for (const org of orgs) {
+                    const want = names.loggerClient(org);
+                    if (!clients.includes(want)) differences.push(`client missing: ${want}`);
+                  }
                   report(differences);
                   dynsec.end(() => process.exit(differences.length ? 3 : 0));
                 });
@@ -99,7 +103,11 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
               syncNodes(db, dynsec, (e5, m) => {
                 if (e5) return fail(`Syncing nodes: ${e5.message}`);
                 console.log(`${m} node account(s)`);
-                dynsec.end(() => process.exit(0));
+                syncLoggers(dynsec, orgs, userSecret, (e6, k) => {
+                  if (e6) return fail(`Syncing logger accounts: ${e6.message}`);
+                  console.log(`${k} logger account(s)`);
+                  dynsec.end(() => process.exit(0));
+                });
               });
             });
           });
@@ -136,6 +144,15 @@ function syncUsers(db, dynsec, userSecret, cb) {
     };
     next();
   });
+}
+
+function syncLoggers(dynsec, orgs, userSecret, cb) {
+  let i = 0;
+  const next = () => {
+    if (i >= orgs.length) return cb(null, orgs.length);
+    applyLogger(dynsec, { org: orgs[i++], userSecret }, (e) => (e ? cb(e) : next()));
+  };
+  next();
 }
 
 function syncNodes(db, dynsec, cb) {

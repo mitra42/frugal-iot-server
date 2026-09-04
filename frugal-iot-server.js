@@ -109,7 +109,7 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { ensureSecrets } from './lib/secrets.js';
-import { syncUser, syncUserById } from './lib/dynsec-server.js';
+import { syncUser, syncUserById, syncLoggers } from './lib/dynsec-server.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -1443,8 +1443,31 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.use(clientErrorHandler);
         // Now start the server
         startServer();
-        // And logger
-        mqttLogger.start();
+
+        // And the logger - but give it its OWN broker account first, and create that account before
+        // it tries to use it.
+        //
+        // It used to connect as the organization itself, with readwrite over the whole topic tree,
+        // which meant a confused or compromised logger could invent sensor readings. Its own account
+        // is in <org>-read and <org>-write, and <org>-write is set/-only - so it can still publish
+        // the platform API's device commands (which is why it needs write at all) and can no longer
+        // forge a reading.
+        //
+        // Not fatal if the broker cannot be reached: syncLoggers reports it and hands back the
+        // derived credentials anyway, and the logger falls back to the organization's shared
+        // password, which works until S8 retires it.
+        syncLoggers(config, Object.keys(config.organizations || {}), (err, creds) => {
+          Object.entries(creds || {}).forEach(([org, cred]) => {
+            const o = config.organizations[org];
+            if (!o) return;
+            // Separate field names rather than overwriting mqtt_password, so that
+            // config.organizations[x].mqtt_password means the same thing in memory as it does in
+            // the file it came from. Withheld from browsers - see lib/config-for-user.js.
+            o.logger_userid = cred.username;
+            o.logger_password = cred.password;
+          });
+          mqttLogger.start();
+        });
       }
     });
   }

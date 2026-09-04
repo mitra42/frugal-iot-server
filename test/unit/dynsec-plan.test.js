@@ -3,8 +3,8 @@
  * produces were verified against a real one in SECURITY-REVIEW.md section 8 (Q1, Q3, Q5).
  */
 import { describe, it, expect } from 'vitest';
-import { derivePassword, groupsForUser, groupsForNode, desiredRolesAndGroups, names }
-  from '../../lib/dynsec-plan.js';
+import { derivePassword, deriveLoggerPassword, groupsForUser, groupsForNode, groupsForLogger,
+         desiredRolesAndGroups, names } from '../../lib/dynsec-plan.js';
 
 const row = (capability, org, project = '') => ({ capability, org, project });
 
@@ -122,6 +122,45 @@ describe('desiredRolesAndGroups', () => {
     const two = Object.keys(desiredRolesAndGroups(
       [{ org: 'dev', project: '' }, { org: 'dev', project: 'lotus' }], []).groups).length;
     expect(two).toBe(one + 2);   // the project's read and write groups, and nothing else
+  });
+});
+
+describe('the logger', () => {
+  it('reads its organization and can send set/, and that is all', () => {
+    expect(groupsForLogger('dev')).toEqual(['dev-read', 'dev-write']);
+  });
+
+  it('is in no group that would let it publish a reading', () => {
+    // dev-write is publishClientSend dev/+/+/set/# - see desiredRolesAndGroups. The point of the
+    // logger having its own account is that it cannot invent sensor data.
+    const { roles } = desiredRolesAndGroups([{ org: 'dev', project: '' }], []);
+    for (const g of groupsForLogger('dev')) {
+      for (const acl of roles[g] || []) {
+        if (acl.acltype === 'publishClientSend') expect(acl.topic).toContain('/set/');
+      }
+    }
+  });
+
+  it('is named per organization and cannot collide with an organization id', () => {
+    // org ids are 1-10 lower-case letters/digits, so none can contain a hyphen
+    expect(names.loggerClient('dev')).toBe('dev-logger');
+    expect(names.loggerClient('dev')).toMatch(/-logger$/);
+  });
+
+  it('has a derived password, stable and distinct per organization', () => {
+    expect(deriveLoggerPassword('s', 'dev')).toBe(deriveLoggerPassword('s', 'dev'));
+    expect(deriveLoggerPassword('s', 'dev')).not.toBe(deriveLoggerPassword('s', 'varta'));
+    expect(deriveLoggerPassword('s', 'dev')).not.toBe(deriveLoggerPassword('t', 'dev'));
+    expect(deriveLoggerPassword('s', 'dev')).toHaveLength(22);
+  });
+
+  it('never derives the same password as a user, even with a name that lines up', () => {
+    const hash = Buffer.from('ab'.repeat(32), 'hex');
+    expect(deriveLoggerPassword('s', 'dev')).not.toBe(derivePassword('s', 'dev', hash));
+  });
+
+  it('refuses to invent one with no user_secret', () => {
+    expect(() => deriveLoggerPassword('', 'dev')).toThrow(/user_secret/);
   });
 });
 
