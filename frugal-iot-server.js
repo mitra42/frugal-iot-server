@@ -109,7 +109,8 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { ensureSecrets } from './lib/secrets.js';
-import { syncUser, syncUserById, syncLoggers } from './lib/dynsec-server.js';
+import { syncUser, syncUserById, syncLoggers, syncNode } from './lib/dynsec-server.js';
+import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter } from './lib/enrol.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -801,6 +802,38 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
       next();
     })
 
+    // Nodes enrol here to get their own broker credential. Deliberately not behind a session: a node
+    // has no session, and this is what replaces the shared password compiled into its firmware.
+    // Authenticated by the organization's enrolment secret, which grants only enrolment.
+    //
+    // Body is JSON, so express.json() has to have run - it is added below for /api, and this route
+    // brings its own parser rather than depending on the order of the two.
+    const enrolLimiter = makeRateLimiter();
+    app.post('/enrol', express.json({ limit: '4kb' }), (req, res) => {
+      enrol({ db, config, limiter: enrolLimiter,
+              syncNode: (node, cb) => syncNode(config, node, cb) },
+        req.body, (err, cred) => {
+          if (!err) {
+            console.log("Enrolled", cred.username, req.body.lora ? "(LoRa-capable)" : "");
+            return res.status(200).json(cred);
+          }
+          const status = {
+            [ENROL.BAD_REQUEST]: 400,
+            [ENROL.REFUSED]: 403,
+            [ENROL.RATE_LIMITED]: 429,
+            [ENROL.NEEDS_RESET]: 409,
+            [ENROL.BROKER]: 503,
+          }[err.code] || 500;
+          // Every attempt is logged, successful or not: anyone holding an enrolment secret can add a
+          // fictitious node, which is a far smaller privilege than the password it replaces but
+          // should not be invisible.
+          console.log(`Enrolment refused (${err.code || 'error'}) for`,
+            `${req.body && req.body.org}/${req.body && req.body.project}/${req.body && req.body.nodeid}:`,
+            err.message);
+          res.status(status).json({ error: err.code || 'error', message: err.message });
+        });
+    });
+
     console.log("Doing OTA updates at /ota_update from", config.server.otadir);
     app.get('/ota_update/:org/:project/:node/:attribs', (req, res) => {
       //Intentionally no login
@@ -881,8 +914,14 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         // so anything missing is generated AND written to config.d/secrets.yaml here. Generating
         // without saving would end every session on every restart, and the symptom does not point
         // at the cause, so it would be lived with rather than fixed.
+        // One enrolment secret per organization, as a list so that rotating one does not strand
+        // nodes already flashed with the old value. Generated here if absent, so adding an
+        // organization needs no extra step and an existing installation fixes itself.
+        const enrolNames = Object.keys(config.organizations || {})
+          .filter((org) => !enrolmentSecretsFor(config, org).length)
+          .map((org) => `enrolment_${org}`);
         const secretsResult = ensureSecrets(config.secrets, './config.d',
-          ['session_secret', 'user_secret']);
+          ['session_secret', 'user_secret', ...enrolNames]);
         config.secrets = secretsResult.secrets;   // so the rest of this run sees them
         if (secretsResult.generated.length) {
           if (secretsResult.written) {

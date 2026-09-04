@@ -35,6 +35,32 @@ CREATE TABLE IF NOT EXISTS `permissions` (
   `project` TEXT NOT NULL DEFAULT '',
   UNIQUE(`id`, `capability`, `org`, `project`)
 );
+-- One row per node that has enrolled, holding the broker credential it was issued.
+--
+-- The password is stored, not derived: a node keeps its copy in LittleFS and cannot recompute
+-- anything, so deriving it from a secret would mean that losing the secret strands the whole fleet.
+-- Storing it here is also what makes "the database is the source of truth, and dynsec can be
+-- rebuilt from it" true for nodes as well as users.
+--
+-- No last_seen column on purpose: the logger already tracks that in memory and serves it through
+-- reportNodes(), and writing it here would be a database write per reading - the SD-card wear the
+-- logger's own buffering exists to avoid.
+--
+-- `lora` records whether the firmware was built with LoRaMesher, declared at enrolment. It decides
+-- whether the node joins <org>-gateways, which grants the broader publish a gateway cannot avoid
+-- needing (it republishes other nodes' readings under its own account). Scoped by what the build
+-- can do rather than by what it is doing at the time, because any node that sees WiFi can promote
+-- itself to gateway at runtime.
+CREATE TABLE IF NOT EXISTS `nodes` (
+  `org` TEXT NOT NULL,
+  `project` TEXT NOT NULL,
+  `nodeid` TEXT NOT NULL,
+  `password` TEXT NOT NULL,
+  `lora` INTEGER NOT NULL DEFAULT 0,
+  `enrolled_at` INTEGER NOT NULL,
+  UNIQUE(`org`, `project`, `nodeid`)
+);
+
 CREATE TABLE IF NOT EXISTS `projects` (
   `org` TEXT NOT NULL,
   `id` TEXT NOT NULL,
