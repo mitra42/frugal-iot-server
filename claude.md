@@ -221,6 +221,22 @@ Do not run `git commit` (or `git push`), for changes made by anyone. Every chang
 by a person or by an assistant - is reviewed in a separate tool before being committed. Leave work
 in the working tree and say what was changed.
 
+### A changed extras/ file does not reach /etc by itself
+
+`frugal-iot-init` copies `extras/` into the install directory but **never overwrites** what is
+already there - it prints `kept ... (DIFFERS from this release)` and moves on. So `install-pi.sh`
+reads `node_modules/frugal-iot-server/extras/`, not the install directory's copy, or a
+security-relevant change to the shipped broker configuration would never reach `/etc` however many
+times the installer was re-run. That is how a broker with no `acl_file` survived several releases.
+The same applies by hand: copy from `node_modules/...`, not from `./extras`.
+
+### PlatformIO: a compile error in a file you did not touch
+
+A damaged `.pio/libdeps` reports the failure against an unrelated source file, and can take the
+scons database with it - two builds in a row failing differently for no reason. The real message is
+further up: `FileNotFoundError: .pio/libdeps/<env>/<Library>/src/...`. Delete that one library
+directory so PlatformIO refetches it, rather than trusting the file it named.
+
 ### Starting the Server
 
 ```bash
@@ -360,6 +376,59 @@ The platform-to-platform API of API.md is not there: it is a router built by
 - Authentication tokens exchanged during platform registration
 - Device commands validated against schema (type, min/max, rw permissions)
 - Authorization enforced at organization level
+
+## Broker accounts: who has which credential
+
+Every actor has its own broker account, created and maintained by the server through mosquitto's
+dynamic security plugin. `lib/dynsec-plan.js` is the single description of what should exist; both
+"apply" and "report differences" are driven from it, which is what makes *the database is the source
+of truth, and the broker can be rebuilt from it* a fact rather than a claim
+(`npx --no frugal-iot-rebuild-dynsec`, or `... check` to report only).
+
+| Actor | Account | Password | Can do |
+| --- | --- | --- | --- |
+| User | `user/<login>` | Derived: `HMAC(user_secret, login ‖ hashed_password)` | Groups per capability: read its organization, publish `set/` only |
+| Node | `<org>/<project>/<nodeid>` | Random at enrolment, **stored in the `nodes` table** | Read its organization, publish only its own subtree |
+| LoRa gateway | as a node, plus `<org>-gateways` | as a node | Also publish anywhere in the organization |
+| Logger | `<org>-logger` | Derived: `HMAC(user_secret, 'logger:' ‖ org)` | Read its organization, publish `set/` only |
+| Server itself | `frugal-admin` | In `config.d/secrets.yaml` | Drive the plugin |
+
+Three reasons behind that table, each of which cost something to find out:
+
+* **A user's is derived from the STORED HASH, not the plaintext.** The server only holds the
+  plaintext for the few milliseconds of a login POST, so anything derived from it could not be
+  recomputed for a session restored from a cookie. Deriving from the hash means `/config.json` can
+  answer at any time, two concurrent logins agree, and changing the login password retires the old
+  broker credential by itself.
+* **A node's is random and stored, not derived.** A node keeps its copy in LittleFS and cannot
+  recompute anything, so a derivation secret going missing would strand the whole fleet.
+* **User accounts are prefixed `user/`.** `addorganization.zsh` creates a login named after the
+  organization, and the organization's own broker account has that same name - so an unprefixed
+  dynsec client called `myfarm` would take over that name, and because a dynsec answer is final for
+  a client it knows, the shared password every node uses would stop working.
+
+Secrets live in `config.d/secrets.yaml` (never served: `lib/config-for-user.js` withholds the
+section). `lib/secrets.js` generates anything missing **and writes it back**, so an installation
+upgraded from before that file fixes itself once instead of quietly using a value that changes on
+every restart.
+
+### Talking to the dynamic security plugin
+
+Three things about it that are not in the documentation and each of which fails confusingly:
+
+* **Commands go to `$CONTROL/dynamic-security/v1`; replies come back on
+  `$CONTROL/dynamic-security/v1/response`.** Subscribe to the command topic - the obvious guess -
+  and you get no reply *while the commands still execute*, so things happen and nothing answers.
+* **Every "already ..." error means "nothing to do"**, and the wording differs per command: "Role
+  already exists", "Group is already in this role", "Client is already in this group". Treat them
+  all as success or a re-run aborts part-way through, which is worse than not re-running at all.
+* **Re-adding a role a client already has answers "Internal error"** - `mosquitto_ctrl` says the
+  same, so it is the plugin's wording, and it is indistinguishable from a real fault. Read the
+  client first and send only what is missing.
+
+And when inspecting state by hand: **group membership is stored on the group in
+`dynamic-security.json`, not on the client.** Reading that file makes every client look like it
+belongs to nothing. `mosquitto_ctrl ... dynsec getClient <name>` shows the truth.
 
 ## Performance Notes
 
