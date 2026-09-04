@@ -418,8 +418,23 @@ and `addbridge-prod.zsh` both work out who that is.
 
 `acl_file` is **deny-by-default**: naming one stops every account that has no rule in it, so the
 rule granting the existing organizations has to land in the same change as the one restricting a
-new account. `pattern readwrite %u/#` gives each account its own topic tree — and also denies
-`$SYS`, so a broker with an ACL can no longer tell anyone which bridges are connected.
+new account. `pattern readwrite %u/#` gives each account its own topic tree. It is shipped in
+`extras/aclfile` and installed by `install-pi.sh`, as **mosquitto:mosquitto mode 600** — not root
+644, which 2.0.21 accepts while warning on every start that a future version will refuse it.
+
+Two things measured on 2.0.21 that are not obvious:
+
+* **A bridge's local side is exempt from the ACL**, in both directions, with no `local_username` and
+  no anonymous rule. So adding an `acl_file` to a Pi does not interrupt its bridge.
+* **`pattern readwrite %u/#` does not match `$SYS`**, so it breaks `frugal-iot-diagnostic`'s
+  bridge-state check. `pattern read $SYS/broker/connection/+/state` restores that one topic; a bare
+  `topic` line would not, because those apply to anonymous clients only. Mosquitto warns that the
+  pattern contains no `%u` — harmless, and the only way to say "every authenticated account".
+* **`systemctl reload mosquitto` on a Pi with a bridge logs `Unable to open config file
+  ...frugal-iot-bridge.conf` and `Error found at mosquitto.conf:13`.** Harmless — password and ACL
+  changes still take effect, and the bridge is unaffected — but alarming in the log. The cause is
+  that a reload re-reads the configuration as the `mosquitto` user, after privileges have been
+  dropped, and the bridge file is 600 root by design. Only a *start* reads it as root.
 
 ### What the logger does with what arrives
 

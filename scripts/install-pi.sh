@@ -470,6 +470,23 @@ step "Configuring the broker"
 # server, so it is copied rather than written here.
 SRC_CONF="${INSTALL_DIR}/extras/mosquitto.conf"
 [[ -f "$SRC_CONF" ]] || { echo "Expected ${SRC_CONF} to exist after frugal-iot-init" >&2; exit 1; }
+
+# The ACL file goes in FIRST, because the configuration copied below names it and mosquitto will not
+# start if it is missing. Owned by mosquitto, mode 600: the broker reads it after dropping
+# privileges, and 2.0.21 warns that a file it does not own, or one that is world readable, will be
+# refused by a future version. Same rule as the password file below.
+SRC_ACL="${INSTALL_DIR}/extras/aclfile"
+if [[ -f "$SRC_ACL" ]]; then
+  if cmp -s "$SRC_ACL" /etc/mosquitto/aclfile 2>/dev/null; then
+    skip "/etc/mosquitto/aclfile already current"
+  else
+    sudo_ install -o mosquitto -g mosquitto -m 600 "$SRC_ACL" /etc/mosquitto/aclfile
+    ok "access control list installed at /etc/mosquitto/aclfile"
+  fi
+else
+  echo "Expected ${SRC_ACL} to exist after frugal-iot-init" >&2; exit 1
+fi
+
 if cmp -s "$SRC_CONF" /etc/mosquitto/conf.d/frugal-iot.conf 2>/dev/null; then
   skip "/etc/mosquitto/conf.d/frugal-iot.conf already current"
 else

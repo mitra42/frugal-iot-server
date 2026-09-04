@@ -1,0 +1,38 @@
+# Frugal IoT access control. Named by acl_file in extras/mosquitto.conf.
+#
+# DENY BY DEFAULT: the moment the broker names an acl_file, an account with no rule here can still
+# log in but can reach no topic at all. So adding an account means adding its rule in the same
+# change - see scripts/addbridge-prod.zsh, which appends one per Pi.
+#
+# This file is read AFTER mosquitto drops privileges, so it must be readable by the mosquitto user.
+# Install it as mosquitto:mosquitto mode 600 - NOT root-owned 644. Mosquitto 2.0.21 warns
+# "owner is not mosquitto ... Future versions will refuse to load this file" and separately
+# "has world readable permissions", so 644 root works today and is on notice to stop working. The
+# rule is the same one the password file follows: owned by whoever opens it.
+
+# Each organization reaches only its own topic tree. "%u" is the connecting account name, and the
+# first element of every Frugal IoT topic is the organization id - so this is what the nodes,
+# dashboards and the server's own logger already do. It just stops being optional.
+pattern readwrite %u/#
+
+# Whether a bridge is up. With "notifications" left on (the default) a bridge publishes a retained
+# 1 or 0 to $SYS/broker/connection/<remote_clientid>/state, and that is what frugal-iot-diagnostic
+# reads to say whether a site is connected.
+#
+# Needed because "pattern readwrite %u/#" does not match $SYS, so without this line the diagnostic
+# reports every bridge as never having connected - measured, not guessed. This is the narrowest rule
+# that fixes it: it exposes which bridges exist and whether each is up, and nothing else. Reading
+# all of $SYS ("pattern read $SYS/#") would also work and would hand every account the broker's
+# client counts, subscription counts and traffic totals, which on a multi-organization broker tells
+# each organization about the others.
+#
+# Mosquitto logs "Warning: ACL pattern ... does not contain '%c' or '%u'" for the line below, on
+# every start and reload. It is harmless and expected: a "pattern" line is the only way to say
+# "every authenticated account", because a bare "topic" line applies to anonymous clients only.
+# Do not "fix" it by changing it to a topic line - that would silently grant nothing.
+pattern read $SYS/broker/connection/+/state
+
+# Bridge connections are exempt from this file on their local broker - a bridge with no
+# local_username still carries traffic in both directions with the rules above in force (measured on
+# mosquitto 2.0.21). So a Pi's own bridge needs nothing here; it is the far end, on production, that
+# needs a rule, and addbridge-prod.zsh writes it.

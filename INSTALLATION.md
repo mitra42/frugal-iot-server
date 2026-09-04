@@ -908,12 +908,16 @@ installed by hand, the written procedure for doing that.
 > Note the asymmetry with the Pi end below: a *certificate* change needs only `reload`, but adding
 > or changing a *bridge* needs a full `restart`, because Mosquitto does not reload bridges.
 
-**Turn on access control.** Without it, any account that can log in to the broker can publish and
-subscribe anywhere on it, so a per-Pi account would be no more confined than the organization's
-own. This is the part to plan carefully, because Mosquitto's ACL file is **deny-by-default**: the
-moment the broker names an `acl_file`, every existing account with no entry in it stops working.
-So the file that restricts new bridge accounts has to grant the existing organizations what they
-already have, in the same change.
+**Turn on access control** — if this broker predates the release that ships it. Since
+`extras/aclfile` became part of the base install, a Pi set up with `install-pi.sh` already has this
+and there is nothing to do here; the steps below are for a broker built before that, or one whose
+configuration was written by hand.
+
+Without it, any account that can log in to the broker can publish and subscribe anywhere on it, so
+a per-Pi account would be no more confined than the organization's own. This is the part to plan
+carefully, because Mosquitto's ACL file is **deny-by-default**: the moment the broker names an
+`acl_file`, every existing account with no entry in it stops working. So the file that restricts new
+bridge accounts has to grant the existing organizations what they already have, in the same change.
 
 ```
 sudo tee /etc/mosquitto/aclfile >/dev/null <<'EOF'
@@ -923,12 +927,21 @@ sudo tee /etc/mosquitto/aclfile >/dev/null <<'EOF'
 # first element of every Frugal IoT topic is the organization id - so this is what the nodes,
 # dashboards and the server's own logger already do. It just stops being optional.
 pattern readwrite %u/#
+
+# Whether a bridge is up, for frugal-iot-diagnostic. "pattern readwrite %u/#" does not match $SYS,
+# so without this the diagnostic reports every bridge as never having connected. Mosquitto logs a
+# warning that this pattern contains no %u - harmless, and a "topic" line would apply to anonymous
+# clients only, which is not what is wanted.
+pattern read $SYS/broker/connection/+/state
 EOF
-sudo chmod 644 /etc/mosquitto/aclfile
+sudo chown mosquitto:mosquitto /etc/mosquitto/aclfile
+sudo chmod 600 /etc/mosquitto/aclfile
 ```
 
-`chmod 644` matters: like the password file and the TLS key, the broker reads this *after* dropping
-to the `mosquitto` user, so a root-only file stops it starting. Then name it in the configuration
+The ownership matters: like the password file and the TLS key, the broker reads this *after*
+dropping to the `mosquitto` user, so a root-only file stops it starting. Mode 600 owned by
+`mosquitto` rather than 644 owned by root — 2.0.21 accepts the latter but warns on every start that
+a file it does not own, or one that is world readable, "will be refused by a future version". Then name it in the configuration
 and restart:
 
 ```
@@ -949,10 +962,12 @@ out, delete `/etc/mosquitto/conf.d/zy-frugal-iot-acl.conf` and restart.
 
 Nothing needs adding here per Pi: `frugal-iot-addbridge-prod` in 11b appends each bridge's own rule.
 
-> One thing this costs: `pattern readwrite %u/#` also denies `$SYS`, so the production broker can no
-> longer tell anyone which bridges are currently connected. The Pi still reports its own bridge
-> state to `frugal-iot-diagnostic`, which is where you would look anyway, so this is a fair trade —
-> but it is why production's dashboard cannot show a site as up or down.
+> `pattern readwrite %u/#` on its own denies `$SYS`, which would stop `frugal-iot-diagnostic`
+> reporting whether a bridge is connected — it reads `$SYS/broker/connection/+/state` as the
+> organization. The second rule above restores exactly that one topic and nothing else. Reading all
+> of `$SYS` would also work and would hand every account the broker's client counts, subscription
+> counts and traffic totals, which on a multi-organization broker tells each organization about the
+> others.
 
 #### 11b. Authorizing this Pi (run on the production server)
 
