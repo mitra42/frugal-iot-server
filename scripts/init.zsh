@@ -78,6 +78,11 @@ done
 # Never regenerated: rotating session_secret logs everyone out, and rotating user_secret invalidates
 # every browser's broker credential until its next login. Both are recoverable, neither should
 # happen because somebody re-ran init.
+#
+# Written here as well as by the server (lib/secrets.js fills in anything missing at startup) so
+# that a permissions problem with this directory shows up now, while somebody is watching the
+# install, rather than in the journal at first boot. The server appends only what it does not find,
+# so the two cannot fight, and a release adding a new secret needs no change here.
 if [[ ! -e ./config.d/secrets.yaml ]]; then
   # ( set +o pipefail ) because head closing the pipe makes tr fail, which under pipefail would
   # end the script - see the note in claude.md about this exact trap.

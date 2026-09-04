@@ -108,6 +108,7 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 // API Integration - Farm IoT Interoperability Standard
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
+import { ensureSecrets } from './lib/secrets.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -852,21 +853,30 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.set('trust proxy', 1); // trust first proxy - see note in https://www.npmjs.com/package/express-session
         // TODO-N89 note need to setup session store, defaults to memory store which is not good for production
         // TODO-N89 think about cookie timeout and add "keep me logged in on this device" option that controls it
-        // The secret signs the session cookie, so a known one would let anyone mint a validly-signed
-        // cookie. That alone is not a way in - the cookie carries only a session id and the session
+        // The session secret signs the cookie, so a known one would let anyone mint a validly-signed
+        // one. That alone is not a way in - the cookie carries only a session id and the session
         // lives server-side, so a forged one names no session - but it was the express-session
         // README's own 'keyboard cat', which is not a state to leave a server in.
-        // Generated per installation by frugal-iot-init into config.d/secrets.yaml. An installation
-        // that predates that file gets a random one for this run, which ends its sessions on every
-        // restart - noisy enough to notice, and no worse than the sessions being in memory anyway.
-        let sessionSecret = config.secrets && config.secrets.session_secret;
-        if (!sessionSecret) {
-          sessionSecret = crypto.randomBytes(32).toString('hex');
-          console.log("No session_secret in config.d/secrets.yaml - using a temporary one, so every",
-            "restart will log everyone out. Run: npx --no frugal-iot-init");
+        //
+        // frugal-iot-init writes these, but a server upgraded from a release before that has none,
+        // so anything missing is generated AND written to config.d/secrets.yaml here. Generating
+        // without saving would end every session on every restart, and the symptom does not point
+        // at the cause, so it would be lived with rather than fixed.
+        const secretsResult = ensureSecrets(config.secrets, './config.d',
+          ['session_secret', 'user_secret']);
+        config.secrets = secretsResult.secrets;   // so the rest of this run sees them
+        if (secretsResult.generated.length) {
+          if (secretsResult.written) {
+            console.log("Generated", secretsResult.generated.join(", "),
+              "and saved them to config.d/secrets.yaml");
+          } else {
+            console.error("Could not write config.d/secrets.yaml:", secretsResult.error);
+            console.error("  Generated", secretsResult.generated.join(", "), "for this run only, so",
+              "every restart will log everyone out until that file is writable.");
+          }
         }
         app.use(session({
-          secret: sessionSecret,
+          secret: config.secrets.session_secret,
           resave: false,
           saveUninitialized: false,
           cookie: { secure: 'auto' }  // TODO-N89 cant be secure: true while testing on HTTP

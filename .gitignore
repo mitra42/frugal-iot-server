@@ -62,5 +62,10 @@ data/
 # do not upload configs for organizations as not secure
 config.d/organizations/
 
+# Generated per installation by frugal-iot-init, or by the server at startup if missing. Holds
+# session_secret and user_secret, so it must never be committed. Note that running the test suite
+# creates one here, because importing frugal-iot-server.js generates what it does not find.
+config.d/secrets.yaml
+
 # Access keys and credentials
 firebase-service-account.json
