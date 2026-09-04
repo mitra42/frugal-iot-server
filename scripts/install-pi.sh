@@ -468,14 +468,28 @@ ok "mosquitto $(mosquitto -h 2>&1 | head -1 | awk '{print $3}' || true)"
 step "Configuring the broker"
 # Two listeners: 1883 for the sensor nodes, 9012 websockets for the browser. Shipped with the
 # server, so it is copied rather than written here.
-SRC_CONF="${INSTALL_DIR}/extras/mosquitto.conf"
-[[ -f "$SRC_CONF" ]] || { echo "Expected ${SRC_CONF} to exist after frugal-iot-init" >&2; exit 1; }
+# Read the broker configuration from the INSTALLED PACKAGE, not from ${INSTALL_DIR}/extras.
+#
+# frugal-iot-init copies extras/ into the install directory but never overwrites what is already
+# there - it prints "kept ... (DIFFERS from this release)" and leaves it. That is right for a file
+# somebody may have edited, and wrong for this one: it means a security-relevant change to the
+# shipped broker configuration does not reach /etc on an upgrade, however many times this script is
+# re-run. That is how a broker with no acl_file survived several releases.
+#
+# The package's own copy is authoritative, so an upgrade followed by a re-run of this script applies
+# the current configuration. ${INSTALL_DIR}/extras stays as the fallback for an installation whose
+# layout predates this.
+PKG_DIR="${INSTALL_DIR}/node_modules/frugal-iot-server"
+SRC_CONF="${PKG_DIR}/extras/mosquitto.conf"
+[[ -f "$SRC_CONF" ]] || SRC_CONF="${INSTALL_DIR}/extras/mosquitto.conf"
+[[ -f "$SRC_CONF" ]] || { echo "Expected extras/mosquitto.conf in ${PKG_DIR} or ${INSTALL_DIR}" >&2; exit 1; }
 
 # The ACL file goes in FIRST, because the configuration copied below names it and mosquitto will not
 # start if it is missing. Owned by mosquitto, mode 600: the broker reads it after dropping
 # privileges, and 2.0.21 warns that a file it does not own, or one that is world readable, will be
 # refused by a future version. Same rule as the password file below.
-SRC_ACL="${INSTALL_DIR}/extras/aclfile"
+SRC_ACL="${PKG_DIR}/extras/aclfile"
+[[ -f "$SRC_ACL" ]] || SRC_ACL="${INSTALL_DIR}/extras/aclfile"
 if [[ -f "$SRC_ACL" ]]; then
   if cmp -s "$SRC_ACL" /etc/mosquitto/aclfile 2>/dev/null; then
     skip "/etc/mosquitto/aclfile already current"
@@ -484,15 +498,63 @@ if [[ -f "$SRC_ACL" ]]; then
     ok "access control list installed at /etc/mosquitto/aclfile"
   fi
 else
-  echo "Expected ${SRC_ACL} to exist after frugal-iot-init" >&2; exit 1
+  echo "Expected extras/aclfile in ${PKG_DIR} or ${INSTALL_DIR}" >&2; exit 1
 fi
 
-if cmp -s "$SRC_CONF" /etc/mosquitto/conf.d/frugal-iot.conf 2>/dev/null; then
+# The dynamic security plugin. Its state file has to exist before the configuration naming it is
+# installed, or the broker will not start - same ordering as the ACL above.
+#
+# The plugin path varies by distribution, so it is found rather than assumed: Debian and Raspberry Pi
+# OS ship it as /usr/lib/<arch>/mosquitto_dynamic_security.so, others use a mosquitto/ subdirectory.
+DYNSEC_SO=""
+for cand in /usr/lib/*/mosquitto_dynamic_security.so /usr/lib/mosquitto_dynamic_security.so             /usr/lib/*/mosquitto/mosquitto_dynamic_security.so /usr/lib/mosquitto/mosquitto_dynamic_security.so; do
+  [[ -f "$cand" ]] && { DYNSEC_SO="$cand"; break; }
+done
+DYNSEC_JSON=/var/lib/mosquitto/dynamic-security.json
+if [[ -z "$DYNSEC_SO" ]]; then
+  warn "mosquitto's dynamic security plugin was not found - per-user broker accounts will not work."
+  warn "  Looked in /usr/lib. The broker will still run on the organization passwords."
+elif [[ -f "$DYNSEC_JSON" ]]; then
+  skip "dynamic security already initialised at ${DYNSEC_JSON}"
+else
+  # dynsec init asks for the admin password twice on stdin. The password is generated here and kept
+  # in the server's own config.d/secrets.yaml, which is never served to a browser.
+  DYNSEC_PW="$(randpw)"
+  if printf '%s\n%s\n' "$DYNSEC_PW" "$DYNSEC_PW"        | sudo_ mosquitto_ctrl dynsec init "$DYNSEC_JSON" frugal-admin >/dev/null 2>&1      && [[ -s "$DYNSEC_JSON" ]]; then
+    # Written after dropping privileges, so owned by mosquitto like the password and ACL files
+    sudo_ chown mosquitto:mosquitto "$DYNSEC_JSON"
+    sudo_ chmod 600 "$DYNSEC_JSON"
+    {
+      echo ""
+      echo "# The broker account the server uses to create and remove other accounts, over"
+      echo "# \$CONTROL/dynamic-security/v1. Created by install-pi.sh."
+      echo "dynsec_admin_user: \"frugal-admin\""
+      echo "dynsec_admin_password: \"${DYNSEC_PW}\""
+    } >> "${INSTALL_DIR}/config.d/secrets.yaml"
+    chmod 600 "${INSTALL_DIR}/config.d/secrets.yaml"
+    ok "dynamic security initialised; admin credential saved to config.d/secrets.yaml"
+  else
+    warn "mosquitto_ctrl dynsec init failed - continuing without it"
+    sudo_ rm -f "$DYNSEC_JSON"
+    DYNSEC_SO=""
+  fi
+fi
+
+# The shipped configuration carries a placeholder for the plugin path, because it differs per
+# distribution. Substitute it here - or comment the plugin out entirely if there is no plugin.
+TMP_CONF="$(mktemp)"
+if [[ -n "$DYNSEC_SO" ]]; then
+  sed "s|^plugin PLUGIN_PATH_SET_BY_INSTALLER|plugin ${DYNSEC_SO}|" "$SRC_CONF" > "$TMP_CONF"
+else
+  sed -e "s|^plugin PLUGIN_PATH_SET_BY_INSTALLER|#plugin (not installed)|"       -e "s|^plugin_opt_config_file|#plugin_opt_config_file|" "$SRC_CONF" > "$TMP_CONF"
+fi
+if cmp -s "$TMP_CONF" /etc/mosquitto/conf.d/frugal-iot.conf 2>/dev/null; then
   skip "/etc/mosquitto/conf.d/frugal-iot.conf already current"
 else
-  sudo_ cp "$SRC_CONF" /etc/mosquitto/conf.d/frugal-iot.conf
+  sudo_ cp "$TMP_CONF" /etc/mosquitto/conf.d/frugal-iot.conf
   ok "configuration copied to /etc/mosquitto/conf.d/frugal-iot.conf"
 fi
+rm -f "$TMP_CONF"
 # The broker refuses to start if the password file it is told about does not exist. It has to belong
 # to the mosquitto user, because both the broker and mosquitto_passwd warn unless the file belongs to
 # whoever opened it - and mosquitto_passwd writes a temporary file beside it, so the directory has to

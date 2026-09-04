@@ -50,6 +50,7 @@
     "private/",
     "scripts/",
     "extras/mosquitto.conf",
+    "extras/aclfile",
     "extras/mosquitto-bridge.conf.example",
     "extras/frugaliot.service",
     "API.md",

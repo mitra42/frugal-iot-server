@@ -1219,9 +1219,18 @@ command for each. That matters most for the files you copy somewhere else — a 
 `extras/mosquitto.conf` or `extras/frugaliot.service` does nothing until you install it again:
 
 ```
-sudo cp extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf && sudo systemctl restart mosquitto
-sudo cp extras/frugaliot.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart frugaliot
+sudo cp node_modules/frugal-iot-server/extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf
+sudo cp node_modules/frugal-iot-server/extras/aclfile /etc/mosquitto/aclfile
+sudo chown mosquitto:mosquitto /etc/mosquitto/aclfile && sudo chmod 600 /etc/mosquitto/aclfile
+sudo systemctl restart mosquitto
+sudo cp node_modules/frugal-iot-server/extras/frugaliot.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart frugaliot
 ```
+
+Note those read from `node_modules/frugal-iot-server/extras/`, **not** from `extras/` in this
+directory. `frugal-iot-init` keeps your local copy and only tells you it differs, so the local one is
+the *old* version — copying it would reinstall what you already have. Re-running the install script
+(`bash node_modules/frugal-iot-server/scripts/install-pi.sh`) does the same job and reads from the
+same place.
 
 > It does not compare `config.yaml`, `config.d/mqtt.yaml`, `config.d/logger.yaml` or
 > `config.d/server.yaml`, because those hold your own settings and would differ every time. If a
