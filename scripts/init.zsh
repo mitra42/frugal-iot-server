@@ -161,6 +161,27 @@ else
   echo "  created ${DB}"
 fi
 
+# ---- 3a. Schema changes that CREATE TABLE IF NOT EXISTS cannot make ----
+# Adding permissions.project needs the UNIQUE constraint changed as well, and SQLite cannot alter a
+# constraint - so the table is rebuilt. Guarded on the column being absent, because init runs on
+# every upgrade. See scripts/migrate-permissions-project.sql for what it does and why.
+PERM_COLS=$(sqlite3 "$DB" "pragma table_info(permissions);" | cut -d'|' -f2) || true
+if ! print -r -- "$PERM_COLS" | grep -qx project; then
+  # A rebuild is the one change here that is not a no-op if it goes wrong, so keep a copy first.
+  DB_BACKUP="${DB}.bak-$(date +%Y%m%d%H%M%S)"
+  cp "$DB" "$DB_BACKUP"
+  if sqlite3 "$DB" < "${PKG}/scripts/migrate-permissions-project.sql"; then
+    echo "  updated ${DB} (added permissions.project; existing rows are organization-wide)"
+    echo "          previous copy kept at ${DB_BACKUP}"
+  else
+    echo "  ERROR: failed to add permissions.project to ${DB}" >&2
+    echo "         the database is unchanged; a copy from before the attempt is at ${DB_BACKUP}" >&2
+    exit 1
+  fi
+else
+  echo "  kept    ${DB} permissions.project (already present)"
+fi
+
 if (( ${#DIFFER_TO} )); then
   echo
   echo "These files were left as you have them, but this release ships a different version:"

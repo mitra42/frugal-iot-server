@@ -259,7 +259,7 @@ function clientErrorHandler(err, req, res, next) {
   }
 }
 const sqlPeoplePermList = `
-  SELECT u.id, u.name, p.capability
+  SELECT u.id, u.name, p.capability, p.project
   FROM users u
   INNER JOIN permissions p ON u.id = p.id AND p.org = ?
 ;`;
@@ -268,7 +268,7 @@ const sqlPeopleList = `
     FROM users u
 ;`;
 const sqlAddPermission = `
-  INSERT INTO permissions (id, capability, org) VALUES (?, ?, ?)
+  INSERT INTO permissions (id, capability, org, project) VALUES (?, ?, ?, ?)
 ;`;
 function get_people_list(org, cb) {
   db.all(sqlPeoplePermList, [org], (err, rows1) => {
@@ -302,7 +302,10 @@ function notePermissionsChanged(id) {
   permissionsChangedAt.set(Number(id), Date.now());
 }
 
-function add_permission(id, capability, org, cb) {
+// project is optional: '' means the whole organization, which is what a caller that knows nothing
+// about projects sends - so the admin UI keeps working unchanged until it grows a project field.
+function add_permission(id, capability, org, project, cb) {
+  project = project || '';
   if ((id === undefined)
     || (capability === undefined) || (capability.length < 2)
     || (org === undefined) || (org.length < 2)) {
@@ -311,21 +314,22 @@ function add_permission(id, capability, org, cb) {
     waterfall([
       (cb) => db.get('SELECT COUNT(id) FROM users WHERE id = ?', [id], cb),
       (n_users, cb) => { if (n_users["COUNT(id)"] != 1) { cb(new Error("User not found")); } else { cb(null); }},
-      (cb) => db.get('SELECT COUNT(id) FROM permissions WHERE id = ? AND capability = ? AND org = ?', [id, capability, org], cb),
+      (cb) => db.get('SELECT COUNT(id) FROM permissions WHERE id = ? AND capability = ? AND org = ? AND project = ?', [id, capability, org, project], cb),
       (n_perms, cb) => { if (n_perms["COUNT(id)"] != 0) { cb(new Error("Duplicate permission")); } else { cb(null); }},
-      (cb) => db.run(sqlAddPermission, [id, capability, org], cb),
+      (cb) => db.run(sqlAddPermission, [id, capability, org, project], cb),
       (cb) => { notePermissionsChanged(id); cb(null); },
     ], cb);
   }
 }
-function permissions_delete(id, capability, org, cb) {
+function permissions_delete(id, capability, org, project, cb) {
+  project = project || '';
   if ((id === undefined)
     || (capability === undefined) || (capability.length < 2)
     || (org === undefined) || (org.length < 2)) {
     cb(new Error("Invalid parameters"));
   } else {
     waterfall([
-      (cb) => db.get('DELETE FROM permissions WHERE id = ? AND capability = ? AND org = ?', [id,capability,org], cb),
+      (cb) => db.get('DELETE FROM permissions WHERE id = ? AND capability = ? AND org = ? AND project = ?', [id,capability,org,project], cb),
       (cb) => { notePermissionsChanged(id); cb(null); },
     ], cb);
   }
@@ -1186,7 +1190,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           loggedInOrFail,
           can_ADMIN,  // Gets org from URL
           (req,res, next) => {
-            add_permission(req.query.id, req.query.capability,req.params.org, (err) => {
+            add_permission(req.query.id, req.query.capability, req.params.org, req.query.project, (err) => {
               if (err) {
                 res.status(400).send(err.message);
               } else {
@@ -1200,7 +1204,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           loggedInOrFail,
           can_ADMIN,  // Gets org from URL
           (req,res, next) => {
-            permissions_delete(req.query.id, req.query.capability,req.params.org, (err) => {
+            permissions_delete(req.query.id, req.query.capability, req.params.org, req.query.project, (err) => {
               if (err) {
                 res.status(400).send(err.message);
               } else {

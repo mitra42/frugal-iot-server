@@ -20,11 +20,20 @@ CREATE TABLE IF NOT EXISTS `users` (
   `email` TEXT,
   `phone` TEXT
 );
+-- `project` scopes a permission to one project of an organization. Empty string means the whole
+-- organization, which is how every row created before this column existed behaves.
+--
+-- NOT NULL DEFAULT '' rather than nullable, and that matters: SQLite treats NULLs as DISTINCT in a
+-- UNIQUE constraint, so with a nullable column `(2,'READ','dev',NULL)` could be inserted twice and
+-- the constraint that used to prevent duplicate organization-wide rows would silently stop working.
+-- An empty string compares equal to itself, so uniqueness holds. It also keeps the queries simple:
+-- `project = ?` everywhere, never `IS NULL`.
 CREATE TABLE IF NOT EXISTS `permissions` (
   `id` INTEGER NOT NULL,
   `capability` TEXT NOT NULL,
   `org` TEXT NOT NULL,
-  UNIQUE(`id`, `capability`, `org`)
+  `project` TEXT NOT NULL DEFAULT '',
+  UNIQUE(`id`, `capability`, `org`, `project`)
 );
 CREATE TABLE IF NOT EXISTS `projects` (
   `org` TEXT NOT NULL,

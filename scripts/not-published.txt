@@ -15,6 +15,10 @@ config.d/organizations/*.yaml
 extras/mosquitto_passwords
 
 # --- Development-only: no use to somebody installing the server ---
+# A working inventory of unfixed vulnerabilities in a running system, kept in the working tree while
+# the security work is in progress and not meant to be committed or published. Listed here so
+# prerelease does not stop on it while it is present.
+SECURITY-REVIEW.md
 .gitignore
 claude.md
 create-favicon.js

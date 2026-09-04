@@ -10,9 +10,11 @@
 import { describe, it, expect } from 'vitest';
 import { buildConfigFor, hasPermissions, orgFieldsNeverServed } from '../../lib/config-for-user.js';
 
+// A permission row is [capability, org] for organization-wide, or [capability, org, project].
+// Organization-wide rows carry project '' in the database, so that is what they get here.
 const user = (...perms) => ({
   id: 2, username: 'fred',
-  permissions: perms.map(([capability, org]) => ({ id: 2, capability, org })),
+  permissions: perms.map(([capability, org, project]) => ({ id: 2, capability, org, project: project || '' })),
 });
 
 // Shaped like a real one, including the secrets section frugal-iot-init generates.
@@ -118,7 +120,36 @@ describe('hasPermissions', () => {
     expect(hasPermissions({}, 'dev', 'READ')).toBe(false);
   });
 
-  it('an organization-wide row satisfies a project-scoped question', () => {
-    expect(hasPermissions(user(['READ', 'dev']), 'dev', 'READ', 'lotus')).toBe(true);
+  // The two questions the project argument distinguishes - see the comment on hasPermissions.
+  describe('with projects', () => {
+    const orgWide = user(['READ', 'dev']);
+    const lotusOnly = user(['READ', 'dev', 'lotus']);
+
+    it('an organization-wide row answers yes to a project-scoped question', () => {
+      expect(hasPermissions(orgWide, 'dev', 'READ', 'lotus')).toBe(true);
+      expect(hasPermissions(orgWide, 'dev', 'READ', 'magi')).toBe(true);
+    });
+
+    it('a project-scoped row answers yes only for that project', () => {
+      expect(hasPermissions(lotusOnly, 'dev', 'READ', 'lotus')).toBe(true);
+      expect(hasPermissions(lotusOnly, 'dev', 'READ', 'magi')).toBe(false);
+    });
+
+    it('a project-scoped row answers yes to "anywhere in the organization?"', () => {
+      // Which is what decides whether the organization is shown at all
+      expect(hasPermissions(lotusOnly, 'dev', 'READ')).toBe(true);
+    });
+
+    it('does not leak across organizations or capabilities', () => {
+      expect(hasPermissions(lotusOnly, 'varta', 'READ', 'lotus')).toBe(false);
+      expect(hasPermissions(lotusOnly, 'dev', 'WRITE', 'lotus')).toBe(false);
+    });
+
+    it('org-wide READ plus project-scoped WRITE gives both, each in its place', () => {
+      const u = user(['READ', 'dev'], ['WRITE', 'dev', 'lotus']);
+      expect(hasPermissions(u, 'dev', 'READ', 'magi')).toBe(true);
+      expect(hasPermissions(u, 'dev', 'WRITE', 'lotus')).toBe(true);
+      expect(hasPermissions(u, 'dev', 'WRITE', 'magi')).toBe(false);
+    });
   });
 });
