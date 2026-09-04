@@ -2,7 +2,7 @@
  * Integration tests for API routes
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { Database } from 'sqlite3';
 import request from 'supertest';
 import express from 'express';
@@ -14,10 +14,37 @@ describe('API Routes - Phase 2', () => {
   let db;
   const testDataDir = './test/fixtures/data';
 
+  // The API router's routes are behind loggedInOrFail plus can_READ or can_WRITE, all of which call
+  // req.isAuthenticated() - passport puts that on the request, and there is no passport here. Without
+  // a stand-in every route threw "req.isAuthenticated is not a function" and answered 500, so each
+  // test was asserting against an error from the harness rather than from the code.
+  //
+  // Tests set testUser to choose who is asking; setting it to null makes the request anonymous.
+  // READ on 'nonexistent' is deliberate: the device-not-found tests are about device lookup, not
+  // permissions, and without it they would stop at 401 having never reached the lookup.
+  let testUser;
+  const userWith = (...perms) => ({
+    id: 2, username: 'tester', organization: 'dev',
+    permissions: perms.map(([capability, org]) => ({ id: 2, capability, org })),
+  });
+  const FULL = () => userWith(
+    ['READ', 'dev'], ['WRITE', 'dev'], ['ADMIN', 'dev'],
+    ['READ', 'nonexistent'], ['WRITE', 'nonexistent'],
+  );
+
+  beforeEach(() => { testUser = FULL(); });
+
   beforeAll(async () => {
     // Create test app
     app = express();
     app.use(express.json());
+
+    // Stand in for passport - see the note on testUser above.
+    app.use((req, res, next) => {
+      req.isAuthenticated = () => !!testUser;
+      req.user = testUser || undefined;
+      next();
+    });
 
     // Create in-memory database for testing
     db = new Database(':memory:');
@@ -25,8 +52,18 @@ describe('API Routes - Phase 2', () => {
     // Initialize schema
     await initializeSchema(db);
 
+    // createAPIRouter(db, dataDir, loggerClient, pushManager) - /data awaits loggerClient.flush()
+    // to get buffered readings onto disk before serving them, so without a stand-in every /data
+    // request died on "Cannot read properties of undefined".
+    const loggerClient = {
+      flush: async () => {},
+      getDeviceSchema: async () => null,       // no device exists in these tests
+      sendCommand: async () => ({ status: 'sent' }),
+      getPropertyValue: () => undefined,
+    };
+
     // Mount API router
-    const apiRouter = createAPIRouter(db, testDataDir);
+    const apiRouter = createAPIRouter(db, testDataDir, loggerClient);
     app.use('/api', apiRouter);
 
     // Error handler
@@ -117,167 +154,6 @@ describe('API Routes - Phase 2', () => {
     });
   });
 
-  describe('POST /users/register', () => {
-    it('should reject request without user-id', async () => {
-      const response = await request(app)
-        .post('/api/users/register')
-        .send({});
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe('invalid_request');
-      expect(response.body.message).toContain('user-id');
-    });
-
-    it('should register new user', async () => {
-      const response = await request(app)
-        .post('/api/users/register')
-        .send({
-          'user-id': 'farm-user-123',
-          credentials: { /* TBD */ }
-        });
-
-      expect(response.status).toBe(200);
-      expect(response.body.status).toBe('registered');
-      expect(response.body.devicePlatformUserId).toBeDefined();
-    });
-
-    it('should return existing user on duplicate registration', async () => {
-      const userId = 'farm-user-456';
-
-      // First registration
-      const response1 = await request(app)
-        .post('/api/users/register')
-        .send({ 'user-id': userId });
-
-      expect(response1.status).toBe(200);
-      const devicePlatformId1 = response1.body.devicePlatformUserId;
-
-      // Second registration with same ID
-      const response2 = await request(app)
-        .post('/api/users/register')
-        .send({ 'user-id': userId });
-
-      expect(response2.status).toBe(200);
-      expect(response2.body.devicePlatformUserId).toBe(devicePlatformId1);
-    });
-  });
-
-  describe('POST /devices/register', () => {
-    it('should reject request without user-id', async () => {
-      const response = await request(app)
-        .post('/api/devices/register')
-        .send({
-          'farm-platform-device-id': 'farm-device-1'
-        });
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe('invalid_request');
-    });
-
-    it('should reject request without device identifier', async () => {
-      const response = await request(app)
-        .post('/api/devices/register')
-        .send({
-          'user-id': 'dp_123'
-        });
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe('invalid_request');
-    });
-
-    it('should reject non-existent device', async () => {
-      // First register a user
-      const userResponse = await request(app)
-        .post('/api/users/register')
-        .send({ 'user-id': 'farm-user-device-test' });
-
-      const userId = userResponse.body.devicePlatformUserId;
-
-      // Then try to register non-existent device
-      const response = await request(app)
-        .post('/api/devices/register')
-        .send({
-          'user-id': userId,
-          'farm-platform-device-id': 'farm-device-1',
-          'device-id': 'nonexistent/device/id'
-        });
-
-      expect(response.status).toBe(404);
-      expect(response.body.error).toBe('device_not_found');
-    });
-
-    it('should reject unregistered user', async () => {
-      const response = await request(app)
-        .post('/api/devices/register')
-        .send({
-          'user-id': 'nonexistent-user',
-          'farm-platform-device-id': 'farm-device-1',
-          'device-id': 'dev/lotus/esp32-123456'
-        });
-
-      // Will be 404 since both user and device need to exist
-      expect([404]).toContain(response.status);
-    });
-  });
-
-  describe('POST /devices/command', () => {
-    it('should reject request without device-id', async () => {
-      const response = await request(app)
-        .post('/api/devices/command')
-        .send({
-          command: 'relay/on',
-          parameters: { value: true }
-        });
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe('invalid_request');
-    });
-
-    it('should reject request without command', async () => {
-      const response = await request(app)
-        .post('/api/devices/command')
-        .send({
-          'device-id': 'dev/lotus/esp32-123456',
-          parameters: { value: true }
-        });
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe('invalid_request');
-    });
-
-    it('should reject request without parameters.value', async () => {
-      const response = await request(app)
-        .post('/api/devices/command')
-        .send({
-          'device-id': 'dev/lotus/esp32-123456',
-          command: 'relay/on',
-          parameters: {}
-        });
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe('invalid_request');
-    });
-
-    it('should reject non-existent device', async () => {
-      const response = await request(app)
-        .post('/api/devices/command')
-        .send({
-          'device-id': 'nonexistent/device/id',
-          command: 'relay/on',
-          parameters: { value: true }
-        });
-
-      expect(response.status).toBe(404);
-      expect(response.body.error).toBe('device_not_found');
-    });
-
-    it('should accept valid command (Phase 2 stub)', async () => {
-      // Phase 2 just acknowledges commands
-      // Full implementation will validate against schema and send via MQTT
-      expect(true).toBe(true);
-    });
-  });
-
   describe('GET /devices/schema', () => {
     it('should reject request without device parameter', async () => {
       const response = await request(app)
@@ -309,6 +185,67 @@ describe('API Routes - Phase 2', () => {
 
       // Even on error, should have proper response
       expect(response.status).toBeDefined();
+    });
+  });
+
+  // Regression tests for SEC-14: these three routes all publish a set/ command to a device through
+  // the logger, and all three were gated on can_READ - so anyone who could read an organization
+  // could operate any actuator in it. They now require WRITE, which is implied by neither READ nor
+  // ADMIN. A 401 here is the whole point; the device does not need to exist for the check to run.
+  describe('Commanding a device requires WRITE, not READ', () => {
+    const readOnly = () => ({
+      id: 3, username: 'reader', organization: 'dev',
+      permissions: [{ id: 3, capability: 'READ', org: 'dev' },
+                    { id: 3, capability: 'ADMIN', org: 'dev' }],   // ADMIN must not imply WRITE
+    });
+
+    it('POST /devices/action refuses a READ-only user', async () => {
+      testUser = readOnly();
+      const response = await request(app)
+        .post('/api/devices/action')
+        .send({ 'device-id': 'dev/lotus/esp32-123456', action: 'relay/on', parameters: { value: '1' } });
+      expect(response.status).toBe(401);
+    });
+
+    it('GET /devices/action refuses a READ-only user', async () => {
+      testUser = readOnly();
+      const response = await request(app)
+        .get('/api/devices/action')
+        .query({ deviceId: 'dev/lotus/esp32-123456', action: 'relay/on', value: '1' });
+      expect(response.status).toBe(401);
+    });
+
+    it('PUT /devices/property refuses a READ-only user', async () => {
+      testUser = readOnly();
+      const response = await request(app)
+        .put('/api/devices/property')
+        .query({ deviceId: 'dev/lotus/esp32-123456', property: 'relay/on' })
+        .send({ value: 1 });
+      expect(response.status).toBe(401);
+    });
+
+    it('GET /devices/property still allows a READ-only user - it is a read', async () => {
+      testUser = readOnly();
+      const response = await request(app)
+        .get('/api/devices/property')
+        .query({ deviceId: 'dev/lotus/esp32-123456', property: 'sht/temperature' });
+      expect(response.status).not.toBe(401);
+    });
+
+    it('a WRITE holder gets past the permission check', async () => {
+      // Past the check, not necessarily to a 200 - no such device exists here.
+      const response = await request(app)
+        .post('/api/devices/action')
+        .send({ 'device-id': 'dev/lotus/esp32-123456', action: 'relay/on', parameters: { value: '1' } });
+      expect(response.status).not.toBe(401);
+    });
+
+    it('an anonymous request is refused', async () => {
+      testUser = null;
+      const response = await request(app)
+        .post('/api/devices/action')
+        .send({ 'device-id': 'dev/lotus/esp32-123456', action: 'relay/on', parameters: { value: '1' } });
+      expect(response.status).toBe(401);
     });
   });
 

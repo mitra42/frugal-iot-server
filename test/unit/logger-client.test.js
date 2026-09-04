@@ -59,148 +59,94 @@ describe('Phase 3: Logger Integration & Push Manager', () => {
 
   describe('LoggerClient', () => {
     describe('Schema Validation', () => {
-      const schema = {
-        'device-platform-device-id': 'dev/test/esp32',
-        modules: {
-          relay: {
-            fields: [
-              {
-                field: 'on',
-                name: 'Relay On',
-                type: 'boolean',
-                rw: 'w',
-                min: 0,
-                max: 1
-              }
-            ]
-          },
-          sensor: {
-            fields: [
-              {
-                field: 'temperature',
-                name: 'Temperature',
-                type: 'float',
-                rw: 'r',
-                min: -40,
-                max: 125
-              },
-              {
-                field: 'humidity',
-                name: 'Humidity',
-                type: 'float',
-                rw: 'rw',
-                min: 0,
-                max: 100
-              }
-            ]
-          }
-        }
-      };
+          // A WoT Thing Descriptor, the shape getDeviceSchema() actually returns (API.md Annex A.2/A.3):
+          // an action carries its DataSchema under "input", a property carries it directly and may be
+          // readOnly. The previous version of these tests used a modules/fields schema that no code
+          // reads any more.
+          const schema = {
+            id: 'dev/test/esp32',
+            actions: {
+              'relay/on': { input: { type: 'boolean' } },
+              'servo/angle': { input: { type: 'integer', minimum: 0, maximum: 180 } },
+            },
+            properties: {
+              'sht/temperature': { type: 'number', minimum: -40, maximum: 125, readOnly: true },
+              'control/setpoint': { type: 'number', minimum: 0, maximum: 100 },
+            },
+          };
 
-      it('should validate correct command', () => {
-        const result = loggerClient.validateCommandAgainstSchema(
-          schema,
-          'relay/on',
-          true
-        );
+          it('accepts a valid action', () => {
+            expect(loggerClient.validateActionAgainstSchema(schema, 'relay/on', true).valid).toBe(true);
+          });
 
-        expect(result.valid).toBe(true);
-      });
+          it('rejects the wrong type for an action', () => {
+            const r = loggerClient.validateActionAgainstSchema(schema, 'relay/on', 'yes');
+            expect(r.valid).toBe(false);
+          });
 
-      it('should reject command for read-only field', () => {
-        const result = loggerClient.validateCommandAgainstSchema(
-          schema,
-          'sensor/temperature',
-          25.5
-        );
+          it('accepts a value inside an action range', () => {
+            expect(loggerClient.validateActionAgainstSchema(schema, 'servo/angle', 90).valid).toBe(true);
+          });
 
-        expect(result.valid).toBe(false);
-        expect(result.error).toContain('read-only');
-      });
+          it('rejects a value above the maximum', () => {
+            const r = loggerClient.validateActionAgainstSchema(schema, 'servo/angle', 200);
+            expect(r.valid).toBe(false);
+            expect(r.error).toContain('above maximum');
+          });
 
-      it('should accept command for rw field', () => {
-        const result = loggerClient.validateCommandAgainstSchema(
-          schema,
-          'sensor/humidity',
-          65
-        );
+          it('rejects a value below the minimum', () => {
+            const r = loggerClient.validateActionAgainstSchema(schema, 'servo/angle', -1);
+            expect(r.valid).toBe(false);
+            expect(r.error).toContain('below minimum');
+          });
 
-        expect(result.valid).toBe(true);
-      });
+          it('rejects a non-integer for an integer action', () => {
+            expect(loggerClient.validateActionAgainstSchema(schema, 'servo/angle', 90.5).valid).toBe(false);
+          });
 
-      it('should validate field type - boolean', () => {
-        const result = loggerClient.validateCommandAgainstSchema(
-          schema,
-          'relay/on',
-          'not-a-boolean'
-        );
+          it('rejects an unknown action', () => {
+            const r = loggerClient.validateActionAgainstSchema(schema, 'nosuch/field', 1);
+            expect(r.valid).toBe(false);
+            expect(r.error).toContain('not found');
+          });
 
-        expect(result.valid).toBe(false);
-        expect(result.error).toContain('boolean');
-      });
+          it('says so when an action name is really a property', () => {
+            const r = loggerClient.validateActionAgainstSchema(schema, 'control/setpoint', 50);
+            expect(r.valid).toBe(false);
+            expect(r.error).toContain('property, not an action');
+          });
 
-      it('should validate field type - number', () => {
-        const result = loggerClient.validateCommandAgainstSchema(
-          schema,
-          'sensor/humidity',
-          'not-a-number'
-        );
+          // The security-relevant one: a read-only property must not be writable through the API.
+          it('refuses to write a read-only property', () => {
+            const r = loggerClient.validatePropertyAgainstSchema(schema, 'sht/temperature', 25.5);
+            expect(r.valid).toBe(false);
+            expect(r.error).toContain('read-only');
+          });
 
-        expect(result.valid).toBe(false);
-      });
+          it('accepts a writable property in range', () => {
+            expect(loggerClient.validatePropertyAgainstSchema(schema, 'control/setpoint', 21).valid).toBe(true);
+          });
 
-      it('should validate value range', () => {
-        const resultLow = loggerClient.validateCommandAgainstSchema(
-          schema,
-          'sensor/humidity',
-          -10
-        );
-        expect(resultLow.valid).toBe(false);
-        expect(resultLow.error).toContain('below minimum');
+          it('rejects a writable property out of range', () => {
+            const r = loggerClient.validatePropertyAgainstSchema(schema, 'control/setpoint', 101);
+            expect(r.valid).toBe(false);
+            expect(r.error).toContain('above maximum');
+          });
 
-        const resultHigh = loggerClient.validateCommandAgainstSchema(
-          schema,
-          'sensor/humidity',
-          150
-        );
-        expect(resultHigh.valid).toBe(false);
-        expect(resultHigh.error).toContain('above maximum');
-      });
+          it('says so when a property name is really an action', () => {
+            const r = loggerClient.validatePropertyAgainstSchema(schema, 'relay/on', true);
+            expect(r.valid).toBe(false);
+            expect(r.error).toContain('action, not a property');
+          });
 
-      it('should reject non-existent module', () => {
-        const result = loggerClient.validateCommandAgainstSchema(
-          schema,
-          'nonexistent/field',
-          true
-        );
+          it('rejects an unknown property', () => {
+            const r = loggerClient.validatePropertyAgainstSchema(schema, 'nosuch/field', 1);
+            expect(r.valid).toBe(false);
+            expect(r.error).toContain('not found');
+          });
+        });
 
-        expect(result.valid).toBe(false);
-        expect(result.error).toContain('not found');
-      });
-
-      it('should reject non-existent field', () => {
-        const result = loggerClient.validateCommandAgainstSchema(
-          schema,
-          'relay/nonexistent',
-          true
-        );
-
-        expect(result.valid).toBe(false);
-        expect(result.error).toContain('not found');
-      });
-
-      it('should validate command format', () => {
-        const result = loggerClient.validateCommandAgainstSchema(
-          schema,
-          'invalid-format',
-          true
-        );
-
-        expect(result.valid).toBe(false);
-        expect(result.error).toContain('module/field');
-      });
-    });
-
+    
     describe('Schema Caching', () => {
       it('should cache schema', async () => {
         const org = 'dev';
@@ -338,55 +284,18 @@ describe('Phase 3: Logger Integration & Push Manager', () => {
   });
 
   describe('Integration: Logger + Push Manager', () => {
-    it('should validate command before queuing', () => {
-      const schema = {
-        'device-platform-device-id': 'dev/test/esp32',
-        modules: {
-          relay: {
-            fields: [
-              {
-                field: 'on',
-                name: 'Relay On',
-                type: 'boolean',
-                rw: 'w'
-              }
-            ]
-          }
-        }
-      };
+    const schema = {
+      id: 'dev/test/esp32',
+      actions: { 'relay/on': { input: { type: 'boolean' } } },
+      properties: { 'sensor/temp': { type: 'number', readOnly: true } },
+    };
 
-      const validation = loggerClient.validateCommandAgainstSchema(
-        schema,
-        'relay/on',
-        true
-      );
-
-      expect(validation.valid).toBe(true);
+    it('validates an action before queuing', () => {
+      expect(loggerClient.validateActionAgainstSchema(schema, 'relay/on', true).valid).toBe(true);
     });
 
-    it('should reject invalid command before queuing', () => {
-      const schema = {
-        'device-platform-device-id': 'dev/test/esp32',
-        modules: {
-          sensor: {
-            fields: [
-              {
-                field: 'temp',
-                name: 'Temperature',
-                type: 'float',
-                rw: 'r'
-              }
-            ]
-          }
-        }
-      };
-
-      const validation = loggerClient.validateCommandAgainstSchema(
-        schema,
-        'sensor/temp',
-        25.5
-      );
-
+    it('rejects a write to a read-only field before queuing', () => {
+      const validation = loggerClient.validatePropertyAgainstSchema(schema, 'sensor/temp', 25.5);
       expect(validation.valid).toBe(false);
       expect(validation.error).toContain('read-only');
     });
