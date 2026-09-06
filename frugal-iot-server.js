@@ -903,9 +903,34 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     const routerNM = express.Router();
     app.use('/node_modules', routerNM);
     //routerData.use('/', (req, res, next) => { console.log("NM:", req.url); next(); });
+    /*
+     * Revalidated, not cached for a day.
+     *
+     * These URLs are not versioned - "/node_modules/mqtt/dist/mqtt.esm.js" serves whatever this
+     * release installed - so "immutable" was a promise the server could not keep. It means "never
+     * even ask again", so a browser went on running the previous release's code for up to 24 hours
+     * after an upgrade, with no way to know it was doing so. That is also why deploying to the test
+     * Pi appeared to do nothing.
+     *
+     * Still a day - these users are often on an expensive link with poor reception, so a request
+     * saved is worth more than a minute's freshness. What changes is only `immutable`, and the
+     * difference between the two is exactly the one that matters here: a RELOAD revalidates a
+     * max-age resource and does not revalidate an immutable one. So ordinary navigation still costs
+     * no requests, while a refresh picks up a new release instead of being told not to ask for a
+     * day. ETag and Last-Modified, which express.static already sends, make that a 304.
+     *
+     * Freshness for an installed PWA is the service worker's job, not this header's: it is
+     * cache-first, its CACHE_NAME follows the release, and it fetches with cache 'reload' on
+     * install, which bypasses this cache entirely.
+     *
+     * The complete answer is a version in the URL, which would allow a year here AND appear the
+     * instant a release changed it. That needs the client's module imports to carry the version, so
+     * it is not a one-line change - noted, not done.
+     */
+    const revalidate = { maxAge: 1000 * 60 * 60 * 24 };
     routerNM.use(
-      express.static(clientNodeModules, {immutable: true, maxAge: 1000 * 60 * 60 * 24}),
-      express.static(config.server.nodemodulesdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24})
+      express.static(clientNodeModules, revalidate),
+      express.static(config.server.nodemodulesdir, revalidate)
     );
 
     openOrCreateDatabase((err, db) => {
@@ -1403,7 +1428,9 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           shouldIBeLoggedIn, // redirect to ./login.html if not logged in then back here
           //(req,res,next) => {console.log("XXX back to /dashboard handler for", req.url); next(); }, // Log attempt
           //(req,res,next) => {console.log("XXX", config.server.htmldir); next(); }, // Log attempt
-          express.static(config.server.htmldir, {immutable: true, maxAge: 1000 * 60 * 60 * 24}) // Serve static
+          // Cached for a day but not immutable - see the note on routerNM above. This is the mount
+          // that serves the dashboard's own code, which changes every release at the same URL.
+          express.static(config.server.htmldir, revalidate) // Serve static
         );
 
         // Serve frugal-iot-logger data at /data but configure where to get them.
@@ -1557,12 +1584,13 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         });
 
         // Serve HTML files from a configurable location
-        // Use a 1-day cache to keep traffic down
-        // Its important that frugaliot.css is cached, or the UX will flash while checking it hasn't changed.
+        // A day, but not immutable, so a reload can pick up a new release - see the note on
+        // routerNM above. Keeping it cached is what stops frugaliot.css being rechecked on every
+        // component render, which would flash unstyled on a slow link.
         // This has to come AFTER all the more specific paths like /data etc
         // Default catches rest (especially "/" so should be last)
         app.use(
-          express.static(config.server.publicdir, {immutable: true, maxAge: 1000 * 60 * 60 * 24})
+          express.static(config.server.publicdir, revalidate)
         );
         app.use(clientErrorHandler);
         // Now start the server

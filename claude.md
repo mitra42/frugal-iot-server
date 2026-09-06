@@ -230,6 +230,33 @@ security-relevant change to the shipped broker configuration would never reach `
 times the installer was re-run. That is how a broker with no `acl_file` survived several releases.
 The same applies by hand: copy from `node_modules/...`, not from `./extras`.
 
+### Caching the client: a day, but never `immutable`
+
+These users are often on an expensive link with poor reception, so a request saved matters more than
+a minute's freshness - the cache is deliberately long. But `immutable` was wrong: it means "do not
+even ask again", and these URLs carry no version (`/dashboard/admin.js` is whatever the release
+installed), so it promised something untrue. The difference that matters is that **a reload
+revalidates a `max-age` resource and does not revalidate an `immutable` one** - so dropping just
+that flag keeps ordinary navigation free of requests while a refresh picks up a new release.
+
+`maxAge: 0` is not the answer either: `frugaliot.css` is re-linked by every web component as it
+renders, and rechecking it each time flashes unstyled content on a slow link.
+
+Freshness for an installed PWA is `public/service-worker.js`, not the header: it is cache-first, its
+`CACHE_NAME` follows the release, and it installs with `cache: 'reload'`, bypassing the HTTP cache.
+
+Two rules for `urlsToCache`, each of which fails silently:
+
+* **Every entry must return 200 without a session.** `install()` rejects the whole cache if one
+  entry fails, so a single 404 or redirect-to-login leaves the PWA with **no cache at all** - and
+  the app still works online, so nothing says so. `/dashboard/*.js` and the stylesheet do serve
+  unauthenticated; `/dashboard/index.html` 307s to the login page.
+* **Never a session-gated page.** A cached `/dashboard/index.html` would be served to a logged-out
+  visitor - the case `admin.js` already has a comment about.
+
+Note the version in the URL that neither of these needs: it would allow a year's caching AND instant
+release visibility, and it needs the client's module imports to carry it. Not done.
+
 ### PlatformIO: a compile error in a file you did not touch
 
 A damaged `.pio/libdeps` reports the failure against an unrelated source file, and can take the

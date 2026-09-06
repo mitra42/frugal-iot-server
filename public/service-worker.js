@@ -2,17 +2,63 @@
 // serving what it cached. It follows the version of frugal-iot-client this release installs, and
 // "npm run prerelease" sets it - so there is normally no reason to edit it by hand.
 const CACHE_NAME = 'frugal-iot-cache-1.3.14';
+/*
+ * Everything the app needs, so that a phone on a poor or expensive link fetches it once.
+ *
+ * The dashboard's OWN code was missing from this list, which was most of the point of having one:
+ * eight files - the entry point, five modules and the stylesheet - were fetched from the network on
+ * every visit while the libraries beside them came from the cache.
+ *
+ * Two rules for anything added here:
+ *
+ * 1. It must return 200 WITHOUT a session. install() rejects the whole cache if any single entry
+ *    fails, so one 404 or one redirect-to-login means this PWA has no cache at all - and the app
+ *    goes on working online, so nothing announces it. /dashboard/*.js and the stylesheet do serve
+ *    unauthenticated; /dashboard/index.html does NOT (it 307s to the login page).
+ * 2. It must not be a session-gated PAGE. Beyond breaking install, a cached /dashboard/index.html
+ *    would be served to a logged-out visitor - which is the "accessing from service worker which
+ *    has /dashboard cached" case admin.js already had to handle.
+ *
+ * Deliberately absent:
+ *   /dashboard/index.html          session-gated, see above
+ *   /node_modules/esptool-js/*     ~1MB, wanted on one screen, and not by the phone users this list
+ *                                  exists for
+ *   nodeview.js, webcomponents.js, index-old.html    the pre-cards UI, still linked but legacy
+ *
+ * Every URL below was checked against a running server. Two entries in index.html's importmap were
+ * not, and are dead: "chart.js" points at dist/Chart.js, which does not exist (the file is
+ * lowercase, and graph.js imports the full path anyway), and "chartjs-adapter-luxon" points into a
+ * package that is not installed at all - its code was copied into core.js instead. Neither is
+ * reachable today; both would 404 the moment somebody used the bare specifier.
+ */
 const urlsToCache = [
+    // The public landing page and the PWA's own furniture
     '/',
     '/index.html',
+    '/manifest.json',
+    '/favicon.ico',
     '/images/icon-192x192.png',
     '/images/icon-512x512.png',
+    // The dashboard: its stylesheet, its entry point, and the modules dashboard.js imports
+    '/dashboard/frugaliot.css',
+    '/dashboard/dashboard.js',
+    '/dashboard/core.js',
+    '/dashboard/widgets.js',
+    '/dashboard/graph.js',
+    '/dashboard/admin.js',
+    '/dashboard/flash.js',
+    '/dashboard/cards.js',
+    // Logging in - the page a visitor lands on when the session has gone
+    '/dashboard/login.html',
+    '/dashboard/login.js',
+    // Libraries, at the paths index.html's importmap and the modules actually use
     '/node_modules/html-element-extended/htmlelementextended.js',
     '/node_modules/mqtt/dist/mqtt.esm.js',
     '/node_modules/js-yaml/dist/js-yaml.mjs',
     '/node_modules/async/dist/async.mjs',
     '/node_modules/csv-parse/dist/esm/index.js',
     '/node_modules/chart.js/dist/chart.js',
+    '/node_modules/@kurkle/color/dist/color.esm.js',   // chart.js needs it; was missing
     '/node_modules/dial-gauge/dial-gauge.js',
     '/node_modules/luxon/src/luxon.js'
 ];
