@@ -111,6 +111,7 @@ import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { ensureSecrets } from './lib/secrets.js';
 import { syncUser, syncUserById, syncLoggers, syncNode, dropNode } from './lib/dynsec-server.js';
 import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode } from './lib/enrol.js';
+import { deleteRetained } from './lib/retained.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -837,6 +838,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             [ENROL.REFUSED]: 403,
             [ENROL.RATE_LIMITED]: 429,
             [ENROL.NEEDS_RESET]: 409,
+            [ENROL.NO_PROJECT]: 404,
             [ENROL.BROKER]: 503,
           }[err.code] || 500;
           // Every attempt is logged, successful or not: anyone holding an enrolment secret can add a
@@ -1313,6 +1315,28 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
          * tag can trigger them against anybody with a live admin session - see SEC-17. Rather than
          * add another, this one is a POST; the older ones want the same treatment together.
          */
+        /*
+         * Delete retained messages, on behalf of an organization's admin.
+         *
+         * The browser used to publish the empty payloads itself. It cannot any more - since S4 its
+         * broker credential may publish to "set/" topics only - and it failed silently, because a
+         * QoS 1 publish is acknowledged whether or not the broker will act on it. See
+         * lib/retained.js for why widening the browser's rights is the wrong repair.
+         */
+        app.post('/retained_delete/:org',
+          loggedInOrFail,
+          can_ADMIN,  // Gets org from URL - and deleteRetained checks every topic is inside it
+          express.json({ limit: '512kb' }),   // a few thousand topic names
+          (req, res) => {
+            const topics = (req.body && req.body.topics) || [];
+            deleteRetained(config, req.params.org, topics, (err, result) => {
+              if (err) { return res.status(err.status || 500).json({ error: err.message }); }
+              console.log("Retained messages deleted by", req.user.username, "-",
+                          req.params.org, result.deleted, "topic(s)");
+              res.status(200).json(result);
+            });
+          },
+        );
         app.post('/node_reset/:org',
           loggedInOrFail,
           can_ADMIN,  // Gets org from URL - an organization admin may reset only their own nodes

@@ -32,7 +32,10 @@ const rows = () => new Promise((res, rej) =>
 beforeEach(() => new Promise((res) => {
   synced = [];
   db = new Database(':memory:');
-  db.exec(SCHEMA, () => res());
+  // The project has to be registered for enrolment to accept it - a node cannot invent one.
+  db.exec(SCHEMA, () => db.run(
+    "INSERT INTO projects (org, id, name) VALUES ('myfarm','lotus','Lotus'), ('other','lotus','L2')",
+    () => res()));
 }));
 
 describe('a node that has never enrolled', () => {
@@ -93,6 +96,27 @@ describe('a node that is already enrolled', () => {
     await new Promise((res) => forgetNode(db, 'myfarm', 'lotus', 'esp32-abc', res));
     const again = await run(deps(), body());
     expect(again.err).toBeFalsy();
+  });
+});
+
+describe('the project', () => {
+  it('is refused if the organization has not registered it', async () => {
+    // A name mistyped into a node's captive portal must not create organisation structure
+    const { err } = await run(deps(), body({ project: 'lotsu' }));
+    expect(err.code).toBe(ENROL.NO_PROJECT);
+    expect(err.message).toMatch(/no project/i);
+    expect(await rows()).toHaveLength(0);
+  });
+
+  it('says what to do about it, naming the project', async () => {
+    const { err } = await run(deps(), body({ project: 'lotsu' }));
+    expect(err.message).toContain('lotsu');
+    expect(err.message).toMatch(/Projects tab/);
+  });
+
+  it('is checked before anything is created on the broker', async () => {
+    await run(deps(), body({ project: 'lotsu' }));
+    expect(synced).toEqual([]);
   });
 });
 

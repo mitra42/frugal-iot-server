@@ -392,8 +392,9 @@ of truth, and the broker can be rebuilt from it* a fact rather than a claim
 | LoRa gateway | as a node, plus `<org>-gateways` | as a node | Also publish anywhere in the organization |
 | Logger | `<org>-logger` | Derived: `HMAC(user_secret, 'logger:' ‖ org)` | Read its organization, publish `set/` only |
 | Server itself | `frugal-admin` | In `config.d/secrets.yaml` | Drive the plugin |
+| Server, per organization | `<org>-admin` | Derived: `HMAC(user_secret, 'orgadmin:' ‖ org)` | Publish anywhere in that organization — only to clear retained messages |
 
-Three reasons behind that table, each of which cost something to find out:
+Four reasons behind that table, each of which cost something to find out:
 
 * **A user's is derived from the STORED HASH, not the plaintext.** The server only holds the
   plaintext for the few milliseconds of a login POST, so anything derived from it could not be
@@ -402,6 +403,12 @@ Three reasons behind that table, each of which cost something to find out:
   broker credential by itself.
 * **A node's is random and stored, not derived.** A node keeps its copy in LittleFS and cannot
   recompute anything, so a derivation secret going missing would strand the whole fleet.
+* **Clearing a retained message needs an account that can forge a reading.** "Forget this topic"
+  IS a publish - an empty retained payload - and the broker cannot tell it from an invented value.
+  So it is done by the server (`POST /retained_delete/:org` → `lib/retained.js`) as `<org>-admin`,
+  not by the browser as it used to be. Two traps: that role belongs to **no group**, so nothing can
+  drift into it, and a browser's failed attempt looked like a success, because an MQTT 3.1.1 broker
+  PUBACKs a QoS 1 publish before deciding whether to allow it.
 * **User accounts are prefixed `user/`.** `addorganization.zsh` creates a login named after the
   organization, and the organization's own broker account has that same name - so an unprefixed
   dynsec client called `myfarm` would take over that name, and because a dynsec answer is final for

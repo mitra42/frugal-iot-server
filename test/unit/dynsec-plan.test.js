@@ -76,11 +76,23 @@ describe('desiredRolesAndGroups', () => {
   const plan = () => desiredRolesAndGroups(
     [{ org: 'dev', project: '' }, { org: 'dev', project: 'lotus' }, { org: 'varta', project: '' }],
     [{ org: 'dev', project: 'lotus' }],
+    [{ org: 'dev', project: 'lotus' }, { org: 'dev', project: 'magi' }],
   );
 
   it('gives every node one rule for its own subtree, not one rule per node', () => {
     expect(plan().roles[names.ownSubtreeRole])
       .toEqual([{ acltype: 'publishClientSend', topic: '%u/#', allow: true }]);
+  });
+
+  it('gives the server, and nothing else, an account that may clear a retained topic', () => {
+    // Removing a retained message IS a publish - an empty payload to that exact topic - so this
+    // role can forge a reading, which is why it belongs to no group: only the server is given it,
+    // through applyOrgAdmin. Before this the browser did the clearing with the organization's
+    // shared credential, which is the capability S4 took away.
+    expect(plan().roles[names.clearRole('dev')])
+      .toEqual([{ acltype: 'publishClientSend', topic: 'dev/#', allow: true }]);
+    const inAGroup = Object.values(plan().groups).some((g) => g.roles.includes(names.clearRole('dev')));
+    expect(inAGroup).toBe(false);
   });
 
   it('lets a browser send set/ but NOT publish a reading', () => {
@@ -108,7 +120,30 @@ describe('desiredRolesAndGroups', () => {
   });
 
   it('lets nodes read the whole organization, for cross-node controls', () => {
-    expect(plan().groups['dev-nodes'].roles).toEqual(['dev-read', names.ownSubtreeRole]);
+    expect(plan().groups['dev-nodes'].roles)
+      .toEqual(['dev-read', names.ownSubtreeRole, 'dev-discover']);
+  });
+
+  // A node that cannot publish "<org>/<project>" never announces itself, and the dashboard shows no
+  // devices however well the readings are arriving - "%u/#" does not cover it, because in MQTT
+  // "a/b/#" matches "a/b" but not "a".
+  it('lets a node announce itself on each REGISTERED project topic', () => {
+    expect(plan().roles['dev-discover'].map((a) => a.topic).sort()).toEqual(['dev/lotus', 'dev/magi']);
+    expect(plan().roles['dev-discover'].every((a) => a.acltype === 'publishClientSend')).toBe(true);
+  });
+
+  it('does NOT let a node announce a project that does not exist', () => {
+    // Not "dev/+": a name mistyped into a captive portal would otherwise appear as a project
+    const topics = plan().roles['dev-discover'].map((a) => a.topic);
+    expect(topics).not.toContain('dev/+');
+    expect(topics).not.toContain('dev/typo');
+  });
+
+  it('gives an organization with no registered projects an empty discover role, not a missing one', () => {
+    // The group names the role, so the role has to exist even when there is nothing to announce on
+    const p = desiredRolesAndGroups([{ org: 'solo', project: '' }], [], []);
+    expect(p.roles['solo-discover']).toEqual([]);
+    expect(p.groups['solo-nodes'].roles).toContain('solo-discover');
   });
 
   it('gives gateways the broader publish they cannot avoid needing', () => {

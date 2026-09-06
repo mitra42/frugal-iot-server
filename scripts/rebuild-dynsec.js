@@ -20,8 +20,8 @@ import sqlite3 from 'sqlite3';
 import { MqttLogger } from 'frugal-iot-logger';
 import { dynsecConnect } from '../lib/dynsec.js';
 import {
-  readScopes, readPublics, readUserRows,
-  applyRolesAndGroups, applyUser, applyNode, applyLogger, checkRolesAndGroups,
+  readScopes, readPublics, readProjects, readUserRows,
+  applyRolesAndGroups, applyUser, applyNode, applyLogger, applyOrgAdmin, checkRolesAndGroups,
 } from '../lib/dynsec-sync.js';
 import { names } from '../lib/dynsec-plan.js';
 
@@ -69,9 +69,11 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
         if (e1) return fail(e1.message);
         readPublics(db, (e2, publics) => {
           if (e2) return fail(e2.message);
+         readProjects(db, (e2b, projects) => {
+          if (e2b) return fail(e2b.message);
 
           if (CHECK) {
-            checkRolesAndGroups(dynsec, scopes, publics, (e3, differences) => {
+            checkRolesAndGroups(dynsec, scopes, publics, projects, (e3, differences) => {
               if (e3) return fail(e3.message);
               db.all('SELECT id, username FROM users WHERE id > 0 AND username IS NOT NULL', [], (e4, users) => {
                 if (e4) return fail(e4.message);
@@ -93,10 +95,10 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
             return;
           }
 
-          applyRolesAndGroups(dynsec, scopes, publics, (e3) => {
+          applyRolesAndGroups(dynsec, scopes, publics, projects, (e3) => {
             if (e3) return fail(`Setting up roles and groups: ${e3.message}`);
             console.log(`Roles and groups for ${scopes.length} organization/project scope(s), ` +
-                        `${publics.length} publicly readable`);
+                        `${projects.length} project(s), ${publics.length} publicly readable`);
             syncUsers(db, dynsec, userSecret, (e4, n) => {
               if (e4) return fail(`Syncing users: ${e4.message}`);
               console.log(`${n} user account(s)`);
@@ -106,11 +108,16 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
                 syncLoggers(dynsec, orgs, userSecret, (e6, k) => {
                   if (e6) return fail(`Syncing logger accounts: ${e6.message}`);
                   console.log(`${k} logger account(s)`);
-                  dynsec.end(() => process.exit(0));
+                  syncOrgAdmins(dynsec, orgs, userSecret, (e7, j) => {
+                    if (e7) return fail(`Syncing admin accounts: ${e7.message}`);
+                    console.log(`${j} server admin account(s)`);
+                    dynsec.end(() => process.exit(0));
+                  });
                 });
               });
             });
           });
+         });
         });
       });
     });
@@ -151,6 +158,15 @@ function syncLoggers(dynsec, orgs, userSecret, cb) {
   const next = () => {
     if (i >= orgs.length) return cb(null, orgs.length);
     applyLogger(dynsec, { org: orgs[i++], userSecret }, (e) => (e ? cb(e) : next()));
+  };
+  next();
+}
+
+function syncOrgAdmins(dynsec, orgs, userSecret, cb) {
+  let i = 0;
+  const next = () => {
+    if (i >= orgs.length) return cb(null, orgs.length);
+    applyOrgAdmin(dynsec, { org: orgs[i++], userSecret }, (e) => (e ? cb(e) : next()));
   };
   next();
 }

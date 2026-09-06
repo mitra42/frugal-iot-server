@@ -36,6 +36,9 @@ function fakeDynsec({ client = null, roles = [], groups = [], failWith = null } 
   };
 }
 
+// The organization's registered projects, which the discovery ACLs are built from
+const PROJECTS = [{ org: 'dev', project: 'lotus' }];
+
 const opts = (rows) => ({
   username: 'fred', hashedPassword: Buffer.from('ab'.repeat(32), 'hex'), rows, userSecret: 'sekrit',
 });
@@ -112,22 +115,22 @@ describe('applyRolesAndGroups', () => {
 
   it('is not stopped by "already exists" - it is re-run constantly', cbTest((done) => {
     const d = fakeDynsec({ failWith: { command: 'createRole', message: 'Role already exists' } });
-    applyRolesAndGroups(d, scopes, [], (err) => { expect(err).toBeFalsy(); done(); });
+    applyRolesAndGroups(d, scopes, [], PROJECTS, (err) => { expect(err).toBeFalsy(); done(); });
   }));
 
   it('is not stopped by "already in this role" either - the bug that aborted a real apply', cbTest((done) => {
     const d = fakeDynsec({ failWith: { command: 'addGroupRole', message: 'Group is already in this role' } });
-    applyRolesAndGroups(d, scopes, [], (err) => { expect(err).toBeFalsy(); done(); });
+    applyRolesAndGroups(d, scopes, [], PROJECTS, (err) => { expect(err).toBeFalsy(); done(); });
   }));
 
   it('does report a real failure', cbTest((done) => {
     const d = fakeDynsec({ failWith: { command: 'createRole', message: 'Out of memory' } });
-    applyRolesAndGroups(d, scopes, [], (err) => { expect(err).toBeTruthy(); done(); });
+    applyRolesAndGroups(d, scopes, [], PROJECTS, (err) => { expect(err).toBeTruthy(); done(); });
   }));
 
   it('points the anonymous group at the public role', cbTest((done) => {
     const d = fakeDynsec();
-    applyRolesAndGroups(d, scopes, [], () => {
+    applyRolesAndGroups(d, scopes, [], PROJECTS, () => {
       expect(d.sent.find((c) => c.command === 'setAnonymousGroup').groupname).toBe('public');
       done();
     });
@@ -137,7 +140,7 @@ describe('applyRolesAndGroups', () => {
 describe('checkRolesAndGroups', () => {
   it('reports what is missing and changes nothing', cbTest((done) => {
     const d = fakeDynsec({ roles: ['own-subtree'], groups: [] });
-    checkRolesAndGroups(d, [{ org: 'dev', project: '' }], [], (err, differences) => {
+    checkRolesAndGroups(d, [{ org: 'dev', project: '' }], [], PROJECTS, (err, differences) => {
       expect(err).toBeFalsy();
       expect(differences.some((x) => x.includes('dev-read'))).toBe(true);
       expect(d.sent.filter((c) => /^create|^add|^remove|^set/.test(c.command))).toEqual([]);
