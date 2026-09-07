@@ -217,8 +217,19 @@ BROKER_URL=$(grep -h '^broker:' config.d/mqtt.yaml 2>/dev/null | awk '{print $2}
 BROKER_HOST=${${${BROKER_URL#*://}%%/*}%%:*}
 if [[ -n "$BROKER_HOST" ]]; then
   item "broker host: $BROKER_HOST"
-  if have getent && BROKER_IP=$(getent hosts "$BROKER_HOST" 2>/dev/null | head -1 | awk '{print $1}') && [[ -n "$BROKER_IP" ]]; then
-    item "  resolves to $BROKER_IP from this machine"
+  # EVERY address, both families. A name that also offers an IPv6 address is the one way this has
+  # actually bitten: a client may prefer the AAAA, and if that address is transient - a global
+  # prefix from the router coming and going - connections stall while the name still resolves and
+  # nothing is wrong at either end. Seen on the test Pi, where avahi registered and withdrew a
+  # global IPv6 address every few minutes; `journalctl -u avahi-daemon` is where that shows.
+  BROKER_ADDRS=""
+  have getent && BROKER_ADDRS=$(getent ahosts "$BROKER_HOST" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')
+  if [[ -n "$BROKER_ADDRS" ]]; then
+    item "  resolves to $BROKER_ADDRS from this machine"
+    if print -r -- "$BROKER_ADDRS" | grep -q ':'; then
+      item "  it offers an IPv6 address as well: a client that picks that one fails on its own if"
+      item "  the address is transient. Check 'journalctl -u avahi-daemon' for it being withdrawn."
+    fi
   elif have ping && ping -c1 -W2 "$BROKER_HOST" >/dev/null 2>&1; then
     item "  answers ping from this machine"
   else
@@ -229,6 +240,31 @@ if [[ -n "$BROKER_HOST" ]]; then
 fi
 MYADDRS=$( (have ip && ip -4 -o addr show scope global | awk '{print $2"="$4}') 2>/dev/null | tr '\n' ' ')
 item "this machine's addresses: ${MYADDRS:-(could not determine)}"
+
+section "Who is connected to the broker"
+# The single most useful line when a node or a browser says it cannot connect: if the server's own
+# logger is connected, the broker is up, listening and authenticating, and the problem is at the
+# other end. That is what settled it on 7 Sep 2026, when a node reporting a failed TCP connect and a
+# browser reporting a failed WebSocket handshake both turned out to have been asleep.
+BROKER_CONNS=""
+if have ss; then
+  # Only the sockets whose LOCAL port is the broker's. A connection with both ends on this machine -
+  # which is what the server's own logger is - otherwise appears twice, once from each side, and the
+  # count comes out too high. With "state established" ss prints no State column, so the local
+  # address is $3 and the peer $4.
+  BROKER_CONNS=$(ss -tn state established 2>/dev/null |
+    awk '$3 ~ /:(1883|9012)$/ {print $4 " -> " $3}' || true)
+  CONN_COUNT=$(print -r -- "$BROKER_CONNS" | grep -c . || true)
+  item "clients connected to 1883/9012: ${CONN_COUNT:-0}"
+  if [[ -n "$BROKER_CONNS" ]]; then
+    print -r -- "$BROKER_CONNS" | sed 's/^/      /'
+  else
+    item "  nothing is connected - not even this server's own logger"
+    problem "No client is connected to the broker. If the frugaliot service is running, its logger should be - check its journal above for 'mqtt <org> connect'"
+  fi
+else
+  item "ss not available - cannot list connections"
+fi
 
 section "Broker access control"
 # An acl_file confines each account to its own organization's topics; without one, every account
@@ -324,6 +360,10 @@ if have mosquitto_sub; then
   fi
   # Then each configured organization should be able to connect with its own credentials.
   # The password is read from the config and used, never printed.
+  #
+  # This is the SHARED organization account, which every node and dashboard used to use. Each of
+  # them now has its own (see SECURITY.md), and this account is removed by S8 - after which "no
+  # mqtt_password" below is the right answer rather than a fault.
   for f in config.d/organizations/*.yaml(N); do
     ORG=${f:t:r}
     ORG_PW=$(sed -n 's/^mqtt_password:[[:space:]]*//p' "$f" 2>/dev/null | head -1 | tr -d '"'"'"'')

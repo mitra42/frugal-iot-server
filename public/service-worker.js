@@ -1,7 +1,12 @@
 // Changing this version is what makes an already installed PWA fetch the app again instead of
 // serving what it cached. It follows the version of frugal-iot-client this release installs, and
 // "npm run prerelease" sets it - so there is normally no reason to edit it by hand.
-const CACHE_NAME = 'frugal-iot-cache-1.3.14';
+//
+// The suffix is here because urlsToCache below CHANGED without the client version changing. Without
+// it, an installed browser keeps serving the files it already cached - and since the list now covers
+// the dashboard's own code, that means old JS behind freshly fetched HTML. Any edit to the list
+// needs this bumped, or it does not reach anyone who already has the old one.
+const CACHE_NAME = 'frugal-iot-cache-1.3.14-2';
 /*
  * Everything the app needs, so that a phone on a poor or expensive link fetches it once.
  *
@@ -23,7 +28,6 @@ const CACHE_NAME = 'frugal-iot-cache-1.3.14';
  *   /dashboard/index.html          session-gated, see above
  *   /node_modules/esptool-js/*     ~1MB, wanted on one screen, and not by the phone users this list
  *                                  exists for
- *   nodeview.js, webcomponents.js, index-old.html    the pre-cards UI, still linked but legacy
  *
  * Every URL below was checked against a running server. Two entries in index.html's importmap were
  * not, and are dead: "chart.js" points at dist/Chart.js, which does not exist (the file is
