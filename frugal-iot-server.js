@@ -108,10 +108,12 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 // API Integration - Farm IoT Interoperability Standard
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
-import { ensureSecrets } from './lib/secrets.js';
+import { ensureSecrets, addEnrolmentSecret, removeEnrolmentSecret } from './lib/secrets.js';
 import { syncUser, syncUserById, syncLoggers, syncNode, dropNode } from './lib/dynsec-server.js';
-import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode } from './lib/enrol.js';
+import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode,
+         makeAttemptLog, setGrant, clearGrant, readGrants } from './lib/enrol.js';
 import { deleteRetained } from './lib/retained.js';
+import { replicaFor, bridgeForToken, noteBridgePull, startReplica } from './lib/replica.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -287,18 +289,63 @@ function get_people_list(org, cb) {
       })
     }});
 }
+/*
+ * Nodes that asked to enrol and were refused. Module level because two things need it: POST /enrol
+ * writes to it and GET /nodes_list reads it, and they are in different scopes.
+ *
+ * In memory on purpose - see makeAttemptLog. Losing it on restart costs nothing, because a node
+ * that is still retrying reappears within minutes.
+ */
+const enrolAttempts = makeAttemptLog();
+
 // Which nodes have enrolled in an organization. No password, obviously - the point of the list is
 // to know what exists and to be able to forget one.
 const sqlNodesList = `
   SELECT project, nodeid, lora, enrolled_at FROM nodes WHERE org = ? ORDER BY project, nodeid
 ;`;
+/*
+ * Every node the organization knows anything about, with one state each (SECURITY.md S12):
+ *
+ *   enrolled  it has a credential
+ *   approved  an admin has said its next request may be accepted
+ *   denied    an admin has stopped it
+ *   failed    it asked and was refused - which is how an admin learns it exists at all
+ *
+ * Three sources, because they answer different questions: the nodes table is what exists, node_grants
+ * is what an admin decided, and the in-memory attempt log is who is asking now. A node that has never
+ * connected appears only in the third, which is exactly the node needing attention.
+ */
 function send_nodes_list(req, res) {
-  db.all(sqlNodesList, [req.params.org], (err, rows) => {
-    if (err) {
-      res.status(500).send(err.message);
-    } else {
-      res.status(200).json(rows); // [{ project, nodeid, lora, enrolled_at }]
-    }
+  const org = req.params.org;
+  db.all(sqlNodesList, [org], (err, enrolled) => {
+    if (err) { return res.status(500).send(err.message); }
+    readGrants(db, org, (gerr, grants) => {
+      if (gerr) { return res.status(500).send(gerr.message); }
+      const byId = new Map();
+      for (const n of enrolled) {
+        byId.set(n.nodeid, { ...n, state: 'enrolled' });
+      }
+      for (const g of grants) {
+        const row = byId.get(g.nodeid) || { project: g.project, nodeid: g.nodeid, lora: 0, enrolled_at: null };
+        // A decision outranks "enrolled": a denied node still has a nodes row until it is forgotten
+        byId.set(g.nodeid, { ...row, state: g.state, decided_by: g.created_by, decided_at: g.created_at });
+      }
+      for (const a of enrolAttempts.forOrg(org)) {
+        if (byId.has(a.nodeid)) {
+          // Still asking despite being enrolled or decided - worth showing, not worth reclassifying
+          Object.assign(byId.get(a.nodeid),
+            { asked_at: a.at, asked_from: a.from, asked_reason: a.reason, asked_count: a.count });
+          continue;
+        }
+        byId.set(a.nodeid, {
+          project: a.project, nodeid: a.nodeid, lora: 0, enrolled_at: null, state: 'failed',
+          asked_at: a.at, asked_from: a.from, asked_reason: a.reason, asked_count: a.count,
+        });
+      }
+      const rows = [...byId.values()].sort((x, y) =>
+        (x.project || '').localeCompare(y.project || '') || x.nodeid.localeCompare(y.nodeid));
+      res.status(200).json(rows);
+    });
   });
 }
 
@@ -827,7 +874,10 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     const enrolLimiter = makeRateLimiter();
     app.post('/enrol', express.json({ limit: '4kb' }), (req, res) => {
       enrol({ db, config, limiter: enrolLimiter,
-              syncNode: (node, cb) => syncNode(config, node, cb) },
+              syncNode: (node, cb) => syncNode(config, node, cb),
+              // So a refusal reaches the dashboard's Nodes card, which is the only way an admin
+              // learns that a node exists and is asking (SECURITY.md S12).
+              attempts: enrolAttempts, from: req.ip },
         req.body, (err, cred) => {
           if (!err) {
             console.log("Enrolled", cred.username, req.body.lora ? "(LoRa-capable)" : "");
@@ -839,6 +889,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             [ENROL.RATE_LIMITED]: 429,
             [ENROL.NEEDS_RESET]: 409,
             [ENROL.NO_PROJECT]: 404,
+            [ENROL.DENIED]: 403,
             [ENROL.BROKER]: 503,
           }[err.code] || 500;
           // Every attempt is logged, successful or not: anyone holding an enrolment secret can add a
@@ -849,6 +900,36 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             err.message);
           res.status(status).json({ error: err.code || 'error', message: err.message });
         });
+    });
+
+    /*
+     * What a bridged Pi may know about this server's people (SECURITY.md S11).
+     *
+     * Authenticated by a bearer token, one per Pi per organization, issued by
+     * frugal-iot-addbridge-prod - not by a session, because there is no person here: the Pi asks
+     * for itself, on a timer.
+     *
+     * Read-only, and scoped to the organization the token was issued for. What it returns is
+     * logins, the stored password hashes and the permission rows - nothing derived from a password,
+     * and no secret of this server's: the Pi authenticates logins itself and derives its own broker
+     * credentials from its own user_secret.
+     */
+    app.get('/replica/:org', (req, res) => {
+      const auth = req.get('Authorization') || '';
+      const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+      bridgeForToken(db, token, (err, bridge) => {
+        if (err) { return res.status(500).json({ error: err.message }); }
+        // Same answer for an unknown token and for a token belonging to another organization: a
+        // bridge should not be able to discover which organizations exist here.
+        if (!bridge || bridge.org !== req.params.org) {
+          return res.status(403).json({ error: 'Not a bridge for this organization' });
+        }
+        replicaFor(db, bridge.org, (rerr, payload) => {
+          if (rerr) { return res.status(500).json({ error: rerr.message }); }
+          noteBridgePull(db, bridge.org, bridge.site);
+          res.status(200).json(payload);
+        });
+      });
     });
 
     console.log("Doing OTA updates at /ota_update from", config.server.otadir);
@@ -1348,6 +1429,76 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
          * QoS 1 publish is acknowledged whether or not the broker will act on it. See
          * lib/retained.js for why widening the browser's rights is the wrong repair.
          */
+        /*
+         * The organization's enrolment secrets (SECURITY.md S10).
+         *
+         * An admin has to compile one into firmware, and until this existed only shell access could
+         * read it. Its own route, never /config.json: that is served to every logged-in user, and
+         * lib/config-for-user.js withholds the whole secrets section for exactly this reason.
+         *
+         * A list, not one value. Rotating means adding a new secret while the old is still
+         * accepted, or every node already flashed with the old value and not yet enrolled is
+         * stranded. So: add, reflash at leisure, then delete.
+         */
+        app.get('/enrolment_secret/:org',
+          loggedInOrFail,
+          can_ADMIN,  // Gets org from URL - an admin sees only their own organization's
+          (req, res) => {
+            const org = req.params.org;
+            // Worth a line: this is the one route that hands a secret to a browser.
+            console.log("Enrolment secrets read by", req.user.username, "for", org);
+            res.status(200).json({
+              org,
+              secrets: enrolmentSecretsFor(config, org),
+              enrol_url: `${req.protocol}://${req.get('host')}/enrol`,
+            });
+          },
+        );
+        app.post('/enrolment_secret/:org',
+          loggedInOrFail,
+          can_ADMIN,
+          (req, res) => {
+            const org = req.params.org;
+            addEnrolmentSecret('./config.d', org, enrolmentSecretsFor(config, org), (err, result) => {
+              // The in-memory copy either way, so POST /enrol accepts the new secret at once; a
+              // failed write means it works until the next restart, which is worth saying.
+              config.secrets[`enrolment_${org}`] = result.list;
+              console.log("Enrolment secret added by", req.user.username, "for", org,
+                          err ? `(NOT saved: ${err.message})` : '');
+              res.status(200).json({
+                org, secrets: result.list, saved: !err,
+                message: err
+                  ? `Added, but config.d/secrets.yaml could not be written (${err.message}) - it will be gone after a restart.`
+                  : 'Added. Existing secrets still work, so nodes already flashed are unaffected.',
+              });
+            });
+          },
+        );
+        app.delete('/enrolment_secret/:org',
+          loggedInOrFail,
+          can_ADMIN,
+          express.json({ limit: '4kb' }),
+          (req, res) => {
+            const org = req.params.org;
+            const secret = (req.body && req.body.secret) || '';
+            if (!secret) { return res.status(400).json({ error: 'secret is required' }); }
+            removeEnrolmentSecret('./config.d', org, secret, enrolmentSecretsFor(config, org),
+              (err, result) => {
+                if (!result.removed) {
+                  return res.status(404).json({ error: 'That is not one of this organization\'s secrets' });
+                }
+                config.secrets[`enrolment_${org}`] = result.list;
+                console.log("Enrolment secret withdrawn by", req.user.username, "for", org,
+                            err ? `(NOT saved: ${err.message})` : '');
+                res.status(200).json({
+                  org, secrets: result.list, saved: !err,
+                  message: result.list.length
+                    ? 'Withdrawn. A node flashed with it can no longer enrol.'
+                    : 'Withdrawn. No secrets left, so no new node can enrol until one is added or the server restarts.',
+                });
+              });
+          },
+        );
         app.post('/retained_delete/:org',
           loggedInOrFail,
           can_ADMIN,  // Gets org from URL - and deleteRetained checks every topic is inside it
@@ -1359,6 +1510,57 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
               console.log("Retained messages deleted by", req.user.username, "-",
                           req.params.org, result.deleted, "topic(s)");
               res.status(200).json(result);
+            });
+          },
+        );
+        /*
+         * An admin's decision about one node (SECURITY.md S12): approved, denied, or cleared.
+         *
+         * `denied` is the kill switch the system otherwise lacks - for a node publishing bad
+         * readings. It works by taking the credential away at the BROKER, not by anything on the
+         * node: the node still holds its copy, is refused, discards it after five refusals, asks to
+         * enrol, and is refused again by the stored decision. Its own nodes row is forgotten too,
+         * so that clearing the denial later lets it enrol normally instead of being asked to prove
+         * a password it no longer has.
+         */
+        app.post('/node_state/:org',
+          loggedInOrFail,
+          can_ADMIN,  // Gets org from URL
+          express.json({ limit: '4kb' }),
+          (req, res) => {
+            const org = req.params.org;
+            const { project, nodeid, state } = req.body || {};
+            if (!nodeid || !state) {
+              return res.status(400).json({ error: 'nodeid and state are required' });
+            }
+            if (!['approved', 'denied', 'cleared'].includes(state)) {
+              return res.status(400).json({ error: 'state must be approved, denied or cleared' });
+            }
+            const finish = (message) => {
+              console.log("Node", state, "by", req.user.username, "-", org, project || '?', nodeid);
+              res.status(200).json({ org, project, nodeid, state, message });
+            };
+            if (state === 'cleared') {
+              return clearGrant(db, org, nodeid, (err) => {
+                if (err) { return res.status(500).json({ error: err.message }); }
+                finish('Cleared. It may enrol again with a valid enrolment secret.');
+              });
+            }
+            setGrant(db, { org, project, nodeid, state, by: req.user.username }, (err) => {
+              if (err) { return res.status(500).json({ error: err.message }); }
+              if (state === 'approved') {
+                return finish('Approved. Its next request is accepted, whatever secret it presents. ' +
+                              'It may take a few minutes to ask again.');
+              }
+              // Denied: take the credential away, and forget the node so that clearing this later
+              // does not leave it unable to prove a password it has already discarded.
+              forgetNode(db, org, project || '', nodeid, () => {
+                dropNode(config, org, project || '', nodeid, (derr) => {
+                  finish(derr
+                    ? `Denied. The broker account could not be removed (${derr.message}) - run frugal-iot-rebuild-dynsec.`
+                    : 'Denied. Its broker account is gone and it cannot enrol again until this is cleared.');
+                });
+              });
             });
           },
         );
@@ -1619,6 +1821,13 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             o.logger_password = cred.password;
           });
           mqttLogger.start();
+        });
+
+        // On a bridged Pi, keep production's logins and permissions in step (SECURITY.md S11).
+        // Does nothing unless config.d/replica.yaml says where to pull from, so a production
+        // server and a standalone Pi are unaffected.
+        startReplica(config, db, {
+          onUser: (id) => syncUserById(db, config, id),
         });
       }
     });

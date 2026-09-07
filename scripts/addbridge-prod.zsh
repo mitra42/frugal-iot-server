@@ -196,6 +196,46 @@ sudo systemctl reload mosquitto || {
   echo "  Try: sudo systemctl restart mosquitto" >&2
 }
 
+# ---------------------------------------------------------------------------------------------
+# A token for the Pi to pull this organization's logins with (SECURITY.md S11).
+#
+# The bridge relays topics, not accounts, so without this a person who logs in here has no account
+# on the Pi's broker - and the Pi is the machine that goes on working when the link is down.
+#
+# It reads logins, hashes and permissions for THIS organization and nothing else. Nothing derived
+# from a password travels: the Pi checks logins against the replicated hash and derives its own
+# broker credentials from its own user_secret, so the two brokers issue different passwords for the
+# same person.
+#
+# Done in node rather than sqlite3, because the sqlite3 command-line tool is not installed
+# everywhere the server runs - the same reason scripts/clearretained.js talks MQTT through a library.
+REPLICA_TOKEN=$(node -e '
+const { randomBytes } = require("crypto");
+const sqlite3 = require("sqlite3");
+const [org, site] = process.argv.slice(1);
+const token = randomBytes(32).toString("base64url");
+const db = new sqlite3.Database("./frugal-iot.db", (err) => {
+  if (err) { console.error(err.message); process.exit(1); }
+  db.run(`CREATE TABLE IF NOT EXISTS bridges (org TEXT NOT NULL, site TEXT NOT NULL,
+            token TEXT NOT NULL, created_at INTEGER NOT NULL, last_pull INTEGER,
+            UNIQUE(org, site))`, () => {
+    db.run(`INSERT INTO bridges (org, site, token, created_at) VALUES (?, ?, ?, ?)
+            ON CONFLICT(org, site) DO UPDATE SET token = excluded.token, created_at = excluded.created_at`,
+      [org, site, token, Date.now()], (e) => {
+        if (e) { console.error(e.message); process.exit(1); }
+        process.stdout.write(token);
+        db.close();
+      });
+  });
+});
+' "$ORG_ID" "$SITE") || true
+
+if [[ -z "$REPLICA_TOKEN" ]]; then
+  echo ""
+  echo "Note: could not create a replica token, so the Pi will not be able to share this server's"
+  echo "logins. The broker bridge above is unaffected. Re-run this script to try again."
+fi
+
 echo ""
 echo "Done. On the Pi at site '${SITE}', run:"
 echo ""
@@ -213,6 +253,14 @@ if [[ "$GENERATED" == true ]]; then
   echo "you lose this output. If it does get lost, set a new one with:"
   echo "  sudo -u \"\$(stat -c '%U' ${PWFILE})\" mosquitto_passwd -b ${PWFILE} ${ACCOUNT} '<new password>'"
   echo "and use that on the Pi instead."
+fi
+if [[ -n "$REPLICA_TOKEN" ]]; then
+  echo "And this replica token, so people registered here can log in on the Pi as well:"
+  echo ""
+  echo "  ${REPLICA_TOKEN}"
+  echo ""
+  echo "A new one replaces the old, so re-running this script revokes the Pi's previous token."
+  echo ""
 fi
 echo "Fill in the public name yourself - it is deliberately not guessed here, because what this"
 echo "machine calls itself is usually not it. This host answers to \"$(hostname -f 2>/dev/null || hostname)\","

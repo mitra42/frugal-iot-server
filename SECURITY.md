@@ -21,6 +21,7 @@ should exist; the database is the source of truth and the broker is rebuilt from
 | Server → plugin | `frugal-admin` | Random, at install | `config.d/secrets.yaml` | Administer broker accounts |
 | Server → organization | `<org>-admin` | Derived: `HMAC(user_secret, 'orgadmin:' ‖ org)` | Nowhere | Publish anywhere in that organization — only to clear retained messages |
 | Anonymous browser | none | — | — | Read whatever is marked public |
+| Bridged Pi | not a broker account | Random token, at pairing | `config.d/secrets.yaml` on the Pi | Read one organization's logins and permissions from production |
 | *Organization (legacy)* | `<org>` | Set by hand | `config.d/organizations/<org>.yaml` | Read/write its whole organization — **retires at S8** |
 
 Derived credentials are computed from `user_secret` when needed, so they can be reissued without
@@ -35,7 +36,8 @@ logins agree, and changing a login password retires the old broker credential by
 
 | | |
 | --- | --- |
-| People, capabilities, projects, node resets, retained messages, OTA uploads | The dashboard, by an organization ADMIN |
+| People, capabilities, projects, node approvals and denials, retained messages, OTA uploads | The dashboard, by an organization ADMIN |
+| Enrolment secrets | The dashboard's Nodes card, by an organization ADMIN |
 | Organizations | `frugal-iot-addorganization`, `frugal-iot-setpassword` |
 | Broker accounts | The server, automatically; `frugal-iot-rebuild-dynsec` to repair or report |
 | Diagnosis | `frugal-iot-diagnostic` |
@@ -88,11 +90,62 @@ organization. No read, no write, no broker access.
    writes it to LittleFS (`/mqtt/username`, `/mqtt/password`) and never echoes it to MQTT.
 
 A node id comes from the chip's MAC and is therefore public, so a node that already exists must
-prove it holds the current password. One whose filesystem was erased cannot, and needs a human:
-the dashboard's Nodes tab, or `frugal-iot-resetnode`.
+prove it holds the current password. One whose filesystem was erased cannot, and needs a human.
 
-The enrolment secret list is per organization and revocable server-side, so a leaked one is deleted
-without reflashing anything. Rate limited per organization and per node id.
+The secrets are a **list** per organization, managed from the dashboard's Nodes card by an admin:
+adding one leaves the others working, so nodes already flashed are unaffected, and rotation is add,
+reflash at leisure, withdraw. A leaked secret is withdrawn without reflashing anything. Rate limited
+per organization and per node id.
+
+### A node's state, and stopping one
+
+Each node the organization knows about has one state, on the dashboard's Nodes card:
+
+| State | Means |
+| --- | --- |
+| Enrolled | It has its own credential |
+| Failed | It asked and was refused — which is how an admin learns it exists at all |
+| Approved | Its next request is accepted whatever secret it presents, and without proving a password. Consumed on use |
+| Denied | Its broker account is deleted and enrolment is refused |
+
+**Approved** is the way back for a node nobody can reach: its secret was withdrawn, or it was
+flashed with none, or its filesystem was erased so it can prove nothing. The admin's decision is the
+authorisation — a node cannot approve itself — and it admits one node once.
+
+A node with no credential asks again every half hour, from its main loop rather than only at
+startup, so an approval takes effect without anyone visiting the node. That matters as much as the
+approval itself: asking once per boot stranded exactly these nodes, and a node in a field cannot be
+restarted.
+
+**Denied** is the kill switch, for a node publishing bad readings. It works at the broker, not on the
+node: the node still holds its credential, is refused, discards it, asks to enrol and is refused
+again by the stored decision. Two limits: a node behind a LoRa gateway is republished under the
+*gateway's* account, so denying it does not stop its readings arriving; and the state is keyed on
+(organization, node id), never on the project a node claims, so a denied node cannot return under
+another project name.
+
+The list of nodes that asked and failed is untrusted — anyone can make an id appear by attempting
+enrolment — so each row shows when it asked and from what address. It is kept in memory and bounded;
+a node still retrying reappears after a restart. Approvals and denials are stored, because a restart
+must not un-deny a node.
+
+### A bridged Pi, sharing production's people
+
+A bridge relays topics, not accounts, so a person who logs into production has no account on the
+Pi's broker — and the Pi is what goes on working when the link is down. So the Pi **pulls**
+`GET /replica/:org` from production, on a timer and at startup, authenticated by a token issued at
+pairing (`frugal-iot-addbridge-prod`, then `frugal-iot-addbridge-pi`).
+
+What travels is logins, their stored password hashes and salts, and that organization's permission
+rows. No secret is shared and nothing derived from a password moves: the Pi checks logins against
+the replicated hash itself and derives its own broker credentials from its own `user_secret`, so the
+two brokers issue different passwords for the same person and neither could compute the other's.
+
+Each pull **replaces** that organization's replicated rows, so a permission that stops being sent
+stops existing. Replicated users take local id `1000 +` their production id, keeping them clear of
+locally created ones; a login whose name a **local** account already uses is refused and reported
+rather than overwritten. A feed carrying permissions for another organization is rejected whole. The
+last replica persists, so people can still log in while production is unreachable.
 
 ### LoRa gateway
 
@@ -156,6 +209,9 @@ to be inside their root. OTA requires HTTPS, so production runs behind a reverse
 | Logins, password hashes | `frugal-iot.db`, `users` |
 | Capabilities | `frugal-iot.db`, `permissions` |
 | Node credentials | `frugal-iot.db`, `nodes` |
+| Node approvals and denials | `frugal-iot.db`, `node_grants` |
+| Bridge tokens (on production) | `frugal-iot.db`, `bridges` |
+| Which production a Pi replicates from | `config.d/replica.yaml`, with the token in `secrets.yaml` |
 | Projects | `frugal-iot.db`, `projects` |
 | Server secrets | `config.d/secrets.yaml` — never served, generated if absent |
 | Organizations | `config.d/organizations/<org>.yaml` — served to logged-in browsers |
@@ -183,8 +239,8 @@ credential extracted from any node's flash can still publish anything in that or
 * A version in client asset URLs, so they can be cached for a year and still appear the instant a
   release changes them.
 
-Not fixed by either, and structural: **a node's flash is readable**, so anyone holding a node has
-that node's credential. Per-node accounts limit the damage to that one node; nothing prevents the
-extraction.
+Not fixed by either, and structural: **a node's flash is readable**, so anyone holding a node
+has that node's credential. Per-node accounts limit the damage to that one node; nothing prevents
+the extraction.
 
 ---

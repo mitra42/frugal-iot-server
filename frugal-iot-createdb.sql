@@ -61,6 +61,52 @@ CREATE TABLE IF NOT EXISTS `nodes` (
   UNIQUE(`org`, `project`, `nodeid`)
 );
 
+-- A Pi authorised to bridge into this server, and the token it pulls users with (SECURITY.md S11).
+--
+-- A bridge relays topics, not accounts, so a person who logs into this server has no account on the
+-- Pi's broker. GET /replica/:org lets the Pi fetch the logins and permissions for the organizations
+-- it hosts, so the same people can log in there - including when this server is unreachable, which
+-- is the reason the Pi exists.
+--
+-- Nothing derived from a password travels: the Pi authenticates the login itself against the
+-- replicated hash and derives its own broker credential from its own user_secret, so the two
+-- brokers issue different passwords for the same person and neither secret is shared.
+--
+-- One token per Pi per organization, so one site can be revoked without disturbing another. The
+-- token is a bearer credential for reading that organization's logins - not for changing anything.
+CREATE TABLE IF NOT EXISTS `bridges` (
+  `org` TEXT NOT NULL,
+  `site` TEXT NOT NULL,
+  `token` TEXT NOT NULL,
+  `created_at` INTEGER NOT NULL,
+  `last_pull` INTEGER,
+  UNIQUE(`org`, `site`)
+);
+
+-- An admin's decision about one node, for the Enrolled column on the dashboard's Nodes card
+-- (SECURITY.md S12). Two states are worth storing:
+--
+--   approved  the next enrolment request from this node id is accepted whatever secret it presents,
+--             and without having to prove it holds a credential - for a node whose secret was
+--             withdrawn, or that was flashed with none, and which cannot be reached physically.
+--             Consumed on use, so an approval admits one node once.
+--   denied    its broker account is deleted and enrolment is refused - the kill switch for a node
+--             publishing bad readings.
+--
+-- Keyed by (org, nodeid), NOT by project: a node states its own project, so keying on it would let
+-- a denied node return by claiming a different one.
+--
+-- Persisted, unlike the record of failed attempts, because a restart must not un-deny a node.
+CREATE TABLE IF NOT EXISTS `node_grants` (
+  `org` TEXT NOT NULL,
+  `project` TEXT NOT NULL DEFAULT '',
+  `nodeid` TEXT NOT NULL,
+  `state` TEXT NOT NULL,
+  `created_by` TEXT NOT NULL DEFAULT '',
+  `created_at` INTEGER NOT NULL,
+  UNIQUE(`org`, `nodeid`)
+);
+
 CREATE TABLE IF NOT EXISTS `projects` (
   `org` TEXT NOT NULL,
   `id` TEXT NOT NULL,

@@ -32,7 +32,7 @@ SCRIPT_NAME=$0
 
 usage() {
   echo "Usage: ${SCRIPT_NAME} <org-id> <prod-host> <account> [password]" >&2
-  echo "   or: ${SCRIPT_NAME} --org <org-id> --host <prod-host> --account <account> [--port N] [--password PW] [--replace]" >&2
+  echo "   or: ${SCRIPT_NAME} --org <org-id> --host <prod-host> --account <account> [--port N] [--password PW] [--replica-token T] [--replace]" >&2
   echo "Example: ${SCRIPT_NAME} myfarm prod.example.org bridge-northfield" >&2
   echo "" >&2
   echo "Through npx, use the positional form: npm swallows unrecognised --flags and passes only" >&2
@@ -40,7 +40,7 @@ usage() {
   exit 1
 }
 
-ORG_ID=""; PROD_HOST=""; ACCOUNT=""; PASSWORD=""; PROD_PORT=8883; REPLACE=false
+ORG_ID=""; PROD_HOST=""; ACCOUNT=""; PASSWORD=""; PROD_PORT=8883; REPLACE=false; REPLICA_TOKEN=""
 POSITIONAL=()
 
 while [[ $# -gt 0 ]]; do
@@ -49,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --host)     PROD_HOST=${2:-}; shift 2 ;;
     --account)  ACCOUNT=${2:-}; shift 2 ;;
     --password) PASSWORD=${2:-}; shift 2 ;;
+    --replica-token) REPLICA_TOKEN=${2:-}; shift 2 ;;
     --port)     PROD_PORT=${2:-}; shift 2 ;;
     --replace)  REPLACE=true; shift ;;
     -*) echo "Error: unknown option '$1'" >&2; usage ;;
@@ -190,5 +191,58 @@ else
   echo "  sudo tail -20 /var/log/mosquitto/mosquitto.log"
   echo "and the state is reported by:  npx --no frugal-iot-diagnostic"
 fi
+# ---------------------------------------------------------------------------------------------
+# Sharing production's logins (SECURITY.md S11).
+#
+# The bridge above relays topics, not accounts, so without this a person registered on production
+# has no account on this Pi's broker - and this Pi is what goes on working when the link is down.
+# With it, the server pulls their logins and permissions on a timer and issues its OWN broker
+# credentials from its own user_secret; nothing derived from a password travels either way.
+#
+# Optional: a bridge is useful without it, so a missing token is not an error.
+if [[ -z "$REPLICA_TOKEN" ]]; then
+  echo -n "Replica token from the production server (blank to skip): "
+  read -r REPLICA_TOKEN
+fi
+
+if [[ -n "$REPLICA_TOKEN" ]]; then
+  # https, and deliberately not asked about: the token is a bearer credential, and over http it
+  # would be readable by anything between here and production.
+  cat > config.d/replica.yaml <<YAML
+# Which production server this Pi takes its logins from, and how often (SECURITY.md S11).
+# Written by frugal-iot-addbridge-pi. The token itself lives in config.d/secrets.yaml, which is
+# never served to a browser - nothing secret may go in this file.
+url: https://${PROD_HOST}
+organizations:
+  - ${ORG_ID}
+intervalSeconds: 900
+YAML
+  # Appended, or the one line replaced: that file holds this server's own secrets too.
+  if grep -q '^replica_token:' config.d/secrets.yaml 2>/dev/null; then
+    python3 - "$REPLICA_TOKEN" <<'PYEOF'
+import io, re, sys
+p = 'config.d/secrets.yaml'
+s = io.open(p, encoding='utf-8').read()
+io.open(p, 'w', encoding='utf-8').write(
+    re.sub(r'^replica_token:.*$', 'replica_token: "%s"' % sys.argv[1], s, count=1, flags=re.M))
+PYEOF
+  else
+    {
+      echo ""
+      echo "# Pulls this Pi's users from the production server named in config.d/replica.yaml."
+      echo "# Issued by frugal-iot-addbridge-prod; re-running that command revokes this one."
+      echo "replica_token: \"${REPLICA_TOKEN}\""
+    } >> config.d/secrets.yaml
+  fi
+  chmod 600 config.d/secrets.yaml
+  echo ""
+  echo "Wrote config.d/replica.yaml and stored the token in config.d/secrets.yaml."
+  echo "Restart the server to start pulling:  sudo systemctl restart frugaliot"
+else
+  echo ""
+  echo "No replica token given - the bridge relays readings, but people registered on production"
+  echo "will not be able to log in on this Pi. Re-run this script with the token to add it."
+fi
+
 echo ""
 echo "The readings this Pi has already recorded stay here - only new ones are relayed."

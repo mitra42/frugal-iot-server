@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync, mkdirSync, chmodSync } from 'fs';
 import { tmpdir } from 'os';
-import { ensureSecrets } from '../../lib/secrets.js';
+import { ensureSecrets, addEnrolmentSecret, removeEnrolmentSecret } from '../../lib/secrets.js';
 import yaml from 'js-yaml';
 
 let dir;
@@ -70,5 +70,92 @@ describe('ensureSecrets', () => {
     expect(r.written).toBe(false);
     expect(r.error).toBeTruthy();
     expect(r.secrets.session_secret).toBeTruthy();     // the server can still run
+  });
+});
+
+/*
+ * Adding and withdrawing enrolment secrets from the dashboard (S10).
+ *
+ * These rewrite one block of a file that holds other secrets and the comments explaining them, so
+ * what matters is what they leave behind, not just what they return.
+ */
+describe('enrolment secrets, added and withdrawn', () => {
+  let dir;
+  beforeEach(() => { dir = mkdtempSync(`${tmpdir()}/frugal-enrol-`); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const seed = () => ensureSecrets({}, dir, ['session_secret', 'user_secret', 'enrolment_myfarm']);
+  const read = () => yaml.load(readFileSync(`${dir}/secrets.yaml`, 'utf8'));
+  const add = (org, current) => new Promise((res) => addEnrolmentSecret(dir, org, current, (e, r) => res({ e, r })));
+  const remove = (org, secret, current) =>
+    new Promise((res) => removeEnrolmentSecret(dir, org, secret, current, (e, r) => res({ e, r })));
+
+  it('adds without disturbing the existing one', async () => {
+    // The reason the file holds a list at all: a node flashed with the old secret and not yet
+    // enrolled must go on being able to enrol.
+    const first = seed().secrets.enrolment_myfarm;
+    const { e, r } = await add('myfarm', first);
+    expect(e).toBe(null);
+    expect(r.list).toEqual([r.secret, first[0]]);
+    expect(read().enrolment_myfarm).toEqual([r.secret, first[0]]);
+  });
+
+  it('leaves the other secrets and their comments alone', async () => {
+    const before = seed().secrets;
+    const text0 = readFileSync(`${dir}/secrets.yaml`, 'utf8');
+    await add('myfarm', before.enrolment_myfarm);
+    const after = read();
+    expect(after.session_secret).toBe(before.session_secret);
+    expect(after.user_secret).toBe(before.user_secret);
+    // The notes say what rotating each secret costs; rewriting the file as YAML would drop them
+    const comments = (t) => t.split('\n').filter((l) => l.startsWith('#')).length;
+    expect(comments(readFileSync(`${dir}/secrets.yaml`, 'utf8'))).toBe(comments(text0));
+  });
+
+  it('withdraws one by value, and says when it was not there', async () => {
+    const first = seed().secrets.enrolment_myfarm;
+    const { r: added } = await add('myfarm', first);
+    const { r } = await remove('myfarm', first[0], added.list);
+    expect(r.removed).toBe(true);
+    expect(read().enrolment_myfarm).toEqual([added.secret]);
+    const { r: miss } = await remove('myfarm', 'never-existed', r.list);
+    expect(miss.removed).toBe(false);
+  });
+
+  it('withdrawing the last one leaves the organization with none', async () => {
+    // A legitimate state - no new node can enrol - and it must still be readable YAML
+    const first = seed().secrets.enrolment_myfarm;
+    await remove('myfarm', first[0], first);
+    const after = read();
+    expect(after.enrolment_myfarm == null || after.enrolment_myfarm.length === 0).toBe(true);
+    expect(after.user_secret).toBeTruthy();
+  });
+
+  it('creates a block for an organization the file has never seen', async () => {
+    seed();
+    const { e, r } = await add('newfarm', []);
+    expect(e).toBe(null);
+    expect(read().enrolment_newfarm).toEqual([r.secret]);
+    expect(read().enrolment_myfarm).toHaveLength(1);   // and not disturbed the first
+  });
+
+  it('keeps the file private', async () => {
+    const first = seed().secrets.enrolment_myfarm;
+    await add('myfarm', first);
+    expect(statSync(`${dir}/secrets.yaml`).mode & 0o777).toBe(0o600);
+  });
+
+  it('reports a write it could not do rather than claiming success', async () => {
+    seed();
+    // The file, not the directory: a read-only directory still permits writing a file that already
+    // exists, so it is not the trigger it looks like.
+    chmodSync(`${dir}/secrets.yaml`, 0o400);
+    const { e, r } = await add('myfarm', ['x']);
+    chmodSync(`${dir}/secrets.yaml`, 0o600);
+    // An install directory the server cannot write is a legitimate state; the caller then says the
+    // change lasts only until the next restart rather than pretending it was saved. The new secret
+    // is still returned, because the route puts it in the running config either way.
+    expect(e).toBeTruthy();
+    expect(r.secret).toBeTruthy();
   });
 });

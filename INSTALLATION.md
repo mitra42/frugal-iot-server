@@ -833,6 +833,15 @@ in the instant the link returned. A gap is honest; that would not be. Controls a
 other way round, and *are* queued, so turning something on from production while the Pi is offline
 takes effect when it reconnects.
 
+**People, as well as readings.** A bridge relays topics, not accounts, so on its own it does not let
+someone registered on production log in here. Step 11b also prints a *replica token*, and step 11c
+asks for it; with it, this Pi pulls that organization's logins and permissions from production every
+fifteen minutes, so the same people can use this Pi's dashboard — including while production is
+unreachable, which is the point of the Pi. It is optional: leave the token blank and the bridge
+relays readings as before. Nothing derived from a password travels either way, and each server
+issues its own broker credentials, so the same person has different ones here and there. Revoking a
+permission on production removes it here on the next pull. See SECURITY.md.
+
 #### 11a. Preparing a production server to accept bridges
 
 Once per production server, not per Pi — and if bridging to `frugaliot.naturalinnovation.org`

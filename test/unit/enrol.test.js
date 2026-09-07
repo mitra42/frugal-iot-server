@@ -9,7 +9,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Database } from 'sqlite3';
 import { readFileSync } from 'fs';
-import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode } from '../../lib/enrol.js';
+import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode,
+         makeAttemptLog, setGrant, clearGrant, readGrants } from '../../lib/enrol.js';
 
 const SCHEMA = readFileSync('./frugal-iot-createdb.sql', 'utf8');
 const SECRET = 'secret-for-myfarm';
@@ -181,9 +182,11 @@ describe('input checking', () => {
     expect(err.code).toBe(ENROL.BAD_REQUEST);
   });
 
-  it('refuses a missing secret before looking anything up', async () => {
+  it('refuses a missing secret, but as a refusal rather than a bad request', async () => {
+    // It was BAD_REQUEST until approvals existed (S12). A node flashed with no secret is exactly
+    // the one an admin may want to approve, and only a refusal reaches the list they approve from.
     const { err } = await run(deps(), body({ enrolment_secret: '' }));
-    expect(err.code).toBe(ENROL.BAD_REQUEST);
+    expect(err.code).toBe(ENROL.REFUSED);
   });
 });
 
@@ -226,5 +229,122 @@ describe('rate limiting', () => {
     expect((await run(d, body())).err).toBeFalsy();
     // Without forget() on success, two more attempts would exhaust the per-node allowance
     expect((await run(d, body({ nodeid: 'esp32-two' }))).err).toBeFalsy();
+  });
+});
+
+/*
+ * An admin's decision about one node (S12).
+ *
+ * The point of approval is a node that can prove nothing - its secret was withdrawn, or it never
+ * had one, and nobody can reach it to reflash. The point of denial is a node that must be stopped
+ * without touching it.
+ */
+describe('an admin decision about a node', () => {
+  const grant = (state, over = {}) => new Promise((res) =>
+    setGrant(db, { org: 'myfarm', project: 'lotus', nodeid: 'esp32-abc', state, by: 'admin', ...over },
+      () => res()));
+
+  it('approved: enrols with no secret at all', async () => {
+    await grant('approved');
+    const { err, cred } = await run(deps(), body({ enrolment_secret: '' }));
+    expect(err).toBeFalsy();
+    expect(cred.username).toBe('myfarm/lotus/esp32-abc');
+  });
+
+  it('approved: enrols with a withdrawn secret', async () => {
+    await grant('approved');
+    const { err } = await run(deps(), body({ enrolment_secret: 'the-old-one' }));
+    expect(err).toBeFalsy();
+  });
+
+  it('approved: admits an already-enrolled node that cannot prove its password', async () => {
+    // The recovery case: a node whose filesystem was erased holds nothing to prove itself with
+    await run(deps(), body());
+    const first = (await rows())[0].password;
+    const refused = await run(deps(), body());
+    expect(refused.err.code).toBe(ENROL.NEEDS_RESET);
+    await grant('approved');
+    const { err, cred } = await run(deps(), body());
+    expect(err).toBeFalsy();
+    expect(cred.password).not.toBe(first);
+  });
+
+  it('approved: is consumed, so it admits one node once', async () => {
+    await grant('approved');
+    await run(deps(), body({ enrolment_secret: '' }));
+    expect(await new Promise((res) => readGrants(db, 'myfarm', (e, r) => res(r)))).toEqual([]);
+    // And the next attempt is back to needing a secret
+    const again = await run(deps(), body({ enrolment_secret: '' }));
+    expect(again.err.code).toBe(ENROL.REFUSED);
+  });
+
+  it('approved: still will not invent a project', async () => {
+    // Approval says "this node may enrol", not "accept whatever structure it asks for"
+    await grant('approved', { project: 'nosuch' });
+    const { err } = await run(deps(), body({ project: 'nosuch', enrolment_secret: '' }));
+    expect(err.code).toBe(ENROL.NO_PROJECT);
+  });
+
+  it('denied: refused even with a valid secret', async () => {
+    // Checked before the secret, because a denied node usually still holds a good one
+    await grant('denied');
+    const { err } = await run(deps(), body());
+    expect(err.code).toBe(ENROL.DENIED);
+  });
+
+  it('denied: cannot come back by claiming a different project', async () => {
+    // Which is why the grant is keyed on (org, nodeid) and not on the project the node states
+    await grant('denied');
+    const { err } = await run(deps(), body({ project: 'lotus' }));
+    expect(err.code).toBe(ENROL.DENIED);
+  });
+
+  it('cleared: may enrol again on its own secret', async () => {
+    await grant('denied');
+    await new Promise((res) => clearGrant(db, 'myfarm', 'esp32-abc', () => res()));
+    const { err } = await run(deps(), body());
+    expect(err).toBeFalsy();
+  });
+});
+
+describe('the record of nodes that asked and were refused', () => {
+  it('shows an admin a node they had no other way to learn about', async () => {
+    const attempts = makeAttemptLog();
+    await run(deps({ attempts, from: '192.168.1.50' }), body({ enrolment_secret: 'wrong' }));
+    const [row] = attempts.forOrg('myfarm');
+    expect(row).toMatchObject({ nodeid: 'esp32-abc', project: 'lotus', reason: ENROL.REFUSED,
+                                from: '192.168.1.50', count: 1 });
+  });
+
+  it('counts repeats rather than filling up with them', async () => {
+    const attempts = makeAttemptLog();
+    for (let i = 0; i < 4; i++) await run(deps({ attempts }), body({ enrolment_secret: 'wrong' }));
+    expect(attempts.forOrg('myfarm')).toHaveLength(1);
+    expect(attempts.forOrg('myfarm')[0].count).toBe(4);
+  });
+
+  it('forgets a node once it succeeds', async () => {
+    const attempts = makeAttemptLog();
+    await run(deps({ attempts }), body({ enrolment_secret: 'wrong' }));
+    await run(deps({ attempts }), body());
+    expect(attempts.forOrg('myfarm')).toEqual([]);
+  });
+
+  it('is bounded, oldest first, and per organization', async () => {
+    let t = 1000;
+    const attempts = makeAttemptLog({ perOrg: 2, now: () => t++ });
+    for (const id of ['a', 'b', 'c']) {
+      await run(deps({ attempts }), body({ nodeid: id, enrolment_secret: 'wrong' }));
+    }
+    await run(deps({ attempts }), body({ org: 'other', nodeid: 'z', enrolment_secret: 'wrong' }));
+    expect(attempts.forOrg('myfarm').map((r) => r.nodeid).sort()).toEqual(['b', 'c']);
+    expect(attempts.forOrg('other')).toHaveLength(1);   // one organization cannot crowd out another
+  });
+
+  it('does not record a request that is not even shaped like one', async () => {
+    // Nothing an admin could act on, and the one path an unauthenticated caller can hit freely
+    const attempts = makeAttemptLog();
+    await run(deps({ attempts }), { org: 'myfarm' });
+    expect(attempts.forOrg('myfarm')).toEqual([]);
   });
 });

@@ -446,6 +446,40 @@ section). `lib/secrets.js` generates anything missing **and writes it back**, so
 upgraded from before that file fixes itself once instead of quietly using a value that changes on
 every restart.
 
+### Replicated users on a bridged Pi
+
+A Pi that bridges to production pulls that organization's logins with `GET /replica/:org`
+(`lib/replica.js`), and they land in the **same** `users` and `permissions` tables as local ones,
+with `id >= 1000` (`REPLICA_ID_OFFSET`). Three things follow, and each is easy to miss:
+
+* **Any query over those tables is now asking about both kinds.** `id >= REPLICA_ID_OFFSET` is what
+  distinguishes them; `isReplicatedId()` is the one place that decides.
+* **Each pull replaces that organization's replicated rows.** That is how revocation works, so a
+  local row that strayed above the offset would be deleted on the next poll.
+* **The offset, not the production id.** Both machines allocate from `AUTOINCREMENT` starting at 2 -
+  `addorganization` creates a login on the Pi too - so production's ids collide with local ones.
+
+Nothing derived from a password is replicated: each server derives its own broker credentials from
+its own `user_secret`, so the same person has different broker passwords on the Pi and on
+production, and neither could compute the other's.
+
+### A node that cannot come back
+
+Two guards in the firmware existed to stop a hot loop and instead stranded exactly the nodes that
+needed help. Both are gone, and it is worth knowing why before adding another:
+
+* **Enrolment was attempted once per boot.** So a node whose enrolment secret had been withdrawn,
+  or that was waiting to be approved on the dashboard, got one refusal and never asked again - and
+  nobody can reach a node in a field to reboot it. It now asks every half hour, from `loop()`.
+* **`noteAuthFailure` gave up when the node had nothing stored.** That is the state of a node which
+  has *just* discarded a refused credential, so the one node most in need of enrolling was the one
+  that stopped asking.
+
+The server side of that is `node_grants`: `approved` accepts the next request whatever secret it
+presents and is consumed on use, `denied` deletes the broker account and refuses enrolment. Keyed on
+`(org, nodeid)` and never on the project, because a node states its own project and could otherwise
+return under a different one.
+
 ### Talking to the dynamic security plugin
 
 Three things about it that are not in the documentation and each of which fails confusingly:
