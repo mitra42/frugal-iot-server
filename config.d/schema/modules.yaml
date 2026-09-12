@@ -239,6 +239,18 @@ soil:
   name: Soil
   topics:
     - leaf: soil
+soilmodbus:
+  name: "Soil Probe"
+  topics:
+    # Reuses the shared humidity and temperature definitions - same ranges, logging and
+    # duplicate rules - overriding only what soil makes different from air.
+    - leaf: humidity
+      name: "Soil Moisture"
+      color: brown
+      units: "%"      # Volumetric water content, not the relative humidity the shared leaf means
+    - leaf: temperature
+      name: "Soil Temperature"
+      color: brown
 ultrasonic:
   name: "Ultrasonic Distance"
   topics:
