@@ -20,6 +20,10 @@ aht21:
   topics:
     - leaf: temperature
     - leaf: humidity
+analog:
+  name: "Analog Out"
+  topics:
+    - leaf: volts
 battery:
   name: "Battery"
   insidefrugaliot: true
