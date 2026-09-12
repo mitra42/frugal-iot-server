@@ -131,11 +131,11 @@ ens160:
       leaf_from: controlfloat
       name: Temperature
       max:  50
-      color: red
+      color: "#ff0000"
     - leaf: humidity
       leaf_from: controlfloat
       name: Humidity
-      color: blue
+      color: "#0000ff"
     - leaf: aqi
     - leaf: tvoc
     - leaf: eco2
