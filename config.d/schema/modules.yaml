@@ -281,76 +281,11 @@ relay:
   name: Relay
   topics:
     - leaf:     on
-# One sector of an irrigation run - see modules "irrigation".
-# `sector` is the template the node takes its compile-time DEFAULT_sector_* values from, and is
-# also the right id for a node with exactly one sector. sector1..sector4 are here so the numbered
-# instances a multi-sector node publishes are recognised rather than landing in "Not in the schema".
+# One sector of an irrigation run - see modules "irrigation". A node with several sectors publishes
+# sector1, sector2... and the client resolves those numbered instances back to this entry, so only
+# the one definition is needed here however many sectors a node has.
 sector:
   name: Irrigation sector
-  topics:
-    - leaf: moisture
-      leaf_from: controlfloat
-      name: Moisture
-      color: "#a52a2a"
-    - leaf: target
-      leaf_from: controlfloat
-      name: Target
-    - leaf: enable
-      leaf_from: controlintoggle
-      name: Enable
-    - leaf: valve
-      leaf_from: controlouttoggle
-      name: Valve
-sector1:
-  name: Irrigation sector 1
-  topics:
-    - leaf: moisture
-      leaf_from: controlfloat
-      name: Moisture
-      color: "#a52a2a"
-    - leaf: target
-      leaf_from: controlfloat
-      name: Target
-    - leaf: enable
-      leaf_from: controlintoggle
-      name: Enable
-    - leaf: valve
-      leaf_from: controlouttoggle
-      name: Valve
-sector2:
-  name: Irrigation sector 2
-  topics:
-    - leaf: moisture
-      leaf_from: controlfloat
-      name: Moisture
-      color: "#a52a2a"
-    - leaf: target
-      leaf_from: controlfloat
-      name: Target
-    - leaf: enable
-      leaf_from: controlintoggle
-      name: Enable
-    - leaf: valve
-      leaf_from: controlouttoggle
-      name: Valve
-sector3:
-  name: Irrigation sector 3
-  topics:
-    - leaf: moisture
-      leaf_from: controlfloat
-      name: Moisture
-      color: "#a52a2a"
-    - leaf: target
-      leaf_from: controlfloat
-      name: Target
-    - leaf: enable
-      leaf_from: controlintoggle
-      name: Enable
-    - leaf: valve
-      leaf_from: controlouttoggle
-      name: Valve
-sector4:
-  name: Irrigation sector 4
   topics:
     - leaf: moisture
       leaf_from: controlfloat
@@ -382,26 +317,9 @@ ultrasonic:
   name: "Ultrasonic Distance"
   topics:
     - leaf: ultrasonic
-# The irrigation valves, as Actuator_Digital instances - one per sector, so one schema entry
-# per sector. `valve` is the right id for a single-sector node; valve1..4 match the numbered
-# instances examples/ospit creates. Same shape as `relay`, which is the same class.
+# The irrigation valves - Actuator_Digital instances, so the same shape as `relay`. A node with
+# several publishes valve1, valve2... which the client resolves back to this entry.
 valve:
   name: Valve
-  topics:
-    - leaf:     on
-valve1:
-  name: Valve 1
-  topics:
-    - leaf:     on
-valve2:
-  name: Valve 2
-  topics:
-    - leaf:     on
-valve3:
-  name: Valve 3
-  topics:
-    - leaf:     on
-valve4:
-  name: Valve 4
   topics:
     - leaf:     on
