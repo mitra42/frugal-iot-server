@@ -242,6 +242,12 @@ lcd:
   name: LCD
   topics:
     - leaf: message
+# The switched load output - OSPIT's pin 14 in its "load" role, opened by the low-voltage
+# disconnect. An Actuator_Digital, so the same shape as `relay`.
+load:
+  name: Load
+  topics:
+    - leaf:     on
 ledbuiltin:
   name: LED
   slot: ledbuiltin
