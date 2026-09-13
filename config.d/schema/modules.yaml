@@ -190,6 +190,53 @@ ina219:
     - leaf: current
     - leaf: power
     - leaf: load
+irrigation:
+  name: Irrigation
+  topics:
+    - leaf: hour
+      leaf_from: controlint
+      name: Start hour
+      min: 0
+      max: 23
+    - leaf: minute
+      leaf_from: controlint
+      name: Start minute
+      min: 0
+      max: 59
+    - leaf: maxminutes
+      leaf_from: controlfloat
+      name: Max minutes per sector
+      min: 0
+      max: 120
+    - leaf: enabled
+      leaf_from: controlintoggle
+      name: Enabled
+    - leaf: tank
+      leaf_from: controlfloat
+      name: Tank level
+      color: "#0000ff"
+    - leaf: tankstart
+      leaf_from: controlfloat
+      name: Tank level to start
+    - leaf: tankempty
+      leaf_from: controlfloat
+      name: Tank level to stop
+    - leaf: power
+      leaf_from: controlintoggle
+      name: Power ok
+      wireable: true
+    - leaf: solar
+      leaf_from: controlintoggle
+      name: Input power
+      wireable: true
+    - leaf: pump
+      leaf_from: controlouttoggle
+      name: Pump
+    - leaf: active
+      leaf_from: controlint
+      name: Active sector
+      min: 0
+      max: 16
 lcd:
   summary: false   # a message is not a reading
   name: LCD
@@ -230,6 +277,90 @@ relay:
   name: Relay
   topics:
     - leaf:     on
+# One sector of an irrigation run - see modules "irrigation".
+# `sector` is the template the node takes its compile-time DEFAULT_sector_* values from, and is
+# also the right id for a node with exactly one sector. sector1..sector4 are here so the numbered
+# instances a multi-sector node publishes are recognised rather than landing in "Not in the schema".
+sector:
+  name: Irrigation sector
+  topics:
+    - leaf: moisture
+      leaf_from: controlfloat
+      name: Moisture
+      color: "#a52a2a"
+    - leaf: target
+      leaf_from: controlfloat
+      name: Target
+    - leaf: enable
+      leaf_from: controlintoggle
+      name: Enable
+    - leaf: valve
+      leaf_from: controlouttoggle
+      name: Valve
+sector1:
+  name: Irrigation sector 1
+  topics:
+    - leaf: moisture
+      leaf_from: controlfloat
+      name: Moisture
+      color: "#a52a2a"
+    - leaf: target
+      leaf_from: controlfloat
+      name: Target
+    - leaf: enable
+      leaf_from: controlintoggle
+      name: Enable
+    - leaf: valve
+      leaf_from: controlouttoggle
+      name: Valve
+sector2:
+  name: Irrigation sector 2
+  topics:
+    - leaf: moisture
+      leaf_from: controlfloat
+      name: Moisture
+      color: "#a52a2a"
+    - leaf: target
+      leaf_from: controlfloat
+      name: Target
+    - leaf: enable
+      leaf_from: controlintoggle
+      name: Enable
+    - leaf: valve
+      leaf_from: controlouttoggle
+      name: Valve
+sector3:
+  name: Irrigation sector 3
+  topics:
+    - leaf: moisture
+      leaf_from: controlfloat
+      name: Moisture
+      color: "#a52a2a"
+    - leaf: target
+      leaf_from: controlfloat
+      name: Target
+    - leaf: enable
+      leaf_from: controlintoggle
+      name: Enable
+    - leaf: valve
+      leaf_from: controlouttoggle
+      name: Valve
+sector4:
+  name: Irrigation sector 4
+  topics:
+    - leaf: moisture
+      leaf_from: controlfloat
+      name: Moisture
+      color: "#a52a2a"
+    - leaf: target
+      leaf_from: controlfloat
+      name: Target
+    - leaf: enable
+      leaf_from: controlintoggle
+      name: Enable
+    - leaf: valve
+      leaf_from: controlouttoggle
+      name: Valve
 sht:
   name: SHT
   topics:
@@ -239,6 +370,10 @@ soil:
   name: Soil
   topics:
     - leaf: soil
+tank:
+  name: Water Tank
+  topics:
+    - leaf: tank
 ultrasonic:
   name: "Ultrasonic Distance"
   topics:

@@ -637,6 +637,22 @@ soil:
   graphable:  true
   calibrate:  true
   units:    "%"
+tank:
+  leaf:     tank
+  name:     Water Tank
+  type:     float
+  display:  bar
+  min:      0
+  max:      100
+  width:    5
+  color:    "#0000ff"
+  rw:       r
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
+  graphable:  true
+  units:    "%"
 temperature:
   leaf:     temperature
   name:     Temperature
