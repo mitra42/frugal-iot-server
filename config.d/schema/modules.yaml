@@ -268,6 +268,10 @@ ota:
   insidefrugaliot: true
   topics:
     - leaf:     key
+pump:
+  name: Pump
+  topics:
+    - leaf:     on
 rain:
   name: Rain
   topics:
@@ -378,3 +382,26 @@ ultrasonic:
   name: "Ultrasonic Distance"
   topics:
     - leaf: ultrasonic
+# The irrigation valves, as Actuator_Digital instances - one per sector, so one schema entry
+# per sector. `valve` is the right id for a single-sector node; valve1..4 match the numbered
+# instances examples/ospit creates. Same shape as `relay`, which is the same class.
+valve:
+  name: Valve
+  topics:
+    - leaf:     on
+valve1:
+  name: Valve 1
+  topics:
+    - leaf:     on
+valve2:
+  name: Valve 2
+  topics:
+    - leaf:     on
+valve3:
+  name: Valve 3
+  topics:
+    - leaf:     on
+valve4:
+  name: Valve 4
+  topics:
+    - leaf:     on
