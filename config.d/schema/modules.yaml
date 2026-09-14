@@ -20,11 +20,30 @@ aht21:
   topics:
     - leaf: temperature
     - leaf: humidity
+# The DS18B20 probes on an FF-OpenMPPT board - see frugal-iot-irrigation. Separate modules rather
+# than one, because the three measure quite different things and want different ranges; the class
+# is the same Sensor_DS18B20 as the `ds18b20` module below.
+airtemp:
+  name: Air Temperature
+  topics:
+    - leaf: airtemp
+      leaf_from: temperature
+      name: Air Temperature
+      min: -20
+      max: 60
 battery:
   name: "Battery"
   insidefrugaliot: true
   topics:
     - leaf:   battery
+batttemp:
+  name: Battery Temperature
+  topics:
+    - leaf: batttemp
+      leaf_from: temperature
+      name: Battery Temperature
+      min: -20
+      max: 60
 bme280:
   name: "BME280"
   topics:
@@ -177,6 +196,16 @@ health:
   topics:
     - leaf:     wifibars
     - leaf:     wifissid
+# The charge controller's own heatsink. Either a DS18B20 or a pair of diodes read on an ADC pin,
+# depending on the board - the reading means the same either way.
+heatsink:
+  name: Heatsink Temperature
+  topics:
+    - leaf: heatsink
+      leaf_from: temperature
+      name: Heatsink Temperature
+      min: 0
+      max: 120
 ht:
   name: HT
   topics:
@@ -274,6 +303,21 @@ ota:
   insidefrugaliot: true
   topics:
     - leaf:     key
+panel:
+  name: Solar Panel
+  topics:
+    - leaf: panel
+      leaf_from: voltage
+      name: Panel Voltage
+      max: 30000
+pcbtemp:
+  name: Board Temperature
+  topics:
+    - leaf: pcbtemp
+      leaf_from: temperature
+      name: Board Temperature
+      min: -20
+      max: 100
 pump:
   name: Pump
   topics:

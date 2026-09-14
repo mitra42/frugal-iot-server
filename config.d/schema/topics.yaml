@@ -736,6 +736,24 @@ utc_time:
   display:  text
   color:    black
   rw:       r
+voltage:
+  # A DC voltage read through a resistor divider - see Sensor_Voltage in the library. Millivolts,
+  # like `battery`, but without that topic's single-lithium-cell range or its special-casing in
+  # the UX. [name, min, max] should be overridden per module.
+  leaf:     voltage
+  name:     Voltage
+  type:     int
+  display:  text
+  min:      0
+  max:      30000
+  color:    "#800080"
+  rw:       r
+  graphable:  true
+  log:      true
+  units:    mV
+  duplicates:
+    significantdate: 900000
+    significantvalue: 100
 wifibars:
   leaf:     wifibars
   name:     WiFi
