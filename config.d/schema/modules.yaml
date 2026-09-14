@@ -318,6 +318,35 @@ mppt:
       min: 10000
       max: 16000
       wireable: false
+    - leaf: tempcoeff
+      leaf_from: controlfloat
+      name: Temp coefficient
+      min: 0
+      max: 60
+      wireable: false
+    - leaf: hotcharge
+      leaf_from: controlfloat
+      name: Hot battery
+      min: 10000
+      max: 16000
+      wireable: false
+    - leaf: batttemp
+      leaf_from: controlfloat
+      name: Battery temp
+      min: -20
+      max: 60
+    - leaf: heatsink
+      leaf_from: controlfloat
+      name: Heatsink temp
+      min: 0
+      max: 120
+    - leaf: target
+      leaf_from: controlfloat
+      name: Target
+      min: 10000
+      max: 16000
+      rw: r
+      wireable: false
     - leaf: step
       leaf_from: controlint
       name: DAC step
