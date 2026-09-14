@@ -293,6 +293,32 @@ lux:
   name: Light meter
   topics:
     - leaf:     lux
+# Solar charge control - see frugal-iot-irrigation. `step` is the raw DAC value because that is
+# unambiguous; `vmpp` is what the node PREDICTS that step asks the hardware for, which is a guess
+# until it has been checked against a meter.
+mppt:
+  name: Charge Control
+  topics:
+    - leaf: step
+      leaf_from: controlint
+      name: DAC step
+      min: 0
+      max: 255
+      wireable: false
+    - leaf: vmpp
+      leaf_from: controlfloat
+      name: Panel target
+      min: 0
+      max: 30
+      rw: r
+      wireable: false
+    - leaf: dacvolts
+      leaf_from: controlfloat
+      name: DAC volts
+      min: 0
+      max: 3.3
+      rw: r
+      log: false
 ms5803:
   name: MS5803
   topics:
