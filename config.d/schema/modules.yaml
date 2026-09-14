@@ -299,11 +299,47 @@ lux:
 mppt:
   name: Charge Control
   topics:
+    - leaf: automatic
+      leaf_from: controlintoggle
+      name: Automatic
+    - leaf: state
+      leaf_from: controltext
+      name: State
+      rw: r
+    - leaf: profile
+      leaf_from: controlint
+      name: Battery type
+      min: 0
+      max: 3
+      wireable: false
+    - leaf: chargeend
+      leaf_from: controlfloat
+      name: Charge end
+      min: 10000
+      max: 16000
+      wireable: false
     - leaf: step
       leaf_from: controlint
       name: DAC step
       min: 0
       max: 255
+      wireable: false
+    - leaf: panel
+      leaf_from: controlfloat
+      name: Panel
+      min: 0
+      max: 30000
+    - leaf: battery
+      leaf_from: controlfloat
+      name: Battery
+      min: 0
+      max: 16000
+    - leaf: voc
+      leaf_from: controlfloat
+      name: Open circuit
+      min: 0
+      max: 30000
+      rw: r
       wireable: false
     - leaf: vmpp
       leaf_from: controlfloat
@@ -318,7 +354,6 @@ mppt:
       min: 0
       max: 3.3
       rw: r
-      log: false
 ms5803:
   name: MS5803
   topics:
