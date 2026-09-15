@@ -74,6 +74,23 @@ batteryhealth:
       name: Irrigation active
       min: 0
       max: 16
+    - leaf: panelwatts
+      leaf_from: controlfloat
+      name: Panel watts
+      min: 0
+      max: 2000
+      wireable: false
+    - leaf: storageratio
+      leaf_from: controlfloat
+      name: Storage ratio
+      min: 0
+      max: 50
+      rw: r
+      wireable: false
+    - leaf: advice
+      leaf_from: controltext
+      name: Advice
+      rw: r
 batttemp:
   name: Battery Temperature
   topics:
