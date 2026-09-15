@@ -45,7 +45,6 @@ batteryhealth:
     - leaf: health
       leaf_from: percent
       name: Health
-      wireable: false
       duplicates:
         significantdate: 86400000
         significantvalue: 1
@@ -492,7 +491,6 @@ soc:
     - leaf: soc
       leaf_from: percent
       name: Charge
-      wireable: false
       duplicates:
         significantdate: 900000
         significantvalue: 1
