@@ -36,6 +36,45 @@ battery:
   insidefrugaliot: true
   topics:
     - leaf:   battery
+# How much of its rated capacity the battery still has, inferred from an overnight discharge.
+# A trend over weeks, not a reading; see control_health.h. Named batteryhealth because `health` is
+# already taken by the device's own reporting.
+batteryhealth:
+  name: Battery Health
+  topics:
+    - leaf: health
+      leaf_from: percent
+      name: Health
+      wireable: false
+      duplicates:
+        significantdate: 86400000
+        significantvalue: 1
+    - leaf: state
+      leaf_from: controltext
+      name: State
+      rw: r
+    - leaf: soc
+      leaf_from: controlfloat
+      name: Charge
+      min: 0
+      max: 100
+    - leaf: capacity
+      leaf_from: controlfloat
+      name: Capacity Ah
+      min: 0
+      max: 500
+      wireable: false
+    - leaf: load
+      leaf_from: controlfloat
+      name: Average load A
+      min: 0
+      max: 50
+      wireable: false
+    - leaf: active
+      leaf_from: controlint
+      name: Irrigation active
+      min: 0
+      max: 16
 batttemp:
   name: Battery Temperature
   topics:
@@ -445,6 +484,37 @@ sht:
   topics:
     - leaf: temperature
     - leaf: humidity
+# State of charge, estimated from battery voltage - reporting only, never controlled from. See
+# control_soc.h in frugal-iot-irrigation for what the estimate is and is not worth.
+soc:
+  name: State of Charge
+  topics:
+    - leaf: soc
+      leaf_from: percent
+      name: Charge
+      wireable: false
+      duplicates:
+        significantdate: 900000
+        significantvalue: 1
+    - leaf: charging
+      leaf_from: controlouttoggle
+      name: Charging
+    - leaf: battery
+      leaf_from: controlfloat
+      name: Battery
+      min: 0
+      max: 16000
+    - leaf: panel
+      leaf_from: controlfloat
+      name: Panel
+      min: 0
+      max: 30000
+    - leaf: profile
+      leaf_from: controlint
+      name: Battery type
+      min: 0
+      max: 3
+      wireable: false
 soil:
   name: Soil
   topics:

@@ -506,6 +506,25 @@ out:
   duplicates:
     significantdate: 900000
     significantvalue: 1
+percent:
+  # A 0-100% figure that is worth recording and graphing - state of charge, battery health. Unlike
+  # controlfloat it is read-only and logged, so it needs its own duplicate rule; [name] and the
+  # duplicate thresholds should be overridden per module.
+  leaf:     percent
+  name:     Percent
+  type:     float
+  display:  bar
+  min:      0
+  max:      100
+  width:    3
+  color:    "#008000"
+  rw:       r
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
+  graphable:  true
+  units:    "%"
 position:
   leaf:     position
   name:     Position
