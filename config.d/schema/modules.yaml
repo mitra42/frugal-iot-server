@@ -459,6 +459,12 @@ ultrasonic:
     - leaf: ultrasonic
 # The irrigation valves - Actuator_Digital instances, so the same shape as `relay`. A node with
 # several publishes valve1, valve2... which the client resolves back to this entry.
+# A switched USB supply - an Actuator_Digital, so the same shape as `relay`. On the FF board this
+# shares a pin with the third irrigation valve; a node has one or the other.
+usb:
+  name: USB Supply
+  topics:
+    - leaf:     on
 valve:
   name: Valve
   topics:
