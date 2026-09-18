@@ -774,6 +774,23 @@ voltage:
   duplicates:
     significantdate: 900000
     significantvalue: 100
+volts:
+  leaf:     volts
+  name:     Volts
+  type:     float
+  display:  slider
+  rw:       w
+  min:      0
+  max:      3.3
+  width:    4
+  color:    "#800080"
+  units:    V
+  wireable: true
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 0.05
+  graphable:  true
 wifibars:
   leaf:     wifibars
   name:     WiFi

@@ -31,6 +31,10 @@ airtemp:
       name: Air Temperature
       min: -20
       max: 60
+analog:
+  name: "Analog Out"
+  topics:
+    - leaf: volts
 battery:
   name: "Battery"
   insidefrugaliot: true
