@@ -1,7 +1,7 @@
 // Changing this version is what makes an already installed PWA fetch the app again instead of
 // serving what it cached. It follows the version of frugal-iot-client this release installs, and
 // "npm run prerelease" sets it - so there is normally no reason to edit it by hand.
-const CACHE_NAME = 'frugal-iot-cache-1.3.14';
+const CACHE_NAME = 'frugal-iot-cache-1.3.15';
 const urlsToCache = [
     '/',
     '/index.html',
