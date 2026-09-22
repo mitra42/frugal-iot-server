@@ -25,3 +25,8 @@ test/**
 # --- Placeholders ---
 # Keeps the ota directory present in a clone; a real installation gets one from frugal-iot-init
 ota/README.md
+
+# Describes how the security works, and would be useful in an installation - but it ends with an
+# open-issues section listing what is currently exploitable, which must not ship to everyone who
+# installs the package. Published by hand, without that section.
+SECURITY.md
