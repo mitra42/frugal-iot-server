@@ -12,8 +12,8 @@
     "cookie-parser": "^1.4.7",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
-    "frugal-iot-client": "^1.3.15",
-    "frugal-iot-logger": "^1.1.21",
+    "frugal-iot-client": "^2.0.0",
+    "frugal-iot-logger": "^2.0.0",
     "hash-wasm": "^4.12.0",
     "js-yaml": "^4.2.0",
     "morgan": "^1.11.0",
@@ -34,6 +34,7 @@
     "frugal-iot-addbridge-prod": "scripts/addbridge-prod.zsh",
     "frugal-iot-addbridge-pi": "scripts/addbridge-pi.zsh",
     "frugal-iot-rebuild-dynsec": "scripts/rebuild-dynsec.js",
+    "frugal-iot-dynsec-init": "scripts/dynsec-init.js",
     "frugal-iot-resetnode": "scripts/resetnode.js"
   },
   "description": "Frugal IoT client and server",
