@@ -74,6 +74,13 @@ rest are enforced by the server.
 Revoking a permission takes effect at the broker on the user's next login, or immediately after
 `frugal-iot-rebuild-dynsec`.
 
+A second server can work against a broker it does not own — a laptop developing against production's
+live data — by holding the same `user_secret` and setting `broker_managed_elsewhere: true` in
+`config.d/secrets.yaml`. It then derives the credentials the owning server already created, and
+never tries to create any: enrolling a node, resetting one and rebuilding the broker state all
+refuse. Holding that secret is what grants this, and it is not in git, so a checkout of the server
+reaches no live data by itself.
+
 `/config.json` is served to any logged-in browser, so **nothing secret may live under `config.d/`**
 other than in `secrets.yaml`, which is never served. That is why a bridge's password goes in
 `/etc/mosquitto/conf.d/` instead.
@@ -213,7 +220,7 @@ to be inside their root. OTA requires HTTPS, so production runs behind a reverse
 | Bridge tokens (on production) | `frugal-iot.db`, `bridges` |
 | Which production a Pi replicates from | `config.d/replica.yaml`, with the token in `secrets.yaml` |
 | Projects | `frugal-iot.db`, `projects` |
-| Server secrets | `config.d/secrets.yaml` — never served, generated if absent |
+| Server secrets | `config.d/secrets.yaml` — never served, generated if absent, never committed |
 | Organizations | `config.d/organizations/<org>.yaml` — served to logged-in browsers |
 | Broker accounts, groups, roles | `/var/lib/mosquitto/dynamic-security.json` |
 | Legacy broker passwords | `/var/lib/mosquitto/passwords`, with `/etc/mosquitto/aclfile` |

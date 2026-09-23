@@ -64,3 +64,45 @@ describe('a server that is set up but cannot reach the broker', () => {
     expect(cred).toMatchObject({ username: 'user/alice', brokerUpdated: false });
   });
 });
+
+/*
+ * A server borrowing another's broker - a laptop pointed at production, to work on the server or
+ * the client with live data.
+ *
+ * It holds the same user_secret and no admin credential, so it derives the credentials the other
+ * server already created and never tries to create anything itself.
+ */
+describe('a server whose broker is managed elsewhere', () => {
+  const borrowed = { user_secret: SECRETS.user_secret, broker_managed_elsewhere: true };
+
+  it('hands a browser the credential the other server issued', async () => {
+    const { err, cred } = await forUser(borrowed);
+    expect(err).toBeFalsy();
+    expect(cred).toMatchObject({ username: 'user/alice', brokerUpdated: false });
+    // The same secret and the same stored hash give the same password, which is the whole point
+    const owned = await forUser(SECRETS);
+    expect(cred.password).toBe(owned.cred.password);
+  });
+
+  it('hands the logger its account too', async () => {
+    const creds = await loggers(borrowed);
+    expect(creds.myfarm).toMatchObject({ username: 'myfarm-logger' });
+    expect(creds.myfarm.password).toBe((await loggers(SECRETS)).myfarm.password);
+  });
+
+  it('is not switched on by the absence of an admin credential alone', async () => {
+    // The distinction this flag exists to make: same secrets, opposite right answer. A server
+    // mid-upgrade has no account on the broker yet and must hand over nothing.
+    const { user_secret } = SECRETS;
+    expect((await forUser({ user_secret })).cred).toBe(null);
+    expect(await loggers({ user_secret })).toEqual({});
+  });
+
+  it('still needs the user_secret - the flag alone derives nothing', async () => {
+    // Which is what stops a checkout of this repository reaching live data: the secret is the
+    // access control, and it is not in git.
+    const { err, cred } = await forUser({ broker_managed_elsewhere: true });
+    expect(err).toBeTruthy();
+    expect(cred).toBeFalsy();
+  });
+});

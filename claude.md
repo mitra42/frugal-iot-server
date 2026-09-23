@@ -446,6 +446,29 @@ section). `lib/secrets.js` generates anything missing **and writes it back**, so
 upgraded from before that file fixes itself once instead of quietly using a value that changes on
 every restart.
 
+### Developing against production's live data
+
+A laptop running the server against the production broker cannot create accounts on it, so since
+S4 it has nothing to hand a browser and the dashboard says "No broker credential for this login".
+To restore it, put the **production server's** `user_secret` in the laptop's `config.d/secrets.yaml`
+and add `broker_managed_elsewhere: true` there. The laptop then derives exactly the credentials
+production issued.
+
+Three things that follow:
+
+* **Do not copy `dynsec_admin_user`/`dynsec_admin_password` as well.** They would let the laptop
+  create and delete accounts on the production broker, and - because a derived password depends on
+  the user's stored hash - a laptop with a stale copy of the database would silently RESET the
+  broker password of anyone whose login password had changed since, breaking their production
+  dashboard until they logged in again.
+* **A stale database copy shows up as a refused browser**, not as wrong data: that user's hash
+  differs, so the derived password is not the one the broker holds.
+* **Enrolment, node reset and `frugal-iot-rebuild-dynsec` refuse** on such a server. They create
+  accounts, and it has no credential to do that with. That is the intended limit, not a bug.
+
+The secret is the access control: it is never committed, so a checkout of this repository reaches
+no live data on its own.
+
 ### Replicated users on a bridged Pi
 
 A Pi that bridges to production pulls that organization's logins with `GET /replica/:org`
