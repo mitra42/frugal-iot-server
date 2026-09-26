@@ -8,16 +8,31 @@
 # schema is maintained.
 #
 # Usage:
-#   scripts/copy-schema-to-examples.zsh [<frugal-iot-logger directory>]
+#   scripts/copy-schema-to-examples.zsh [-q|--quiet] [<frugal-iot-logger directory>]
 #
 # With no argument it looks for frugal-iot-logger beside this checkout, which is how these are
 # developed. Says what it did and changes nothing else; committing is up to you.
+#
+# -q (--quiet) names only the files it changed. A run that copies nothing says nothing, so from a
+# release script the output is the list of files you now have to commit.
 
 set -euo pipefail
 
+QUIET=0
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    -q|--quiet) QUIET=1 ;;
+    *)          ARGS+=("$arg") ;;
+  esac
+done
+
+# Progress, as opposed to a change or a problem: silent under -q
+say() { (( QUIET )) || print -r -- "$@" }
+
 HERE="${0:A:h:h}"                     # The frugal-iot-server checkout this script is in
 SCHEMA="${HERE}/config.d/schema"
-LOGGER="${1:-${HERE:h}/frugal-iot-logger}"
+LOGGER="${ARGS[1]:-${HERE:h}/frugal-iot-logger}"
 
 if [[ ! -d "$LOGGER" ]]; then
   echo "  No frugal-iot-logger checkout at ${LOGGER}, so nothing copied."
@@ -44,7 +59,7 @@ COPIED=0
 for d in $DIRS; do
   for f in $FILES; do
     if cmp -s "${SCHEMA}/${f}" "${d}/${f}"; then
-      echo "  same     ${d#${LOGGER}/}/${f}"
+      say "  same     ${d#${LOGGER}/}/${f}"
     else
       cp "${SCHEMA}/${f}" "${d}/${f}"
       echo "  updated  ${d#${LOGGER}/}/${f}"

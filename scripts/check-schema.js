@@ -25,7 +25,8 @@
  *    is what decides how many decimals a reading is shown to; without it the UI guesses.
  *
  *  - A numeric topic with no "units". Often right - plenty of readings are dimensionless - but
- *    worth a look, because the UI has nothing to put after the number.
+ *    worth a look, because the UI has nothing to put after the number. The topics that are
+ *    deliberately dimensionless are listed in UNITS_EXEMPT below, and are not mentioned.
  *
  * And, separately, things that are never deliberate and so count as errors:
  *
@@ -35,7 +36,12 @@
  * Usage:
  *   node scripts/check-schema.js                     # checks ./config.d/schema
  *   node scripts/check-schema.js <dir> [<dir> ...]   # each dir holding topics.yaml and modules.yaml
+ *   node scripts/check-schema.js -q <dir>            # say nothing unless there is something to say
  *   node scripts/check-schema.js --resolve <otakey>  # which devices.yaml entry that OTA key uses
+ *
+ * -q (--quiet) prints nothing at all when a schema is clean, so it can run from a release script
+ * without burying the one line that matters. Warnings and errors print exactly as they otherwise
+ * would, and the exit code is the same either way.
  *
  * Exits 0 for warnings, so it can run from a prerelease script without blocking a release for
  * something that may well be deliberate. Exits 1 for an error, or if it could not read a schema.
@@ -51,6 +57,17 @@ import path from 'path';
 const TYPES_LOGGED_BY_DEFAULT = ['float', 'int', 'bool'];
 // The types with decimals to decide, and so the ones that need a width
 const NUMERIC_TYPES = ['float', 'exponential'];
+/*
+ * Topics that are dimensionless on purpose, so "no units" is the right answer rather than
+ * something to look at. Without this the same three warnings appear at every release, which is
+ * exactly how a real one comes to be skimmed past. Add a name here only once you are sure the
+ * reading genuinely has no unit - not because you have not decided yet.
+ */
+const UNITS_EXEMPT = [
+  'controlfloat',   // a control's value, in whatever the thing it controls is measured in
+  'hdop',           // dilution of precision - a ratio
+  'loadcell',       // raw ADC counts until a calibration turns them into grams
+];
 
 function loadYaml(file) {
   if (!existsSync(file)) return null;
@@ -111,7 +128,7 @@ function checkSchemaDir(dir) {
           + ` characters before any decimal point, so values will overflow it`);
       }
     }
-    if (hasDecimals && (topic.units === undefined)) {
+    if (hasDecimals && (topic.units === undefined) && !UNITS_EXEMPT.includes(name)) {
       warnings.push(`topic "${name}" has no "units" - fine if it is dimensionless, but the UI has`
         + ` nothing to put after the number`);
     }
@@ -187,6 +204,7 @@ function resolveDeviceEntry(devices, otakey) {
 }
 
 const argv = process.argv.slice(2);
+const quiet = argv.includes('-q') || argv.includes('--quiet');
 const resolveAt = argv.indexOf('--resolve');
 if (resolveAt !== -1) {
   const otakey = argv[resolveAt + 1];
@@ -201,7 +219,8 @@ if (resolveAt !== -1) {
   process.exit(0);
 }
 
-const dirs = argv.length ? argv : ['config.d/schema'];
+const named = argv.filter((a) => !a.startsWith('-'));
+const dirs = named.length ? named : ['config.d/schema'];
 let unreadable = 0;
 let totalWarnings = 0;
 let totalErrors = 0;
@@ -214,7 +233,8 @@ for (const dir of dirs) {
     continue;
   }
   if (!warnings.length && !errors.length) {
-    console.log(`${dir}: nothing to report`);
+    // Under -q a clean schema says nothing, so whatever a release script does print is a finding
+    if (!quiet) console.log(`${dir}: nothing to report`);
     continue;
   }
   if (warnings.length) {
