@@ -43,12 +43,15 @@ Usage: bash install-pi.sh [options]
   --name "<name>"      organization display name
   --email <address>    contact address for the organization
   --phone <number>     contact phone, "+" and digits only
-  --broker-password    the machine credential shared by the server, nodes and dashboards.
+  --broker-password    the organization's shared broker credential. Generated, and not needed on a
+                       Pi installed by this script: nodes are issued their own when they enrol and
+                       browsers derive their own at login. Set it only to match nodes flashed
+                       before enrolment existed.
   --superuser-password password for this server's administrator login.
   --login-password     web login password for the organization's own account, which is a different
                        thing from the broker credential above and should not be the same string.
-                       Any of these three not given is asked for, and generated if you just press
-                       Enter, or if there is no terminal to ask at.
+                       Either of the two logins, if not given, is asked for - and generated if you
+                       just press Enter, or if there is no terminal to ask at.
   --broker-host <host> what the browser and the nodes should call this Pi.
                        Default: this Pi's hostname with ".local". Use an IP address if you will
                        view the dashboard on Android, which cannot resolve ".local" names.
@@ -129,6 +132,18 @@ as_user_sh() {
 }
 # sudo, or nothing if we are already root
 sudo_() { if [[ ${EUID} -eq 0 ]]; then "$@"; else sudo "$@"; fi; }
+
+# Read a file under /etc that may be readable only by root. An ordinary user gets "Permission
+# denied" on stderr and nothing on stdout, which is indistinguishable from "the setting you were
+# looking for is not in there" - so a grep over it reports the wrong problem entirely. Try plainly,
+# and fall back to sudo when a file that exists yields nothing.
+read_maybe_root() {
+  local f=$1 out
+  [[ -e "$f" ]] || return 0
+  out="$(cat "$f" 2>/dev/null || true)"
+  [[ -n "$out" ]] || out="$(sudo_ cat "$f" 2>/dev/null || true)"
+  printf '%s\n' "$out"
+}
 
 # ---------------------------------------------------------------- logging
 
@@ -292,7 +307,15 @@ ask ORG_PHONE "Contact phone ('+' and digits only)" || exit 1
 # Asked for in the order they matter. Each may be typed, passed as an option, or generated.
 ask_password SUPER_PW  "the superuser login (this server's administrator)"
 ask_password LOGIN_PW  "the ${ORG_ID} web login"
-ask_password BROKER_PW "the ${ORG_ID} broker credential, shared by the nodes and dashboards"
+# Not asked for. addorganization.zsh requires one, and lib/retained.js falls back to it on a broker
+# with no dynamic security - but this installer always sets dynamic security up, so on this Pi every
+# node is issued its own credential when it enrols and every browser derives its own when it logs
+# in, and nothing reads this. Generated rather than asked, so there is one less thing to choose.
+# --broker-password still sets it, for an organization whose nodes predate enrolment.
+if [[ -z "$BROKER_PW" ]]; then
+  BROKER_PW="$(randpw)"
+  GENERATED+=(BROKER_PW)
+fi
 [[ -n "$BROKER_HOST" ]] || BROKER_HOST="$(hostname).local"
 
 info "install into:  ${INSTALL_DIR}  (owned by ${RUN_USER})"
@@ -315,7 +338,9 @@ $( (( NEEDS_SWAP )) && echo "  * add a 2G swap file, because this board has unde
 Passwords it would use. A generated one is different on every run, so pass it or type it if you
 want this exact set. All of them are shown here because a dry run writes no log; a real run prints
 only the generated ones, so the ones you chose stay out of the log:
-$(printf '  %-22s %s\n' "superuser login" "${SUPER_PW}" "${ORG_ID} web login" "${LOGIN_PW}" "${ORG_ID} broker" "${BROKER_PW}")
+$(printf '  %-22s %s\n' "superuser login" "${SUPER_PW}" "${ORG_ID} web login" "${LOGIN_PW}")
+The organization's broker credential is generated too, but not shown: nothing needs you to know it,
+since nodes are issued their own when they enrol. It lands in config.d/organizations/${ORG_ID}.yaml.
 PLAN
   exit 0
 fi
@@ -547,7 +572,17 @@ if [[ -z "$DYNSEC_SO" ]]; then
   warn "mosquitto's dynamic security plugin was not found - per-user broker accounts will not work."
   warn "  Looked in /usr/lib. The broker will still run on the organization passwords."
 elif [[ -f "$DYNSEC_JSON" ]]; then
-  skip "dynamic security already initialised at ${DYNSEC_JSON}"
+  if as_user_sh "grep -q '^dynsec_admin_password:' '${INSTALL_DIR}/config.d/secrets.yaml'" 2>/dev/null; then
+    skip "dynamic security already initialised at ${DYNSEC_JSON}"
+  else
+    # Re-running cannot mend this: mosquitto_ctrl will not re-initialise over an existing state
+    # file, and the password it chose the first time was never written down anywhere.
+    warn "${DYNSEC_JSON} exists but config.d/secrets.yaml has no dynsec_admin_password."
+    warn "  A previous run must have stopped between the two. The password it used is not"
+    warn "  recoverable, so start that part again:"
+    warn "    sudo rm ${DYNSEC_JSON}"
+    warn "  then run this script again. Nothing else is affected - no accounts exist yet."
+  fi
 else
   # dynsec init asks for the admin password twice on stdin. The password is generated here and kept
   # in the server's own config.d/secrets.yaml, which is never served to a browser.
@@ -580,19 +615,36 @@ if [[ -n "$DYNSEC_SO" ]]; then
 else
   sed -e "s|^plugin PLUGIN_PATH_SET_BY_INSTALLER|#plugin (not installed)|"       -e "s|^plugin_opt_config_file|#plugin_opt_config_file|" "$SRC_CONF" > "$TMP_CONF"
 fi
-if cmp -s "$TMP_CONF" /etc/mosquitto/conf.d/frugal-iot.conf 2>/dev/null; then
+if [[ "$(read_maybe_root /etc/mosquitto/conf.d/frugal-iot.conf)" == "$(cat "$TMP_CONF")" ]]; then
   skip "/etc/mosquitto/conf.d/frugal-iot.conf already current"
 else
-  sudo_ cp "$TMP_CONF" /etc/mosquitto/conf.d/frugal-iot.conf
+  # "install" and not "cp": cp gives a new destination the mode of its source, and the source here
+  # is a mktemp file, which is 600. That left this root-only - unreadable to the grep below, to
+  # frugal-iot-init's comparison, and to the diagnostic. It holds paths, not secrets.
+  sudo_ install -o root -g root -m 644 "$TMP_CONF" /etc/mosquitto/conf.d/frugal-iot.conf
   ok "configuration copied to /etc/mosquitto/conf.d/frugal-iot.conf"
+fi
+# Repair the mode even when the contents already matched. A release before this one installed this
+# file with "cp" from a mktemp file, leaving it 600 root - and since the contents are right, the
+# branch above skips, so nothing else would ever put that straight.
+CONF_MODE="$(stat -c '%a' /etc/mosquitto/conf.d/frugal-iot.conf 2>/dev/null || true)"
+if [[ -n "$CONF_MODE" && "$CONF_MODE" != 644 ]]; then
+  sudo_ chown root:root /etc/mosquitto/conf.d/frugal-iot.conf
+  sudo_ chmod 644 /etc/mosquitto/conf.d/frugal-iot.conf
+  ok "mode corrected to 644 (was ${CONF_MODE}) - it holds paths, not secrets, and several things read it"
 fi
 rm -f "$TMP_CONF"
 # The broker refuses to start if the password file it is told about does not exist. It has to belong
 # to the mosquitto user, because both the broker and mosquitto_passwd warn unless the file belongs to
 # whoever opened it - and mosquitto_passwd writes a temporary file beside it, so the directory has to
 # be writable by that user too.
-PWFILE="$(grep -hE '^[[:space:]]*password_file[[:space:]]' /etc/mosquitto/conf.d/frugal-iot.conf | tail -1 | awk '{print $2}' || true)"
-[[ -n "$PWFILE" ]] || { echo "No password_file line in /etc/mosquitto/conf.d/frugal-iot.conf" >&2; exit 1; }
+PWFILE="$(read_maybe_root /etc/mosquitto/conf.d/frugal-iot.conf | grep -hE '^[[:space:]]*password_file[[:space:]]' | tail -1 | awk '{print $2}' || true)"
+if [[ -z "$PWFILE" ]]; then
+  echo "No password_file line found in /etc/mosquitto/conf.d/frugal-iot.conf" >&2
+  echo "That file is: $(ls -ld /etc/mosquitto/conf.d/frugal-iot.conf 2>&1)" >&2
+  echo "If it cannot be read even with sudo, check what is in it - the broker needs that line." >&2
+  exit 1
+fi
 if [[ -f "$PWFILE" ]]; then
   skip "password file ${PWFILE} exists"
 else
@@ -673,8 +725,17 @@ sed -e "s|^User=.*|User=${RUN_USER}|" \
 if cmp -s "$TMP_SERVICE" /etc/systemd/system/frugaliot.service 2>/dev/null; then
   skip "service file already current"
 else
-  sudo_ cp "$TMP_SERVICE" /etc/systemd/system/frugaliot.service
+  # "install" not "cp", for the reason given at the broker configuration above: a unit file copied
+  # from a mktemp file inherits mode 600, which "systemctl cat" and frugal-iot-init cannot read
+  sudo_ install -o root -g root -m 644 "$TMP_SERVICE" /etc/systemd/system/frugaliot.service
   ok "service installed, running as ${RUN_USER} from ${INSTALL_DIR}"
+fi
+# Same repair as for the broker configuration above, and for the same reason
+SERVICE_MODE="$(stat -c '%a' /etc/systemd/system/frugaliot.service 2>/dev/null || true)"
+if [[ -n "$SERVICE_MODE" && "$SERVICE_MODE" != 644 ]]; then
+  sudo_ chown root:root /etc/systemd/system/frugaliot.service
+  sudo_ chmod 644 /etc/systemd/system/frugaliot.service
+  ok "service file mode corrected to 644 (was ${SERVICE_MODE}) - systemctl cat could not read it"
 fi
 rm -f "$TMP_SERVICE"
 sudo_ systemctl daemon-reload
@@ -703,6 +764,10 @@ systemctl is-enabled --quiet frugaliot && ok "will start again at boot"
 
 IP_ADDR="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 
+# What a node presents once to be issued its own broker credential. The server generates one per
+# organization at startup, so it exists by now; secrets.yaml is 600 and owned by the server's user.
+ENROL_SECRET="$(as_user_sh "grep -A1 '^enrolment_${ORG_ID}:' '${INSTALL_DIR}/config.d/secrets.yaml' 2>/dev/null | tail -1" 2>/dev/null | sed -e 's/^[[:space:]]*-[[:space:]]*//' -e 's/^"//' -e 's/"$//' || true)"
+
 # Only the generated ones are worth printing - and printing a password you typed would put it in the
 # log for no reason
 was_generated() { local v; for v in ${GENERATED[@]+"${GENERATED[@]}"}; do [[ "$v" == "$1" ]] && return 0; done; return 1; }
@@ -729,9 +794,10 @@ cat <<SUMMARY
  Logins         superuser / $(shown SUPER_PW)
                 ${ORG_ID} / $(shown LOGIN_PW)
 
- Broker         ws://${BROKER_HOST}:9012        for browsers
-                ${BROKER_HOST}:1883             for sensor nodes
-                user ${ORG_ID}, password $(shown BROKER_PW)
+ Broker         ws://${BROKER_HOST}:9012        for browsers - each login is issued its own
+                                                credential, so there is nothing to type in
+                ${BROKER_HOST}:1883             for sensor nodes, which are issued their own
+                                                credential when they enrol (below)
 
  Installed in   ${INSTALL_DIR}, running as ${RUN_USER}
  Log of this run ${LOG}   (readable only by you; any generated password above is in it)
@@ -740,10 +806,15 @@ cat <<SUMMARY
 
  1. Your sensor nodes. This cannot be done from here - a node learns the broker by being
     flashed with it, which happens on your workstation. Build each node's firmware with:
-        broker    ${BROKER_HOST}
-        org       ${ORG_ID}
-        password  $(shown BROKER_PW)
+        broker           ${BROKER_HOST}
+        org              ${ORG_ID}
+        enrolment secret ${ENROL_SECRET:-see config.d/secrets.yaml, enrolment_${ORG_ID}}
+    A node presents that secret once, is issued a broker credential of its own, and stores it.
+    The secret grants nothing else - no read and no write - so it is not the thing to guard.
     They appear on the dashboard by themselves once they connect.
+
+    To rotate it, add a line above the old one in ${INSTALL_DIR}/config.d/secrets.yaml and leave
+    the old one until every node flashed with it has enrolled - deleting it first strands them.
 
 ${REBOOT_TEXT}
 

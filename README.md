@@ -100,6 +100,9 @@ broker logins, what has been logged - and changes nothing:
 ```
 npx --no frugal-iot-diagnostic
 ```
+Add `quiet` and it says nothing unless something is wrong, exiting non-zero when it does, which is
+what makes it usable as a periodic check: `npx --no frugal-iot-diagnostic quiet`. No dash, because
+npm consumes flags before they reach the script - and `-q` is npm's own `--quiet`.
 
 To upgrade later: `npm update frugal-iot-server` then `npx --no frugal-iot-init`.
 

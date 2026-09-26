@@ -10,9 +10,39 @@
 #
 # Paste the whole output into a bug report. Passwords are deliberately not printed: the password
 # file is reported by account name only, and organization configs by name only.
-
+#
+# QUIET MODE says nothing at all unless something is wrong, which is what makes it usable as a
+# periodic check rather than only as something to read when you already have a problem:
+#   npx --no frugal-iot-diagnostic quiet        # positional, see below
+#   zsh diagnostic.zsh -q
+#
+# The word "quiet" with no dash is not a typo. npm parses the whole command line itself and passes
+# only the values through, so a flag never reaches a script run by npx - and "-q" is worse than
+# most, because it is npm's OWN abbreviation for --quiet, so npm consumes it and goes quiet itself.
+# "npx --no frugal-iot-diagnostic -- --quiet" also works, if you would rather remember that.
+#
+# Exit status, either mode:
+#   0  nothing found
+#   1  problems found - they are listed, and are the only thing a quiet run prints
+#
 # No "set -e": a failing check should report and carry on, not stop the script.
 setopt no_unset 2>/dev/null
+
+QUIET=0
+for arg in "$@"; do
+  case "$arg" in
+    -q|--quiet|quiet) QUIET=1 ;;
+    -h|--help|help)   sed -n '3,28p' "$0" | sed -e 's/^#$//' -e 's/^# //'; exit 0 ;;
+    *) print -u2 "Unknown argument: $arg (try \"quiet\", or \"help\")"; exit 2 ;;
+  esac
+done
+
+# Keep the real stdout on fd 3 for the summary, which prints in both modes. Under -q everything
+# else - including whatever the commands being run write - goes nowhere, so a quiet run that
+# prints anything is a quiet run that found something. stderr goes too: the noise it carries is
+# things like sudo declining, which the checks below already turn into findings of their own.
+exec 3>&1
+(( QUIET )) && exec 1>/dev/null 2>/dev/null
 
 section() { print -r -- ""; print -r -- "===== $* ====="; }
 item()    { print -r -- "  $*"; }
@@ -119,6 +149,21 @@ done
 # so look at exactly those - and the last setting wins, hence "tail -1" everywhere below.
 BROKER_CONF_FILES=(/etc/mosquitto/mosquitto.conf(N) /etc/mosquitto/conf.d/*.conf(N))
 
+# Everything the broker reads, as one stream - with sudo if reading it plainly gives nothing. A
+# file under /etc can be readable only by root, and an ordinary user then gets silence rather than
+# an error, which is indistinguishable from "that setting is not configured". Left unguarded, the
+# comparison below reported a broker as missing EVERY setting this release ships, which as a
+# periodic check is worse than no check at all.
+broker_conf_text() {
+  local t
+  (( ${#BROKER_CONF_FILES} )) || return 0
+  t=$(cat "${BROKER_CONF_FILES[@]}" 2>/dev/null) || true
+  if [[ -z "$t" ]] && have sudo; then
+    t=$(sudo -n cat "${BROKER_CONF_FILES[@]}" 2>/dev/null) || true
+  fi
+  print -r -- "$t"
+}
+
 # Where the packaged copy of a shipped file is. What is in ./extras is NOT it: frugal-iot-init
 # copies extras/ in and then never overwrites it, so once a release changes one of these files the
 # local copy is a fossil. Checks below read the package.
@@ -126,7 +171,7 @@ PKG_EXTRAS="node_modules/frugal-iot-server/extras"
 [[ -d "$PKG_EXTRAS" ]] || PKG_EXTRAS="${0:A:h:h}/extras"
 
 # Which password file does the running configuration actually name?
-CONFIGURED_PWFILE=$(grep -hE '^[[:space:]]*password_file[[:space:]]' "${BROKER_CONF_FILES[@]}" 2>/dev/null | tail -1 | awk '{print $2}')
+CONFIGURED_PWFILE=$(broker_conf_text | grep -hE '^[[:space:]]*password_file[[:space:]]' | tail -1 | awk '{print $2}')
 section "Mosquitto password file"
 if [[ -n "$CONFIGURED_PWFILE" ]]; then
   item "configuration names: $CONFIGURED_PWFILE"
@@ -160,7 +205,7 @@ if [[ -f "${PKG_EXTRAS}/mosquitto.conf" ]]; then
     # frugal-iot.conf or as several hand-written pieces.
     MISSING_CONF=$(comm -23 \
       <(sed -E 's#^plugin .*#plugin -#' "${PKG_EXTRAS}/mosquitto.conf" | grep -vE '^[[:space:]]*(#|$)' | sort -u) \
-      <(sed -E 's#^plugin .*#plugin -#' "${BROKER_CONF_FILES[@]}" 2>/dev/null | grep -vE '^[[:space:]]*(#|$)' | sort -u) 2>/dev/null)
+      <(broker_conf_text | sed -E 's#^plugin .*#plugin -#' | grep -vE '^[[:space:]]*(#|$)' | sort -u) 2>/dev/null)
     # password_file and the listeners are allowed to be sited differently on an older installation,
     # so a difference in those is reported without being called a fault.
     MISSING_REAL=$(print -r -- "$MISSING_CONF" | grep -vE '^[[:space:]]*(password_file|listener|protocol)[[:space:]]' || true)
@@ -304,12 +349,8 @@ section "Broker access control"
 # the ACL shipped will not have one, and nothing else says so.
 BROKER_SETTING=""
 broker_setting() {  # name -> value from the broker's own configuration, sudo only if needed
-  local v
-  v=$(grep -hE "^[[:space:]]*$1[[:space:]]" "${BROKER_CONF_FILES[@]}" 2>/dev/null | tail -1 | awk '{print $2}') || true
-  if [[ -z "$v" ]] && have sudo; then
-    v=$(sudo -n grep -hE "^[[:space:]]*$1[[:space:]]" "${BROKER_CONF_FILES[@]}" 2>/dev/null | tail -1 | awk '{print $2}') || true
-  fi
-  BROKER_SETTING="$v"
+  # broker_conf_text carries the sudo fallback this used to spell out for itself
+  BROKER_SETTING=$(broker_conf_text | grep -hE "^[[:space:]]*$1[[:space:]]" | tail -1 | awk '{print $2}') || true
 }
 broker_setting acl_file; ACLFILE="$BROKER_SETTING"
 if [[ -z "$ACLFILE" ]]; then
@@ -550,7 +591,7 @@ fi
 # puts this wherever it likes, and looking in one file meant a broker that logs every connect and
 # disconnect was never reported as doing so.
 if (( ${#BROKER_CONF_FILES} )); then
-  if grep -qhE '^[[:space:]]*connection_messages[[:space:]]+false' "${BROKER_CONF_FILES[@]}" 2>/dev/null; then
+  if broker_conf_text | grep -qhE '^[[:space:]]*connection_messages[[:space:]]+false'; then
     item "mosquitto connections: not logged"
   else
     item "mosquitto connections: logged - every connect and disconnect is a write"
@@ -573,10 +614,23 @@ if [[ -d data ]]; then
   [[ -n "$OLDEST" ]] && item "  oldest day: ${OLDEST}"
 fi
 
-section "Summary"
+# The summary prints to fd 3, which is the real stdout whether or not the rest was silenced. A
+# quiet run with nothing to report prints nothing at all, which is the point of it.
 if (( ${#PROBLEMS} == 0 )); then
-  item "No problems detected by these checks."
-else
-  for p in $PROBLEMS; do item "PROBLEM: $p"; done
+  if (( ! QUIET )); then
+    print -r -- "" >&3
+    print -r -- "===== Summary =====" >&3
+    print -r -- "  No problems detected by these checks." >&3
+    print -r -- "" >&3
+  fi
+  exit 0
 fi
-print -r -- ""
+print -r -- "" >&3
+print -r -- "===== Summary: ${#PROBLEMS} problem(s) =====" >&3
+for p in $PROBLEMS; do print -r -- "  PROBLEM: $p" >&3; done
+if (( QUIET )); then
+  print -r -- "" >&3
+  print -r -- "  Run it again without \"quiet\" for the whole report." >&3
+fi
+print -r -- "" >&3
+exit 1

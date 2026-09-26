@@ -25,6 +25,12 @@ and go to [Upgrading](#upgrading).
 `npx --no frugal-iot-diagnostic` from your install directory — it inspects the whole installation and
 reports what looks wrong. See [When something does not work](#when-something-does-not-work).
 
+Adding `quiet` makes it say nothing at all unless something is wrong, and exit non-zero when it
+does, so it can be run periodically rather than only when you already have a problem:
+`npx --no frugal-iot-diagnostic quiet`. The word has no dash on purpose — npm parses the command
+line itself and never passes a flag through to the script, and `-q` is worse still, because it is
+npm's own abbreviation for `--quiet`.
+
 ---
 
 ## Which Raspberry Pi
@@ -189,17 +195,32 @@ bash install-pi.sh --org myfarm --name "My Farm" --email you@example.com --phone
 ```
 
 It asks for anything it needs that you did not pass, says what it is doing as it goes, and stops at
-the first thing that fails - leaving a log, and telling you to run `frugal-iot-diagnostic`. Running
-it again after a failure carries on rather than starting over, which matters on a Pi Zero W where one
-step takes about 40 minutes. `--dry-run` checks the arguments and shows the plan without touching the
-machine.
+the first thing that fails - leaving a log, and telling you to run `frugal-iot-diagnostic`.
+`--dry-run` checks the arguments and shows the plan without touching the machine.
 
-**Passwords** are asked for, not invented, unless you say otherwise: it prompts for each (twice, not
-echoed) and generates one if you just press Enter. Pass them as `--superuser-password`,
-`--login-password` and `--broker-password` to skip the prompts, `--random-passwords` to have all
-three generated, or `--yes` to ask nothing at all — which is what to use over ssh with no terminal.
-A password you chose is not written to the log; a generated one has to be, since otherwise you would
-have no way of knowing it.
+**It is safe to run again, as many times as you like.** Every step that changes something checks
+first and says `already done:` instead, so a run that stopped half way carries on from where it got
+to rather than starting over. That matters most on a Pi Zero W, where compiling `sqlite3` takes
+about 40 minutes and is not repeated once it has succeeded. It is also how to pick up a fix: re-run
+it after upgrading the package and it will put right anything the newer version installs differently.
+
+Two things it will tell you it cannot mend by itself, rather than looping:
+
+* a `sqlite3` that still will not load after being rebuilt;
+* a `/var/lib/mosquitto/dynamic-security.json` that exists while `config.d/secrets.yaml` has no
+  `dynsec_admin_password` - a previous run stopped between creating the one and recording the other,
+  and the password it chose was never written down. It tells you to delete that file and run again.
+
+**Passwords.** You are asked for the two you will actually type - the `superuser` login and the
+organization's web login - twice each, not echoed, and pressing Enter has one generated instead.
+`--superuser-password` and `--login-password` skip the prompts, `--random-passwords` generates both,
+and `--yes` asks nothing at all, which is what to use over ssh with no terminal. A password you
+chose is not written to the log; a generated one has to be, or you would have no way of knowing it.
+
+The organization's *broker* credential is no longer among them: it is generated and never shown,
+because nothing on the Pi needs you to know it. Nodes are issued their own credential when they
+enrol, and browsers derive their own when they log in. `--broker-password` still sets it, for an
+organization whose nodes were flashed before enrolment existed.
 
 **It tells you whether a reboot is needed**, rather than leaving you to wonder — it notices a kernel
 or boot-firmware package in the upgrade, the images in `/boot` changing underneath it, and
@@ -209,8 +230,10 @@ Fetch it with `curl -O` and then run it, rather than piping curl into bash - pip
 terminal to ask questions at.
 
 It finishes with a live server and a tested broker. It cannot do step 9, pointing your nodes at it,
-because a node learns its broker by being flashed with it - so it prints the settings to give them.
-Nor step 10, HTTPS.
+because a node learns its broker by being flashed with it - so it prints what to build into them:
+the broker host, the organization, and the organization's **enrolment secret**. A node presents that
+secret once, is issued a broker credential of its own, and stores it; the secret grants nothing else,
+no read and no write. Nor can it do step 10, HTTPS.
 
 The steps below are what it does, in the same order, if you would rather do it by hand or need to
 understand what went wrong, otherwise skip to Step 9.
