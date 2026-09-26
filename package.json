@@ -73,7 +73,10 @@
   "license": "MIT",
   "main": "frugal-iot-server.js",
   "name": "frugal-iot-server",
-  "repository": "https://github.com/mitra42/frugal-iot-server",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mitra42/frugal-iot-server.git"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
