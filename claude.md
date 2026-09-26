@@ -224,11 +224,32 @@ in the working tree and say what was changed.
 ### A changed extras/ file does not reach /etc by itself
 
 `frugal-iot-init` copies `extras/` into the install directory but **never overwrites** what is
-already there - it prints `kept ... (DIFFERS from this release)` and moves on. So `install-pi.sh`
-reads `node_modules/frugal-iot-server/extras/`, not the install directory's copy, or a
-security-relevant change to the shipped broker configuration would never reach `/etc` however many
-times the installer was re-run. That is how a broker with no `acl_file` survived several releases.
-The same applies by hand: copy from `node_modules/...`, not from `./extras`.
+already there. So `install-pi.sh` reads `node_modules/frugal-iot-server/extras/`, not the install
+directory's copy, or a security-relevant change to the shipped broker configuration would never
+reach `/etc` however many times the installer was re-run. That is how a broker with no `acl_file`
+survived several releases. The same applies by hand: copy from `node_modules/...`, not `./extras`.
+
+Which is also why `frugal-iot-init` does **not** compare its own `extras/` copy any more. That copy
+is a fossil it refuses to overwrite, so once a release changes one of these files it differs for
+ever and says so at every upgrade, whether or not anything is actually out of date - and a warning
+that is always wrong is one you skip past on the day it is right. It checks the **installed** file
+instead (`check_installed` in `scripts/init.zsh`), each in the way that file is allowed to differ:
+
+* `mosquitto.conf` → `/etc/mosquitto/conf.d/frugal-iot.conf`, with the `plugin` line normalised,
+  because the installer substitutes a path that varies by distribution.
+* `aclfile` → `/etc/mosquitto/aclfile`, as a **subset** check: `addbridge-prod` appends a stanza per
+  bridge, so the installed file is expected to be a superset and only a missing shipped line counts.
+* `frugaliot.service` → `/etc/systemd/system/frugaliot.service`, with `User`, `WorkingDirectory` and
+  `ExecStart` normalised, because the installer rewrites those for wherever the server went.
+
+A target that does not exist is reported as "nothing to compare", not as a problem - a broker whose
+configuration was assembled by hand as several files in `conf.d/` is a normal thing to have, and on
+one of those re-running `install-pi.sh` is wrong: it would add `frugal-iot.conf` alongside,
+declaring the same listeners and the same plugin twice.
+
+None of the three can be installed with a plain `cp` - see the table in INSTALLATION.md's upgrade
+section. `install-pi.sh` refuses to overwrite an `aclfile` that has per-bridge rules in it, and
+names the missing lines instead.
 
 ### Caching the client: a day, but never `immutable`
 

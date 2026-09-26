@@ -490,15 +490,47 @@ SRC_CONF="${PKG_DIR}/extras/mosquitto.conf"
 # refused by a future version. Same rule as the password file below.
 SRC_ACL="${PKG_DIR}/extras/aclfile"
 [[ -f "$SRC_ACL" ]] || SRC_ACL="${INSTALL_DIR}/extras/aclfile"
-if [[ -f "$SRC_ACL" ]]; then
-  if cmp -s "$SRC_ACL" /etc/mosquitto/aclfile 2>/dev/null; then
-    skip "/etc/mosquitto/aclfile already current"
-  else
-    sudo_ install -o mosquitto -g mosquitto -m 600 "$SRC_ACL" /etc/mosquitto/aclfile
-    ok "access control list installed at /etc/mosquitto/aclfile"
-  fi
+[[ -f "$SRC_ACL" ]] || { echo "Expected extras/aclfile in ${PKG_DIR} or ${INSTALL_DIR}" >&2; exit 1; }
+
+# An existing ACL file is NOT simply replaced. addbridge-prod.zsh appends a stanza to it per Pi:
+#
+#   user <account>
+#   topic readwrite <org>/#
+#
+# Overwriting the file drops those, and because a mosquitto acl_file is deny-by-default the result
+# is every bridge account still logging in and reaching nothing at all - every site stops relaying,
+# on a broker that looks perfectly healthy. So the shipped file is treated as the set of lines that
+# must be PRESENT, not as the whole contents.
+#
+# Ownership and mode of a file that already exists are left alone deliberately. An older install has
+# it root-owned 644, which works and only draws a warning from the broker; "fixing" it to 600
+# without also chowning it to mosquitto stops the broker starting, because it reads this file after
+# dropping privileges. That is a migration to make deliberately, not a side effect of an upgrade -
+# INSTALLATION.md step 11 has it.
+if [[ ! -e /etc/mosquitto/aclfile ]]; then
+  sudo_ install -o mosquitto -g mosquitto -m 600 "$SRC_ACL" /etc/mosquitto/aclfile
+  ok "access control list installed at /etc/mosquitto/aclfile"
 else
-  echo "Expected extras/aclfile in ${PKG_DIR} or ${INSTALL_DIR}" >&2; exit 1
+  # Read with sudo: the file is normally mode 600 owned by the broker's own user, so reading it as
+  # anyone else returns nothing, which would look exactly like "every shipped rule is missing".
+  ACL_MISSING=$(comm -23 \
+      <(grep -vE '^[[:space:]]*(#|$)' "$SRC_ACL" | sort -u) \
+      <(sudo_ grep -vE '^[[:space:]]*(#|$)' /etc/mosquitto/aclfile 2>/dev/null | sort -u) || true)
+  ACL_ADDED=$(sudo_ grep -cE '^[[:space:]]*user[[:space:]]' /etc/mosquitto/aclfile 2>/dev/null || true)
+  ACL_ADDED=${ACL_ADDED:-0}
+  if [[ -z "$ACL_MISSING" ]]; then
+    skip "/etc/mosquitto/aclfile has every rule this release ships${ACL_ADDED:+ (plus ${ACL_ADDED} added per bridge)}"
+  elif (( ACL_ADDED == 0 )); then
+    # Nothing has been added by hand, so there is nothing to lose by replacing it
+    sudo_ install -m "$(stat -c '%a' /etc/mosquitto/aclfile 2>/dev/null || echo 600)" \
+          "$SRC_ACL" /etc/mosquitto/aclfile
+    ok "access control list at /etc/mosquitto/aclfile brought up to date"
+  else
+    warn "/etc/mosquitto/aclfile is missing rules this release ships, and holds ${ACL_ADDED} rule(s)"
+    warn "  added per bridge, which replacing it would delete. Add these by hand instead:"
+    while IFS= read -r line; do [[ -n "$line" ]] && info "    ${line}"; done <<< "$ACL_MISSING"
+    warn "  then: sudo systemctl reload mosquitto"
+  fi
 fi
 
 # The dynamic security plugin. Its state file has to exist before the configuration naming it is
@@ -627,8 +659,12 @@ rm -f "$SUB_OUT"
 step "Running the server as a service"
 # The shipped unit is written for user "pi" installing into /home/pi/frugal-iot, so the three lines
 # that depend on that are rewritten for wherever this actually went.
-SRC_SERVICE="${INSTALL_DIR}/extras/frugaliot.service"
-[[ -f "$SRC_SERVICE" ]] || { echo "Expected ${SRC_SERVICE} to exist after frugal-iot-init" >&2; exit 1; }
+# From the installed package, not ${INSTALL_DIR}/extras - for the same reason as the broker
+# configuration above. frugal-iot-init never overwrites its copy, so a release that changes the
+# unit would otherwise never reach /etc however often this is re-run.
+SRC_SERVICE="${PKG_DIR}/extras/frugaliot.service"
+[[ -f "$SRC_SERVICE" ]] || SRC_SERVICE="${INSTALL_DIR}/extras/frugaliot.service"
+[[ -f "$SRC_SERVICE" ]] || { echo "Expected extras/frugaliot.service in ${PKG_DIR} or ${INSTALL_DIR}" >&2; exit 1; }
 TMP_SERVICE="$(mktemp)"
 sed -e "s|^User=.*|User=${RUN_USER}|" \
     -e "s|^WorkingDirectory=.*|WorkingDirectory=${INSTALL_DIR}|" \

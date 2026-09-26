@@ -63,10 +63,16 @@ done
 for f in "${PKG}"/config.d/schema/*.yaml(N); do
   copy_if_missing "$f" "./config.d/schema/${f:t}" compare
 done
-# Copied so that mosquitto.conf and frugaliot.service can be edited and installed from here. Worth
-# comparing: these get copied on somewhere else (/etc/...), where an old version lingers unnoticed.
+# Copied so that mosquitto.conf and frugaliot.service can be there to read and install from.
+#
+# NOT compared against the packaged copy. This copy is never overwritten - that is the whole point
+# of copy_if_missing - so once a release changes one of these it differs for ever, and says so at
+# every upgrade whether or not anything is actually out of date. A warning that is always wrong is
+# one you learn to skip past, and then miss on the day it is right. What matters is not whether
+# this copy is current but whether the file actually in use is, so that is what is checked, below,
+# where it really lives.
 for f in "${PKG}"/extras/*(N); do
-  copy_if_missing "$f" "./extras/${f:t}" compare
+  copy_if_missing "$f" "./extras/${f:t}"
 done
 
 # ---- 1b. Secrets this server generates for itself ----
@@ -182,6 +188,74 @@ else
   echo "  kept    ${DB} permissions.project (already present)"
 fi
 
+# ---- 4. Is what was installed FROM extras/ still current? ----
+# The files in extras/ are templates for files that live somewhere else - the broker's
+# configuration, its ACL, the systemd unit. Whether this directory's copy matches the release says
+# nothing about any of them, so the question is asked where the file actually is.
+#
+# Each of these is checked in the way that file is allowed to differ, because two of them are
+# *supposed* to differ and a plain cmp would cry wolf at every upgrade:
+#  - mosquitto.conf carries a placeholder for the dynamic security plugin, which the installer
+#    replaces with a path that varies by distribution.
+#  - aclfile gets a stanza appended per bridge by addbridge-prod, so the installed file is
+#    expected to be a superset - only a line this release ships and it lacks is a finding.
+STALE=()        # installed, and older than this release
+UNINSTALLED=()  # nothing at the usual place, so there was nothing to compare
+UNREADABLE=()   # there, but not readable without sudo
+
+# check_installed <packaged file> <installed path> <exact|plugin|subset>
+check_installed() {
+  local from=$1 to=$2 how=$3 a b missing
+  [[ -e "$from" ]] || return 0
+  if [[ ! -e "$to" ]]; then
+    UNINSTALLED+=("${to}|${from}")
+    return 0
+  fi
+  if [[ ! -r "$to" ]]; then
+    UNREADABLE+=("$to")
+    return 0
+  fi
+  # Both sides through the same filter, so only a real difference survives. Note the "#"
+  # delimiter: an alternation inside an "s|...|" would end the expression at its first branch, and
+  # the "|| true" below would then hide the error and report the two files as identical.
+  local norm
+  case "$how" in
+    plugin)  norm='s#^plugin .*#plugin -#' ;;
+    # The installer rewrites User, WorkingDirectory and ExecStart for whoever runs it and wherever
+    # the server went, so those three are normalised - comparing them exactly would report every
+    # installation that is not user "pi" in /home/pi/frugal-iot as out of date at every upgrade.
+    service) norm='s#^(User|WorkingDirectory|ExecStart)=.*#\1=-#' ;;
+    *)       norm='' ;;
+  esac
+
+  case "$how" in
+    plugin|service)
+      a=$(sed -E "$norm" "$from" | grep -vE '^[[:space:]]*(#|$)' | sort || true)
+      b=$(sed -E "$norm" "$to"   | grep -vE '^[[:space:]]*(#|$)' | sort || true)
+      # Neither of these files is ever empty once the comments are gone. Both blank means the
+      # filter failed rather than that they agree, and reporting "current" on that would be the
+      # worst answer of the three.
+      if [[ -z "$a" || -z "$b" ]]; then
+        UNREADABLE+=("$to")
+      elif [[ "$a" != "$b" ]]; then
+        STALE+=("${to}|${from}")
+      fi
+      ;;
+    subset)
+      missing=$(comm -23 <(grep -vE '^[[:space:]]*(#|$)' "$from" | sort -u || true) \
+                         <(grep -vE '^[[:space:]]*(#|$)' "$to"   | sort -u || true) || true)
+      [[ -z "$missing" ]] || STALE+=("${to}|${from}")
+      ;;
+    *)
+      cmp -s "$from" "$to" || STALE+=("${to}|${from}")
+      ;;
+  esac
+}
+
+check_installed "${PKG}/extras/mosquitto.conf"    /etc/mosquitto/conf.d/frugal-iot.conf  plugin
+check_installed "${PKG}/extras/aclfile"           /etc/mosquitto/aclfile                 subset
+check_installed "${PKG}/extras/frugaliot.service" /etc/systemd/system/frugaliot.service  service
+
 if (( ${#DIFFER_TO} )); then
   echo
   echo "These files were left as you have them, but this release ships a different version:"
@@ -189,9 +263,35 @@ if (( ${#DIFFER_TO} )); then
     echo "  ${DIFFER_TO[$i]}"
     echo "    compare with:  diff ${DIFFER_TO[$i]} ${DIFFER_FROM[$i]}"
   done
-  echo "Usually that just means you edited it, and there is nothing to do. But a release can also"
-  echo "change one of these files - and anything installed elsewhere from it, such as"
-  echo "/etc/mosquitto/conf.d/frugal-iot.conf, keeps the old content until you copy it again."
+  echo "The schema describes the sensor types the software understands. If you added one of your"
+  echo "own that is exactly as it should be; if you did not, this release changed it and the"
+  echo "difference is worth reading."
+fi
+
+if (( ${#STALE} )); then
+  echo
+  echo "Installed elsewhere from extras/, and older than this release:"
+  for e in $STALE; do
+    echo "  ${e%%|*}"
+    echo "    compare with:  sudo diff ${e%%|*} ${e#*|}"
+  done
+  echo "Re-running the installer brings these up to date and is the safe way to do it - it"
+  echo "substitutes the plugin path and will not discard ACL rules added per bridge:"
+  echo "  bash node_modules/frugal-iot-server/scripts/install-pi.sh"
+fi
+
+if (( ${#UNINSTALLED} )); then
+  echo
+  echo "Nothing at the usual place, so these were not compared:"
+  for e in $UNINSTALLED; do echo "  ${e%%|*}  (would come from extras/${${e#*|}:t})"; done
+  echo "Either install-pi.sh has not been run here, or this machine's broker configuration was put"
+  echo "together by hand under another name - several small files in /etc/mosquitto/conf.d is a"
+  echo "normal way to have done it. Nothing is out of date; there is simply nothing to compare."
+fi
+
+if (( ${#UNREADABLE} )); then
+  echo
+  echo "There, but not readable as $(id -un), so not compared: ${(j:, :)UNREADABLE}"
 fi
 
 echo

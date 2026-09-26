@@ -1222,24 +1222,51 @@ journalctl -u frugaliot -n 30
 npm ls frugal-iot-server
 ```
 
-`frugal-iot-init` leaves your files alone, so watch its output for a section headed **"These files
-were left as you have them, but this release ships a different version"**. It gives you the `diff`
-command for each. That matters most for the files you copy somewhere else — a changed
-`extras/mosquitto.conf` or `extras/frugaliot.service` does nothing until you install it again:
+`frugal-iot-init` leaves your own files alone. Two sections of its output are worth reading.
+
+**"These files were left as you have them, but this release ships a different version"** covers the
+sensor schema under `config.d/schema/`, and gives you a `diff` command for each. If you added a
+sensor type of your own, that is exactly what it should say; if you did not, this release changed
+the schema and the difference is worth reading.
+
+**"Installed elsewhere from extras/, and older than this release"** covers the files that live
+somewhere else — the broker configuration, its ACL, the systemd unit. It compares what is actually
+in `/etc`, not the copy in `extras/`, because that copy is never overwritten and so differs for ever
+once a release changes it. To bring anything it names up to date, re-run the installer:
 
 ```
-sudo cp node_modules/frugal-iot-server/extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf
-sudo cp node_modules/frugal-iot-server/extras/aclfile /etc/mosquitto/aclfile
-sudo chown mosquitto:mosquitto /etc/mosquitto/aclfile && sudo chmod 600 /etc/mosquitto/aclfile
-sudo systemctl restart mosquitto
-sudo cp node_modules/frugal-iot-server/extras/frugaliot.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart frugaliot
+bash node_modules/frugal-iot-server/scripts/install-pi.sh
 ```
 
-Note those read from `node_modules/frugal-iot-server/extras/`, **not** from `extras/` in this
-directory. `frugal-iot-init` keeps your local copy and only tells you it differs, so the local one is
-the *old* version — copying it would reinstall what you already have. Re-running the install script
-(`bash node_modules/frugal-iot-server/scripts/install-pi.sh`) does the same job and reads from the
-same place.
+It is safe to re-run: it changes only what is out of date, and it is the *only* correct way to
+install these three, because none of them can simply be copied into place:
+
+| file | why a plain `cp` is wrong |
+|------|---------------------------|
+| `extras/mosquitto.conf` | carries `plugin PLUGIN_PATH_SET_BY_INSTALLER`. The path differs by distribution, so the installer substitutes it. Copied as-is, **the broker will not start.** |
+| `extras/aclfile` | `frugal-iot-addbridge-prod` appends a rule per Pi. Copying over it deletes them, and a mosquitto `acl_file` is deny-by-default — so every bridge goes on logging in and reaches nothing at all. |
+| `extras/frugaliot.service` | written for user `pi` in `/home/pi/frugal-iot`; the installer rewrites `User`, `WorkingDirectory` and `ExecStart` for wherever this actually went. |
+
+The installer will not overwrite an ACL file that has per-bridge rules in it. If this release adds a
+rule to a broker that has them, it says which lines are missing and leaves the file alone for you to
+add them by hand, then `sudo systemctl reload mosquitto`.
+
+> **If your broker's configuration was assembled by hand** — several small files in
+> `/etc/mosquitto/conf.d/` rather than the single `frugal-iot.conf` the installer writes — then
+> `frugal-iot-init` reports those files under "Nothing at the usual place, so these were not
+> compared", and re-running the installer is *not* what you want: it would add `frugal-iot.conf`
+> alongside what you already have, declaring the same listeners and the same plugin twice. Compare
+> by hand instead, and add only what is missing:
+>
+> ```
+> sudo grep -hvE '^\s*(#|$)' /etc/mosquitto/conf.d/*.conf | sort -u > /tmp/running.txt
+> grep -hvE '^\s*(#|$)' node_modules/frugal-iot-server/extras/mosquitto.conf | sort -u > /tmp/shipped.txt
+> diff /tmp/running.txt /tmp/shipped.txt
+> ```
+>
+> Lines only in the running config are usually this machine's own — TLS `certfile`/`keyfile`, a
+> bridge `listener`, a `password_file` in a different place. Lines only in the shipped one are what
+> this release added.
 
 > It does not compare `config.yaml`, `config.d/mqtt.yaml`, `config.d/logger.yaml` or
 > `config.d/server.yaml`, because those hold your own settings and would differ every time. If a

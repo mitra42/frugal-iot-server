@@ -115,9 +115,18 @@ for f in /etc/mosquitto/conf.d/*(N); do
 done
 [[ -z "$(print -r -- /etc/mosquitto/conf.d/*(N))" ]] && problem "Nothing in /etc/mosquitto/conf.d - the Frugal IoT config was never copied there (step 5)"
 
+# The files the broker actually reads. mosquitto's include_dir only loads names ending in .conf,
+# so look at exactly those - and the last setting wins, hence "tail -1" everywhere below.
+BROKER_CONF_FILES=(/etc/mosquitto/mosquitto.conf(N) /etc/mosquitto/conf.d/*.conf(N))
+
+# Where the packaged copy of a shipped file is. What is in ./extras is NOT it: frugal-iot-init
+# copies extras/ in and then never overwrites it, so once a release changes one of these files the
+# local copy is a fossil. Checks below read the package.
+PKG_EXTRAS="node_modules/frugal-iot-server/extras"
+[[ -d "$PKG_EXTRAS" ]] || PKG_EXTRAS="${0:A:h:h}/extras"
+
 # Which password file does the running configuration actually name?
-# mosquitto's include_dir only loads files ending in .conf, so look at exactly those, last one wins
-CONFIGURED_PWFILE=$(grep -hE '^[[:space:]]*password_file[[:space:]]' /etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*.conf(N) 2>/dev/null | tail -1 | awk '{print $2}')
+CONFIGURED_PWFILE=$(grep -hE '^[[:space:]]*password_file[[:space:]]' "${BROKER_CONF_FILES[@]}" 2>/dev/null | tail -1 | awk '{print $2}')
 section "Mosquitto password file"
 if [[ -n "$CONFIGURED_PWFILE" ]]; then
   item "configuration names: $CONFIGURED_PWFILE"
@@ -133,12 +142,35 @@ else
   item "no password_file line found in any mosquitto configuration"
   problem "No password_file configured - the broker would allow anonymous access or reject everything"
 fi
-# The copy in this installation is what step 5 tells you to put into /etc - if the two disagree,
-# either the copy never happened or the installed package is older than the instructions.
-if [[ -f extras/mosquitto.conf ]]; then
-  item "this installation's extras/mosquitto.conf names: $(grep -hE '^[[:space:]]*password_file' extras/mosquitto.conf 2>/dev/null | awk '{print $2}')"
-  if [[ -n "$CONFIGURED_PWFILE" ]] && ! diff -q extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf >/dev/null 2>&1; then
-    problem "extras/mosquitto.conf here differs from /etc/mosquitto/conf.d/frugal-iot.conf - if you followed step 5 with an older installed package, copy it again after upgrading"
+# What this release ships, against what the broker is actually running.
+#
+# This used to be "diff ./extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf", which
+# reported a problem on every machine there has ever been, for three separate reasons: ./extras is
+# a fossil frugal-iot-init will not overwrite, so it differs from the release for ever; the
+# installed copy has the dynamic-security plugin's path substituted, so it differs from the shipped
+# one by design; and "diff -q" against a frugal-iot.conf that does not exist fails too, which is
+# the normal state of a broker whose configuration was assembled by hand as several small files in
+# conf.d. A check that is always wrong is one you stop reading, so this asks the question that
+# actually matters instead: is the broker missing a setting this release ships?
+if [[ -f "${PKG_EXTRAS}/mosquitto.conf" ]]; then
+  item "this release's mosquitto.conf names: $(grep -hE '^[[:space:]]*password_file' "${PKG_EXTRAS}/mosquitto.conf" 2>/dev/null | awk '{print $2}')"
+  if (( ${#BROKER_CONF_FILES} )); then
+    # The plugin line is normalised: the installer substitutes a path that varies by distribution.
+    # Comparing settings rather than files means this works whether the configuration arrived as one
+    # frugal-iot.conf or as several hand-written pieces.
+    MISSING_CONF=$(comm -23 \
+      <(sed -E 's#^plugin .*#plugin -#' "${PKG_EXTRAS}/mosquitto.conf" | grep -vE '^[[:space:]]*(#|$)' | sort -u) \
+      <(sed -E 's#^plugin .*#plugin -#' "${BROKER_CONF_FILES[@]}" 2>/dev/null | grep -vE '^[[:space:]]*(#|$)' | sort -u) 2>/dev/null)
+    # password_file and the listeners are allowed to be sited differently on an older installation,
+    # so a difference in those is reported without being called a fault.
+    MISSING_REAL=$(print -r -- "$MISSING_CONF" | grep -vE '^[[:space:]]*(password_file|listener|protocol)[[:space:]]' || true)
+    if [[ -n "$MISSING_CONF" ]]; then
+      item "settings this release ships that the broker does not have:"
+      print -r -- "$MISSING_CONF" | while IFS= read -r l; do [[ -n "$l" ]] && item "    $l"; done
+    else
+      item "the broker has every setting this release ships"
+    fi
+    [[ -n "$MISSING_REAL" ]] && problem "The broker is missing $(print -r -- "$MISSING_REAL" | grep -c .) setting(s) this release ships - see \"Mosquitto password file\" above. Re-run install-pi.sh, or add them by hand if this broker's config.d was written by hand."
   fi
 fi
 item "candidate locations, whether or not configured:"
@@ -270,7 +302,6 @@ section "Broker access control"
 # An acl_file confines each account to its own organization's topics; without one, every account
 # that can log in reaches every topic on the broker. Reported here because a broker installed before
 # the ACL shipped will not have one, and nothing else says so.
-BROKER_CONF_FILES=(/etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*.conf(N))
 BROKER_SETTING=""
 broker_setting() {  # name -> value from the broker's own configuration, sudo only if needed
   local v
@@ -515,8 +546,11 @@ if [[ -f config.d/server.yaml ]]; then
   MORGANSET=$(sed -n 's/^morgan:[[:space:]]*//p' config.d/server.yaml 2>/dev/null | head -1)
   item "server morgan:       ${MORGANSET:-not set, so on - a line logged per HTTP request}"
 fi
-if [[ -f /etc/mosquitto/conf.d/frugal-iot.conf ]]; then
-  if grep -qE '^[[:space:]]*connection_messages[[:space:]]+false' /etc/mosquitto/conf.d/frugal-iot.conf 2>/dev/null; then
+# Across every file the broker reads, not just frugal-iot.conf: a configuration assembled by hand
+# puts this wherever it likes, and looking in one file meant a broker that logs every connect and
+# disconnect was never reported as doing so.
+if (( ${#BROKER_CONF_FILES} )); then
+  if grep -qhE '^[[:space:]]*connection_messages[[:space:]]+false' "${BROKER_CONF_FILES[@]}" 2>/dev/null; then
     item "mosquitto connections: not logged"
   else
     item "mosquitto connections: logged - every connect and disconnect is a write"
