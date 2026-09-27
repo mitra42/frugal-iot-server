@@ -341,10 +341,79 @@ describe('the record of nodes that asked and were refused', () => {
     expect(attempts.forOrg('other')).toHaveLength(1);   // one organization cannot crowd out another
   });
 
-  it('does not record a request that is not even shaped like one', async () => {
-    // Nothing an admin could act on, and the one path an unauthenticated caller can hit freely
+  /*
+   * A malformed request IS recorded, which it was not at first.
+   *
+   * The reasoning for excluding it - "nothing an admin could act on" - missed that the fix for a
+   * mistyped project is in the firmware, not on the dashboard, and that until the row appears the
+   * symptom is identical to the node being dead or pointed at another server entirely.
+   */
+  it('records a request whose project is not a legal name, so the typo is visible', async () => {
     const attempts = makeAttemptLog();
-    await run(deps({ attempts }), { org: 'myfarm' });
-    expect(attempts.forOrg('myfarm')).toEqual([]);
+    const { err } = await run(deps({ attempts }), body({ project: 'Lotus' }));
+    expect(err.code).toBe(ENROL.BAD_REQUEST);
+    expect(attempts.forOrg('myfarm')).toMatchObject([
+      { nodeid: 'esp32-abc', project: 'Lotus', reason: ENROL.BAD_REQUEST },
+    ]);
+  });
+
+  it('records nothing under an organization that is not a nameable one', async () => {
+    // There is no admin who could ever see the row, and nothing would bound how many organizations
+    // an unauthenticated caller could invent.
+    const attempts = makeAttemptLog();
+    await run(deps({ attempts }), body({ org: 'Not An Org' }));
+    expect(attempts.forOrg('Not An Org')).toEqual([]);
+  });
+
+  it('truncates the untrusted strings it is about to show in a table', async () => {
+    const attempts = makeAttemptLog();
+    await run(deps({ attempts }), body({ nodeid: 'x'.repeat(500), project: 'y'.repeat(500) }));
+    const [row] = attempts.forOrg('myfarm');
+    expect(row.nodeid).toHaveLength(64);
+    expect(row.project).toHaveLength(64);
+  });
+});
+
+/*
+ * Surviving a restart, which is the whole reason this stopped being memory-only: a node retries
+ * every half hour, so a restart hid a node that was asking for up to thirty minutes - and that is
+ * indistinguishable from a node that is not asking at all, which is the question being asked.
+ */
+describe('the record of attempts, across a restart', () => {
+  it('reloads what was there, so a node that is asking stays visible', async () => {
+    const before = makeAttemptLog();
+    await new Promise((res) => before.useDatabase(db, res));
+    await run(deps({ attempts: before, from: '10.0.0.9' }), body({ enrolment_secret: 'wrong' }));
+
+    const after = makeAttemptLog();                       // a fresh process, same database
+    const loaded = await new Promise((res) => after.useDatabase(db, (e, n) => res(n)));
+    expect(loaded).toBe(1);
+    expect(after.forOrg('myfarm')).toMatchObject([
+      { nodeid: 'esp32-abc', reason: ENROL.REFUSED, from: '10.0.0.9', count: 1 },
+    ]);
+  });
+
+  it('does not persist a rate-limited attempt', async () => {
+    // The one refusal that by definition arrives faster than the limiter allows, so persisting it
+    // would be a database write per request from an unauthenticated endpoint.
+    const attempts = makeAttemptLog();
+    await new Promise((res) => attempts.useDatabase(db, res));
+    const limiter = makeRateLimiter({ perNode: 0, perOrg: 0 });
+    const { err } = await run(deps({ attempts, limiter }), body());
+    expect(err.code).toBe(ENROL.RATE_LIMITED);
+    expect(attempts.forOrg('myfarm')).toHaveLength(1);    // visible to the admin
+    const rows = await new Promise((res) =>
+      db.all('SELECT * FROM node_attempts', [], (e, r) => res(r)));
+    expect(rows).toEqual([]);                             // but not written
+  });
+
+  it('forgets the persisted row too once the node succeeds', async () => {
+    const attempts = makeAttemptLog();
+    await new Promise((res) => attempts.useDatabase(db, res));
+    await run(deps({ attempts }), body({ enrolment_secret: 'wrong' }));
+    await run(deps({ attempts }), body());
+    const rows = await new Promise((res) =>
+      db.all('SELECT * FROM node_attempts', [], (e, r) => res(r)));
+    expect(rows).toEqual([]);
   });
 });

@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS `bridges` (
 -- Keyed by (org, nodeid), NOT by project: a node states its own project, so keying on it would let
 -- a denied node return by claiming a different one.
 --
--- Persisted, unlike the record of failed attempts, because a restart must not un-deny a node.
+-- Persisted, because a restart must not un-deny a node. So is node_attempts below, for a
+-- different reason - see the note there.
 CREATE TABLE IF NOT EXISTS `node_grants` (
   `org` TEXT NOT NULL,
   `project` TEXT NOT NULL DEFAULT '',
@@ -193,3 +194,35 @@ CREATE TABLE IF NOT EXISTS notification_queue (
 -- silently becoming the superuser.
 INSERT OR IGNORE INTO `users` (`id`, `username`, `name`, `organization`) VALUES (0, 'everyone', 'Everyone', '');
 INSERT OR IGNORE INTO `users` (`id`, `username`, `name`, `organization`) VALUES (1, 'superuser', 'Superuser', '');
+
+-- Every node that asked to enrol and was refused, for the Nodes card on the dashboard.
+--
+-- This is the ONLY way an administrator learns that a node exists: a node id is not discoverable
+-- from the server, so a node nobody can reach physically can only announce itself by asking and
+-- being refused. The rows are therefore UNTRUSTED - anyone can make an id appear by attempting
+-- enrolment - so each keeps when it asked, from where, and why it was refused, for an administrator
+-- to recognise rather than to trust.
+--
+-- Persisted, although it was in memory first and the reasoning for that was not wrong: the nodes
+-- table has no last_seen column because that would be a database write per reading. But an
+-- enrolment attempt is not a reading. It is capped by the rate limiter at 20 per organization per
+-- hour, repeats from one node are throttled to one write a minute, and a rate-limited request is
+-- not written at all - so the write rate here is a few rows an hour, not one per reading.
+--
+-- What losing them on a restart cost was the thing this table exists to give: a node retries only
+-- every half hour, so a server restart made a node that was asking invisible for up to thirty
+-- minutes, which is indistinguishable from a node that is not asking at all. That is precisely the
+-- case an administrator is trying to diagnose.
+--
+-- Keyed by (org, nodeid) like node_grants, and for the same reason: a node states its own project,
+-- so keying on it would let one node occupy several rows by varying what it claims.
+CREATE TABLE IF NOT EXISTS `node_attempts` (
+  `org` TEXT NOT NULL,
+  `project` TEXT NOT NULL DEFAULT '',
+  `nodeid` TEXT NOT NULL,
+  `reason` TEXT NOT NULL DEFAULT '',
+  `from_addr` TEXT NOT NULL DEFAULT '',
+  `at` INTEGER NOT NULL,
+  `count` INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(`org`, `nodeid`)
+);

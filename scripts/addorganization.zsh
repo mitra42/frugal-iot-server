@@ -107,19 +107,38 @@ fi
 # opening it, and mosquitto_passwd writes a temporary backup beside it, so it needs the directory too
 # - neither of which we get by running as ourselves against a file owned by mosquitto or by root.
 # On Raspberry Pi OS the first user has passwordless sudo, so this is invisible.
+#
+# The owner is not always able to do it either: a file at /etc/mosquitto/mosquitto_passwords is
+# owned by mosquitto inside a directory owned by root, and the backup then cannot be written -
+# "Error creating backup password file". So check the chosen account can write the directory, and
+# fall back to root, putting the ownership back afterwards so mosquitto can still read the file.
+# stat's spelling differs between Linux (-c) and BSD/macOS (-f)
+MOSQUITTO_PASSWD_DIR="${MOSQUITTO_PASSWD_FILE:h}"
+MOSQUITTO_PASSWD_OWNER=$(stat -c '%U' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null \
+  || stat -f '%Su' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null || true)
+MOSQUITTO_PASSWD_GROUP=$(stat -c '%G' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null \
+  || stat -f '%Sg' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null || true)
+MOSQUITTO_PASSWD_MODE=$(stat -c '%a' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null \
+  || stat -f '%Lp' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null || true)
+MOSQUITTO_RESTORE_OWNER=0
 MOSQUITTO_PASSWD_CMD=(mosquitto_passwd)
-if [[ ! -w "${MOSQUITTO_PASSWD_FILE:h}" || ( -e "$MOSQUITTO_PASSWD_FILE" && ! -w "$MOSQUITTO_PASSWD_FILE" ) ]]; then
+if [[ ! -w "$MOSQUITTO_PASSWD_DIR" || ( -e "$MOSQUITTO_PASSWD_FILE" && ! -w "$MOSQUITTO_PASSWD_FILE" ) ]]; then
   if command -v sudo >/dev/null; then
-    # stat's spelling differs between Linux (-c) and BSD/macOS (-f)
-    MOSQUITTO_PASSWD_OWNER=$(stat -c '%U' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null \
-      || stat -f '%Su' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null || true)
-    if [[ -n "$MOSQUITTO_PASSWD_OWNER" && "$MOSQUITTO_PASSWD_OWNER" != "$(id -un)" && "$MOSQUITTO_PASSWD_OWNER" != "root" ]]; then
+    if [[ -n "$MOSQUITTO_PASSWD_OWNER" && "$MOSQUITTO_PASSWD_OWNER" != "$(id -un)" && "$MOSQUITTO_PASSWD_OWNER" != "root" ]] \
+       && sudo -u "$MOSQUITTO_PASSWD_OWNER" test -w "$MOSQUITTO_PASSWD_DIR" 2>/dev/null; then
       MOSQUITTO_PASSWD_CMD=(sudo -u "$MOSQUITTO_PASSWD_OWNER" mosquitto_passwd)
     else
       MOSQUITTO_PASSWD_CMD=(sudo mosquitto_passwd)
+      [[ -n "$MOSQUITTO_PASSWD_OWNER" && "$MOSQUITTO_PASSWD_OWNER" != "root" ]] && MOSQUITTO_RESTORE_OWNER=1
     fi
   fi
 fi
+# Called after any successful mosquitto_passwd run below
+restore_passwd_owner() {
+  (( MOSQUITTO_RESTORE_OWNER )) || return 0
+  sudo chown "${MOSQUITTO_PASSWD_OWNER}:${MOSQUITTO_PASSWD_GROUP}" "$MOSQUITTO_PASSWD_FILE"
+  [[ -n "$MOSQUITTO_PASSWD_MODE" ]] && sudo chmod "$MOSQUITTO_PASSWD_MODE" "$MOSQUITTO_PASSWD_FILE"
+}
 
 # ---- Escaping helpers ----
 # Escape a value for embedding in a double-quoted YAML string
@@ -229,6 +248,7 @@ else
     echo "If it complains about creating a backup file, the directory holding that file is not" >&2
     echo "writable by you - which is why the command above uses sudo." >&2
   else
+    restore_passwd_owner
     echo "Set mosquitto password for ${ORG_ID} in ${MOSQUITTO_PASSWD_FILE}"
   fi
 fi

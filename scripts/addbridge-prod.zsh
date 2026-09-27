@@ -144,15 +144,28 @@ fi
 # user *before* reading it - so the broker then cannot read its own password file and refuses to
 # start, with an error that says nothing about ownership. mosquitto_passwd also writes a temporary
 # backup beside the file, so it needs the directory and not only the file.
+#
+# Whoever runs it must be able to write the DIRECTORY, not merely the file, and the file's owner
+# frequently cannot: a password file at /etc/mosquitto/mosquitto_passwords is owned by mosquitto
+# inside a directory owned by root, and picking the owner then fails with "Error creating backup
+# password file". So the last resort is root - and because that leaves the file owned by root,
+# where mosquitto (which drops privileges before reading it) could no longer read it, the
+# ownership and mode are put back immediately afterwards.
+# stat's spelling differs between Linux (-c) and BSD/macOS (-f)
+PWDIR="${PWFILE:h}"
+PWFILE_OWNER=$(stat -c '%U' "$PWFILE" 2>/dev/null || stat -f '%Su' "$PWFILE" 2>/dev/null || true)
+PWFILE_GROUP=$(stat -c '%G' "$PWFILE" 2>/dev/null || stat -f '%Sg' "$PWFILE" 2>/dev/null || true)
+PWFILE_MODE=$(stat -c '%a' "$PWFILE" 2>/dev/null || stat -f '%Lp' "$PWFILE" 2>/dev/null || true)
+RESTORE_OWNER=0
 MOSQ_PASSWD_CMD=(mosquitto_passwd)
-if [[ ! -w "${PWFILE:h}" || ( -e "$PWFILE" && ! -w "$PWFILE" ) ]]; then
+if [[ ! -w "$PWDIR" || ( -e "$PWFILE" && ! -w "$PWFILE" ) ]]; then
   if command -v sudo >/dev/null; then
-    # stat's spelling differs between Linux (-c) and BSD/macOS (-f)
-    PWFILE_OWNER=$(stat -c '%U' "$PWFILE" 2>/dev/null || stat -f '%Su' "$PWFILE" 2>/dev/null || true)
-    if [[ -n "$PWFILE_OWNER" && "$PWFILE_OWNER" != "$(id -un)" && "$PWFILE_OWNER" != "root" ]]; then
+    if [[ -n "$PWFILE_OWNER" && "$PWFILE_OWNER" != "$(id -un)" && "$PWFILE_OWNER" != "root" ]] \
+       && sudo -u "$PWFILE_OWNER" test -w "$PWDIR" 2>/dev/null; then
       MOSQ_PASSWD_CMD=(sudo -u "$PWFILE_OWNER" mosquitto_passwd)
     else
       MOSQ_PASSWD_CMD=(sudo mosquitto_passwd)
+      [[ -n "$PWFILE_OWNER" && "$PWFILE_OWNER" != "root" ]] && RESTORE_OWNER=1
     fi
   fi
 fi
@@ -161,6 +174,12 @@ echo "Creating broker account ${ACCOUNT} in ${PWFILE} ..."
 if ! $MOSQ_PASSWD_CMD -b "$PWFILE" "$ACCOUNT" "$PASSWORD"; then
   echo "Error: mosquitto_passwd failed - nothing has been changed." >&2
   exit 1
+fi
+if (( RESTORE_OWNER )); then
+  # Written as root, so hand it back before mosquitto next needs to read it
+  sudo chown "${PWFILE_OWNER}:${PWFILE_GROUP}" "$PWFILE"
+  [[ -n "$PWFILE_MODE" ]] && sudo chmod "$PWFILE_MODE" "$PWFILE"
+  echo "  (written as root, then given back to ${PWFILE_OWNER}:${PWFILE_GROUP} mode ${PWFILE_MODE})"
 fi
 
 # The access control rule. Without one the account can connect and reach nothing at all, because a
@@ -237,16 +256,21 @@ if [[ -z "$REPLICA_TOKEN" ]]; then
 fi
 
 echo ""
-echo "Done. On the Pi at site '${SITE}', run:"
+echo "Done. Collect these, then run the command at the bottom on the Pi."
 echo ""
-echo "  npx --no frugal-iot-addbridge-pi ${ORG_ID} <this server's public name> ${ACCOUNT}"
+echo "1. THE FQDN OF THIS SERVER - the DNS name on its TLS certificate."
+echo "   The Pi verifies the certificate against exactly what you type, so a local hostname, an IP"
+echo "   address, or a domain the certificate does not cover will fail to connect."
+echo "   TO TEST IT: open https://<name>/ in a browser. Loading with no certificate warning means"
+echo "   the name matches the certificate, which is the part that is easy to get wrong. The bridge"
+echo "   then uses port 8883 on that same host, so that port has to be open to the Pi as well."
+echo "   This host calls itself \"$(hostname -f 2>/dev/null || hostname)\" - use that only if it is"
+echo "   also the name on the certificate and one the Pi can resolve. Not guessed here, because"
+echo "   what a machine calls itself usually is not its public name."
 echo ""
-echo "Positional arguments on purpose: npm swallows any --flag it does not recognise and passes"
-echo "only the value on, so the --org form would arrive at that script as a bare word."
+echo "2. THE PASSWORD for ${ACCOUNT}, which the Pi's script will prompt for:"
 echo ""
-echo "It will ask for this password:"
-echo ""
-echo "  ${PASSWORD}"
+echo "   ${PASSWORD}"
 echo ""
 if [[ "$GENERATED" == true ]]; then
   echo "That was generated just now and is not stored anywhere you can read it back - copy it before"
@@ -255,15 +279,20 @@ if [[ "$GENERATED" == true ]]; then
   echo "and use that on the Pi instead."
 fi
 if [[ -n "$REPLICA_TOKEN" ]]; then
-  echo "And this replica token, so people registered here can log in on the Pi as well:"
+  echo "3. THE REPLICA TOKEN, so people registered here can log in on the Pi as well:"
   echo ""
-  echo "  ${REPLICA_TOKEN}"
+  echo "   ${REPLICA_TOKEN}"
   echo ""
-  echo "A new one replaces the old, so re-running this script revokes the Pi's previous token."
+  echo "   A new one replaces the old, so re-running this script revokes the Pi's previous token."
   echo ""
 fi
-echo "Fill in the public name yourself - it is deliberately not guessed here, because what this"
-echo "machine calls itself is usually not it. This host answers to \"$(hostname -f 2>/dev/null || hostname)\","
-echo "which is only the right answer if that is also the DNS name the Pi can reach and the name on"
-echo "the TLS certificate. The Pi verifies the certificate against whatever you put here, so a"
-echo "local hostname, or a domain the certificate does not cover, fails to connect."
+echo "Then, on the Pi at site '${SITE}':"
+echo ""
+if [[ -n "$REPLICA_TOKEN" ]]; then
+  echo "  npx --no frugal-iot-addbridge-pi ${ORG_ID} <fqdn-from-1-above> ${ACCOUNT} -- --replica-token <token-from-3>"
+else
+  echo "  npx --no frugal-iot-addbridge-pi ${ORG_ID} <fqdn-from-1-above> ${ACCOUNT}"
+fi
+echo ""
+echo "The first three are positional on purpose: npm swallows any --flag it does not recognise and"
+echo "passes only the value on, so the --org form would arrive at that script as a bare word."

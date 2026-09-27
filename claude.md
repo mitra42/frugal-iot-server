@@ -515,6 +515,19 @@ needed help. Both are gone, and it is worth knowing why before adding another:
 * **Enrolment was attempted once per boot.** So a node whose enrolment secret had been withdrawn,
   or that was waiting to be approved on the dashboard, got one refusal and never asked again - and
   nobody can reach a node in a field to reboot it. It now asks every half hour, from `loop()`.
+  Half an hour **only on a node that stays awake**: the timer is a RAM variable and deep sleep
+  discards it, so a deep-sleeping node asks once per wake - six times an hour at the default
+  ten-minute cycle. That is wanted, and it is why the server's per-node rate limit is 12 an hour and
+  not 5; see the note on `makeRateLimiter`.
+* **An https enrolment before the clock is set cannot succeed**, because `setCACert` makes mbedTLS
+  check the certificate's dates and a node boots at 1970. `configTime()` is asynchronous and
+  `setup_after_wifi()` calls MQTT's straight after Time's, so the race is normal rather than rare.
+  It now waits for the clock instead of spending an attempt, and retries in seconds - the half hour
+  is for a node waiting on a human, not on SNTP.
+* **A failure before the request is sent is invisible on the server.** `HTTP -1` from HTTPClient is
+  a connection or TLS failure, so nothing arrives, nothing is logged, and nothing appears on the
+  dashboard - which looks exactly like a node that is not asking. The node now says so in that line,
+  with whether its clock is set and how much heap is free, the two things that cause it.
 * **`noteAuthFailure` gave up when the node had nothing stored.** That is the state of a node which
   has *just* discarded a refused credential, so the one node most in need of enrolling was the one
   that stopped asking.
@@ -523,6 +536,27 @@ The server side of that is `node_grants`: `approved` accepts the next request wh
 presents and is consumed on use, `denied` deletes the broker account and refuses enrolment. Keyed on
 `(org, nodeid)` and never on the project, because a node states its own project and could otherwise
 return under a different one.
+
+An admin can only approve a node they can SEE, and the only way a node becomes visible is by asking
+and being refused - a node id is not discoverable from the server. So `node_attempts` is a diagnostic
+of the same rank as the grant itself, and two things that seemed like sensible economies each made a
+node asking indistinguishable from a node that was dead:
+
+* **It was in memory only.** The argument was the one that keeps `last_seen` out of the `nodes`
+  table - no database write per event - but the rate is nothing like it: attempts are capped at 20
+  per organization per hour, repeats are throttled to one write a minute, and a rate-limited request
+  is not written at all. What it cost was that a restart hid an asking node for the half hour until
+  its next attempt.
+* **A malformed request was not recorded**, on the grounds that an admin cannot act on it. They
+  cannot approve it - but a project mistyped in a node's data tree (`Lotus`, `my-farm`) fails the
+  name check, and the only symptom was silence everywhere. The fix is in the firmware, and seeing
+  the row is what points there. The limiter therefore runs BEFORE the shape check now, since it is
+  the only thing bounding what an unauthenticated caller can put in that table, and nothing is
+  recorded under an org that is not itself a legal name.
+
+The dashboard shows the refusal reason in words, because the codes are deliberately vague to the
+*node* (probing an org name should learn nothing) while an admin needs the difference: "secret
+wrong" and "project not registered" have different fixes and neither is approving the node.
 
 ### Talking to the dynamic security plugin
 

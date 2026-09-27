@@ -293,13 +293,25 @@ function get_people_list(org, cb) {
  * Nodes that asked to enrol and were refused. Module level because two things need it: POST /enrol
  * writes to it and GET /nodes_list reads it, and they are in different scopes.
  *
- * In memory on purpose - see makeAttemptLog. Losing it on restart costs nothing, because a node
- * that is still retrying reappears within minutes.
+ * Kept in memory and written through to the node_attempts table - see makeAttemptLog. It used to be
+ * memory alone, which meant a restart hid a node that was asking for up to the half hour until its
+ * next attempt.
  */
 const enrolAttempts = makeAttemptLog();
 
 // Which nodes have enrolled in an organization. No password, obviously - the point of the list is
 // to know what exists and to be able to forget one.
+/*
+ * The Pis bridging to this server for one organization.
+ *
+ * The token is deliberately not selected: it is the credential a Pi presents to pull replicated
+ * logins, and this list is rendered in a browser. "site" is also the bridge's broker account name
+ * ("bridge-<site>"), which is what ties a row here to the live state the broker publishes on
+ * $SYS/broker/connection/<clientid>/state.
+ */
+const sqlBridgesList = `
+  SELECT site, created_at, last_pull FROM bridges WHERE org = ? ORDER BY site
+;`;
 const sqlNodesList = `
   SELECT project, nodeid, lora, enrolled_at FROM nodes WHERE org = ? ORDER BY project, nodeid
 ;`;
@@ -628,6 +640,11 @@ function loggedInOrRedirect(req, res, next) {
   } else {
     // If originalUrl is /private/index.html then req.url is just /index.html
     const q = new URLSearchParams({ mode: 'signin', message: 'Please login', url: req.originalUrl });
+    // Never store this one. The paths behind it are fetched by script as well as navigated to - the
+    // dashboard asks for /data/.../<date>.csv - so a redirect kept in a cache would go on sending a
+    // browser that has since logged in to the login page, and that arrives as a 200 full of HTML
+    // where the caller expected CSV.
+    res.set('Cache-Control', 'no-store');
     res.redirect(307, `${loginUrl}?${q}`);
   }
 }
@@ -1023,6 +1040,15 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             console.error("Error loading projects into config", err);
           }
         });
+        // Reload the nodes that were asking to enrol when this server last stopped, so a restart
+        // does not hide them until each retries - which for a node is half an hour away.
+        enrolAttempts.useDatabase(db, (err, loaded) => {
+          if (err) {
+            console.error("Could not read past enrolment attempts", err.message);
+          } else if (loaded) {
+            console.log("Enrolment attempts pending:", loaded);
+          }
+        });
         // app.use(express.json()); // Not needed
         app.use(express.urlencoded({ extended: true })); // Passport will not function without this
         app.set('trust proxy', 1); // trust first proxy - see note in https://www.npmjs.com/package/express-session
@@ -1408,6 +1434,26 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           loggedInOrFail,
           can_ADMIN,  // Gets org from URL
           send_nodes_list,
+        );
+        /*
+         * Which Pis bridge to this server, and when each last checked in.
+         *
+         * last_pull is stamped by lib/replica.js every time a Pi collects this organization's
+         * logins, so it answers "is that Pi alive" without needing the broker at all. Whether the
+         * BRIDGE itself is up is a different question, answered by the retained message the broker
+         * publishes on $SYS/broker/connection/<account>/state - which the dashboard subscribes to
+         * directly, since it already holds an MQTT connection. The two differ in a way worth
+         * seeing: a Pi that is up with a broken bridge still pulls logins.
+         */
+        app.get('/bridges_list/:org',
+          loggedInOrFail,
+          can_ADMIN,  // Gets org from URL
+          (req, res) => {
+            db.all(sqlBridgesList, [req.params.org], (err, rows) => {
+              if (err) { return res.status(500).send(err.message); }
+              res.json(rows.map((r) => ({ ...r, account: `bridge-${r.site}` })));
+            });
+          },
         );
         /*
          * Forget a node, so it can enrol again and be issued a new credential.

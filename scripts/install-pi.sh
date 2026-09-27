@@ -775,6 +775,19 @@ fi
 sudo_ systemctl restart mosquitto   # so it re-reads the password file
 sleep 2
 
+step "Creating the broker's roles and groups"
+# dynsec init creates only the admin account. The roles and groups every other account is put into
+# are built from lib/dynsec-plan.js by this one command, and nothing else creates them - not the
+# server at startup, not addorganization. Without it the first login fails with
+# "addGroupClient: Group not found" and the dashboard says there is no broker credential.
+# Idempotent by design: it is also how a release that adds a rule delivers it.
+if [[ -n "$DYNSEC_SO" ]]; then
+  as_user_sh "cd '${INSTALL_DIR}' && npx --no frugal-iot-rebuild-dynsec"
+  ok "roles and groups built from the database"
+else
+  skip "no dynamic security plugin, so there are no groups to build"
+fi
+
 step "Testing the broker end to end"
 # Proves the account, the password file and the port 1883 listener the nodes use all work together.
 TEST_TOPIC="${ORG_ID}/installtest/hello"
@@ -862,11 +875,11 @@ was_generated() { local v; for v in ${GENERATED[@]+"${GENERATED[@]}"}; do [[ "$v
 shown() { if was_generated "$1"; then echo "${!1}"; else echo "(the one you gave)"; fi; }
 
 if (( ${#REBOOT_REASONS[@]} )); then
-  REBOOT_TEXT=" 2. REBOOT NEEDED - $(printf '%s' "${REBOOT_REASONS[0]}")."
+  REBOOT_TEXT=" 3. REBOOT NEEDED - $(printf '%s' "${REBOOT_REASONS[0]}")."
   for r in "${REBOOT_REASONS[@]:1}"; do REBOOT_TEXT="${REBOOT_TEXT}"$'\n'"    Also: ${r}."; done
   REBOOT_TEXT="${REBOOT_TEXT}"$'\n'"        sudo reboot"$'\n'"    The server and broker both come back by themselves afterwards."
 else
-  REBOOT_TEXT=" 2. No reboot needed. The kernel running now is the one on disk, and everything
+  REBOOT_TEXT=" 3. No reboot needed. The kernel running now is the one on disk, and everything
     installed here is already running."
 fi
 
@@ -892,22 +905,39 @@ cat <<SUMMARY
 
  Still to do:
 
- 1. Your sensor nodes. This cannot be done from here - a node learns the broker by being
-    flashed with it, which happens on your workstation. Build each node's firmware with:
-        broker           ${BROKER_HOST}
-        org              ${ORG_ID}
-        enrolment secret ${ENROL_SECRET:-see config.d/secrets.yaml, enrolment_${ORG_ID}}
-    A node presents that secret once, is issued a broker credential of its own, and stores it.
-    The secret grants nothing else - no read and no write - so it is not the thing to guard.
-    They appear on the dashboard by themselves once they connect.
+ 1. A project. Create one on the dashboard before flashing any node: a node says which
+    project it is in, and enrolling into one this server does not know is refused.
+    Your organization "${ORG_ID}" starts with none.
+
+ 2. Your sensor nodes. This cannot be done from here - it happens on your workstation. In the
+    PlatformIO project's platformio-secrets-local.ini:
+
+        build_flags_local =
+            '-D SYSTEM_FRUGAL_ORG="${ORG_ID}"'
+            '-D SYSTEM_FRUGAL_PROJECT="<the project from 1>"'
+            '-D SYSTEM_MQTT_HOST="${BROKER_HOST}"'
+            '-D SYSTEM_MQTT_ENROL_URL="http://${BROKER_HOST}:${PORT}/enrol"'
+            '-D SYSTEM_MQTT_ENROL_SECRET="${ENROL_SECRET:-see the dashboard, gear icon -> Nodes}"'
+
+    http and not https, because this Pi has no certificate yet - see 5 below.
+    The node presents that secret once, is issued a broker credential of its own, and stores it.
+    The secret grants nothing else, so it is not the thing to guard. Nodes appear on the
+    dashboard by themselves once they connect.
 
     To rotate it, add a line above the old one in ${INSTALL_DIR}/config.d/secrets.yaml and leave
     the old one until every node flashed with it has enrolled - deleting it first strands them.
 
 ${REBOOT_TEXT}
 
- 3. HTTPS, if you want over-the-air firmware updates - ESP32 requires it for those.
-    See INSTALLATION.md step 10.
+ 4. Outgoing mail, if you want people to be able to reset a forgotten password themselves.
+    Without it only you can, on this Pi, with frugal-iot-setpassword.
+    Optional - see INSTALLATION.md step 9a.
+
+ 5. HTTPS. NOT WRITTEN YET: step 10 of INSTALLATION.md describes what it will cover - a DNS
+    name, port forwarding, nginx in front of port ${PORT}, and certbot - but there are no
+    instructions to follow there yet. Until then this is a plain HTTP server on your own
+    network, which is all an offline installation needs. What you do not get is over-the-air
+    firmware updates, since an ESP32 requires HTTPS to fetch them.
 
  If anything looks wrong:
      cd ${INSTALL_DIR} && npx --no frugal-iot-diagnostic

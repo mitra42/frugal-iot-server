@@ -703,30 +703,50 @@ still answers. Your server is now installed.
 
 ### 9. Point your sensor nodes at the Pi
 
-Your ESP8266/ESP32 nodes are told which broker to use in their sketch — `main.cpp`, or the `.ino`
-file if you build in the Arduino IDE. Look for a line like:
+A node is flashed with an **enrolment secret**,
+presents that once, and is issued a broker credential of its own which it stores. The secret grants only one thing — "create a node in this organization" — so it is not the thing to guard, and a node that is stolen cannot be used to read anyone else's data.
 
-```cpp
-frugal_iot.configure_mqtt("frugaliot.naturalinnovation.org", "dev", "public");
+**First, get the enrolment secret.** On the dashboard on the Pi: **gear icon → Nodes → Enrolment secret**. It prints the line ready to paste. 
+(It is also in `config.d/secrets.yaml` as `enrolment_myfarm`.)
+
+**Second, check the project exists.** A node states which project it is in, and enrolling into one the server does not know is refused. The organization you made in step 6 starts with none, so create one on the dashboard before flashing.
+
+Then, on your workstation, in the PlatformIO project's `platformio-secrets-local.ini` for example ...:
+
+```ini
+[common]
+
+build_flags_local =
+    '-D SYSTEM_FRUGAL_ORG="myfarm"'
+    '-D SYSTEM_FRUGAL_PROJECT="lotus"'
+    '-D SYSTEM_MQTT_HOST="frugaliot.local"'
+    '-D SYSTEM_MQTT_ENROL_URL="http://frugaliot.local:8080/enrol"'
+    '-D SYSTEM_MQTT_ENROL_SECRET="<the secret from the dashboard>"'
 ```
 
-and point it at your Pi instead:
+Note `http`, not `https`, in the enrol URL: a Pi on your own network has no certificate, and step 10 is where that may change in the future. The defaults in `platformio.ini` point at the production server, so all five
+lines are needed to aim a build at your Pi.
+
+The sketch itself calls:
 
 ```cpp
-frugal_iot.configure_mqtt("frugaliot.local", "myfarm", "<broker-password>");
+frugal_iot.configure_mqtt_enrolled(SYSTEM_MQTT_HOST, SYSTEM_MQTT_ENROL_SECRET);
 ```
 
-The three arguments are the broker's host, the organization, and that organization's broker
-password. The organization must be the one you created in step 6, because it is the first part of
-every topic the node publishes to, and the password is the *broker* password from that step — not
-the login password. Then rebuild and flash the node as usual.
+which is already what the examples do. Then rebuild and flash as usual. The node enrols on first boot and appears on the dashboard by itself.
 
-> If the node does not connect, try the Pi's IP address in place of `frugaliot.local`. Resolving
-> `.local` names needs mDNS support in the firmware, which is not something this guide has
-> confirmed; an IP address avoids the question entirely, which is why step 3 suggests reserving one
-> for the Pi in your router.
+> If the node does not connect, try the Pi's IP address in place of `frugaliot.local`, in both the
+> host and the enrol URL. Resolving `.local` names needs mDNS support in the firmware, which is not
+> something this guide has confirmed; an IP address avoids the question entirely, which is why step
+> 3 suggests reserving one for the Pi in your router.
 
-You can confirm nodes are reporting without involving the UI, using the subscriber from step 6:
+> A node whose enrolment is refused — wrong secret, unknown project, or awaiting approval — retries
+> every half hour rather than giving up, because nobody can reach a node in a field to reboot it.
+
+**To rotate the secret**, add a new line above the old one in `config.d/secrets.yaml` and leave the
+old one there until every node flashed with it has enrolled. Deleting it first strands them.
+
+You can watch nodes arriving without involving the UI, using the subscriber from step 6:
 
 ```
 mosquitto_sub -h localhost -u myfarm -P '<broker-password>' -t '#' -v
@@ -738,8 +758,10 @@ port 1883 is reachable from off the Pi, which is what the nodes need.
 ### 9a. Optional: outgoing mail, so people can reset a forgotten password
 
 Without this, a forgotten password can only be fixed by you, on the Pi, with
-`npx --no frugal-iot-setpassword <username> <new-password>`. The login page's "Forgot password?"
-link says "Password reset is not available on this server" rather than pretending to send anything.
+`npx --no frugal-iot-setpassword <username> <new-password>`. 
+
+Until you set this up, the login page's "Forgot password?"
+link says "Password reset is not available on this server".
 
 An offline Pi cannot send mail at all, so skip this unless it has internet access.
 
@@ -859,10 +881,9 @@ surrounding work.
 It comes in three parts, and only the first is a one-off:
 
 * **11a — preparing a production server to accept bridges.** A TLS listener, a certificate, and an
-  access-control file. Done once for a given production server, and not again until there is
-  another one.
-* **11b — authorizing this Pi on that server.** One command, run there, once per Pi.
-* **11c — pointing this Pi at it.** One command, run here, once per Pi.
+  access-control file. Done once for a given production server.
+* **11b — authorizing this Pi on the production server.** One command, run on that server, once per Pi.
+* **11c — pointing this Pi at it.** One command, run on the Pi, once per Pi.
 
 **What you get, and what you do not.** While the link is up, readings appear on production within
 a second or so. While it is down, the Pi records everything as usual and production simply has a
@@ -879,7 +900,7 @@ asks for it; with it, this Pi pulls that organization's logins and permissions f
 fifteen minutes, so the same people can use this Pi's dashboard — including while production is
 unreachable, which is the point of the Pi. It is optional: leave the token blank and the bridge
 relays readings as before. Nothing derived from a password travels either way, and each server
-issues its own broker credentials, so the same person has different ones here and there. Revoking a
+issues its own broker credentials, so the same person has different ones on the Pi and on production. Revoking a
 permission on production removes it here on the next pull. See SECURITY.md.
 
 #### 11a. Preparing a production server to accept bridges
@@ -957,67 +978,6 @@ installed by hand, the written procedure for doing that.
 > Note the asymmetry with the Pi end below: a *certificate* change needs only `reload`, but adding
 > or changing a *bridge* needs a full `restart`, because Mosquitto does not reload bridges.
 
-**Turn on access control** — if this broker predates the release that ships it. Since
-`extras/aclfile` became part of the base install, a Pi set up with `install-pi.sh` already has this
-and there is nothing to do here; the steps below are for a broker built before that, or one whose
-configuration was written by hand.
-
-Without it, any account that can log in to the broker can publish and subscribe anywhere on it, so
-a per-Pi account would be no more confined than the organization's own. This is the part to plan
-carefully, because Mosquitto's ACL file is **deny-by-default**: the moment the broker names an
-`acl_file`, every existing account with no entry in it stops working. So the file that restricts new
-bridge accounts has to grant the existing organizations what they already have, in the same change.
-
-```
-sudo tee /etc/mosquitto/aclfile >/dev/null <<'EOF'
-# Deny-by-default: an account with no rule here can connect but reach no topic at all.
-
-# Each organization reaches only its own topic tree. "%u" is the connecting account name, and the
-# first element of every Frugal IoT topic is the organization id - so this is what the nodes,
-# dashboards and the server's own logger already do. It just stops being optional.
-pattern readwrite %u/#
-
-# Whether a bridge is up, for frugal-iot-diagnostic. "pattern readwrite %u/#" does not match $SYS,
-# so without this the diagnostic reports every bridge as never having connected. Mosquitto logs a
-# warning that this pattern contains no %u - harmless, and a "topic" line would apply to anonymous
-# clients only, which is not what is wanted.
-pattern read $SYS/broker/connection/+/state
-EOF
-sudo chown mosquitto:mosquitto /etc/mosquitto/aclfile
-sudo chmod 600 /etc/mosquitto/aclfile
-```
-
-The ownership matters: like the password file and the TLS key, the broker reads this *after*
-dropping to the `mosquitto` user, so a root-only file stops it starting. Mode 600 owned by
-`mosquitto` rather than 644 owned by root — 2.0.21 accepts the latter but warns on every start that
-a file it does not own, or one that is world readable, "will be refused by a future version". Then name it in the configuration
-and restart:
-
-```
-echo 'acl_file /etc/mosquitto/aclfile' | sudo tee /etc/mosquitto/conf.d/zy-frugal-iot-acl.conf
-sudo systemctl restart mosquitto
-```
-
-Check every existing organization can still log in **before** connecting any Pi — a wrong ACL file
-locks out every node and dashboard at once, and the reason appears only in Mosquitto's own log. On a
-Frugal IoT server the quickest check is its journal, which logs one line per organization:
-
-```
-sudo journalctl -u frugaliot -n 40 --no-pager | grep -iE "mqtt |not authoris"
-```
-
-Every organization should show `connect` and none should show `not authorized`. To back the change
-out, delete `/etc/mosquitto/conf.d/zy-frugal-iot-acl.conf` and restart.
-
-Nothing needs adding here per Pi: `frugal-iot-addbridge-prod` in 11b appends each bridge's own rule.
-
-> `pattern readwrite %u/#` on its own denies `$SYS`, which would stop `frugal-iot-diagnostic`
-> reporting whether a bridge is connected — it reads `$SYS/broker/connection/+/state` as the
-> organization. The second rule above restores exactly that one topic and nothing else. Reading all
-> of `$SYS` would also work and would hand every account the broker's client counts, subscription
-> counts and traffic totals, which on a multi-organization broker tells each organization about the
-> others.
-
 #### 11b. Authorizing this Pi (run on the production server)
 
 Once per Pi. On the production server, from its own directory:
@@ -1056,19 +1016,13 @@ cd ~/frugal-iot
 npx --no frugal-iot-addbridge-pi <org-id> <prod-host> bridge-<site-name>
 ```
 
-It asks for the password rather than taking it on the command line, so it stays out of your shell
-history. Then it checks the far end is reachable and that its certificate is valid for that name,
+It asks for the password, then it checks the far end is reachable and that its certificate is valid for that name,
 writes `/etc/mosquitto/conf.d/frugal-iot-bridge.conf`, restarts the broker, and reports whether the
-bridge actually connected.
-
-The restart is unavoidable: Mosquitto does not pick up bridges on a reload signal, so `reload`
-appears to succeed and changes nothing. It briefly disconnects every node, which they recover from
-on their own.
+bridge actually connected. It briefly disconnects every node, 
+which they recover from on their own.
 
 > The configuration goes into `/etc/mosquitto/conf.d/` and not into this installation's
-> `config.d/`, because it holds a password for the production server. Everything under `config.d/`
-> is served to any logged-in browser by `/config.json`, so a credential put there would not stay
-> private. The file is written mode 600 for the same reason.
+> `config.d/`, to keep the password out of `/config.json`. The file is written mode 600 for the same reason.
 
 To undo it: `sudo rm /etc/mosquitto/conf.d/frugal-iot-bridge.conf && sudo systemctl restart
 mosquitto`. The Pi goes back to being self-contained and keeps everything it has recorded.
