@@ -278,6 +278,82 @@ Two rules for `urlsToCache`, each of which fails silently:
 Note the version in the URL that neither of these needs: it would allow a year's caching AND instant
 release visibility, and it needs the client's module imports to carry it. Not done.
 
+### A node that cannot reach the server over TLS
+
+Enrolment and OTA are the node's only HTTPS connections, and both failed on an ESP32-S2 for two
+days' worth of wrong diagnoses. Every step of that was misleading, so:
+
+* **`HTTP -1` means nothing was sent.** It is HTTPClient's own code (connection refused / failed),
+  covering DNS, the TCP connect and every TLS failure. So there is no request in the server log and
+  nothing on the dashboard's Nodes card - which looks exactly like a node that is not asking. Do not
+  go looking there. `WiFiClientSecure::lastError()` names the real failure; both `enrolIfNeeded` and
+  the OTA failure path now print it with free heap and largest block.
+* **`-9984` (X509 - Certificate verification failed) usually means MEMORY, not certificates.** An
+  allocation that fails inside the chain walk is reported as `BADCERT_NOT_TRUSTED`, which surfaces
+  as a verification failure and is indistinguishable from a genuinely bad chain. The giveaway is
+  that it MOVES as memory changes: the same node went `-32512` (SSL - Memory allocation failed) →
+  `-9984` → enrolled, as heap was freed a few KB at a time. Check heap before suspecting the chain.
+* **An unset clock does NOT break TLS here.** `CONFIG_MBEDTLS_HAVE_TIME_DATE` is unset in every
+  chip's sdkconfig, so certificate dates are never checked and a node at 1970 verifies fine. Just as
+  well, since most builds have no `System_Time`. The usual "set the time before TLS" advice is wrong
+  on this platform, and a guard enforcing it would strand every node without that module.
+* **Let's Encrypt now serves `leaf <- YR1 <- Root YR <- ISRG Root X1`.** `rootca.cpp` pins Root YR
+  as well as X1, which shortens the walk by a cross-signature. Adding a root is not trusting the
+  server's claim about itself - X1 is already compiled in and signs Root YR; verify any replacement
+  with `openssl verify -partial_chain -CAfile <X1> <the new root>` before shipping it.
+
+### Where an ESP32's RAM actually goes, and giving TLS the PSRAM
+
+`RAM: 24.2% (used 79332 from 327680)` at the end of a build answers almost none of the question. For
+an S2, measured from `firmware.map` and `objdump -h`:
+
+| | bytes | |
+| --- | ---: | --- |
+| bottom reserve | 16,384 | ROM/bootloader, `0x3FFB0000-0x3FFB4000` |
+| `.dram0_reserved_for_iram` | 70,696 | **IRAM - code, out of the same SRAM** |
+| `.dram0.data` + `.dram0.bss` | 79,329 | what the build reports |
+| heap | 161,256 | `_heap_start` to `_heap_end`, ~153K usable |
+
+* **IRAM is the big invisible one.** Instruction RAM and data RAM are carved from one 320KB SRAM, so
+  ~70KB of it is code and can never be heap. Find the real numbers with `_heap_start`/`_heap_end` in
+  `firmware.map`, not by subtracting the build's RAM figure from the chip's datasheet total.
+* **Of ~153KB of heap, ~94KB is gone before any TLS** - WiFi driver, lwIP, task stacks, LittleFS,
+  MQTT. A handshake then wants 33KB in two CONTIGUOUS 16KB blocks
+  (`CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN=16384`, symmetric), so largest-block matters as much as free.
+* **mbedTLS never uses PSRAM unless told.** Ordinary `malloc` does - `CONFIG_SPIRAM_USE_MALLOC=1`
+  and anything over `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` (4096) goes external - but `esp_config.h`
+  sets `MBEDTLS_PLATFORM_STD_CALLOC` to a function that demands `MALLOC_CAP_INTERNAL`
+  (`CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=1`). So a board can have 2MB free and fail to allocate 16KB.
+  `System_Frugal::pre_setup()` swaps it with `mbedtls_platform_set_calloc_free()` - which works only
+  because it is `STD_CALLOC` (a function pointer's initial value) and not `CALLOC_MACRO`. Gated on
+  `ESP.getPsramSize()` at RUNTIME, not on `BOARD_HAS_PSRAM`, which board files set for modules also
+  sold without the die. Keep the fallback to internal: hardware AES/GCM/SHA/MPI use DMA, and
+  external-RAM buffers are the least travelled path there.
+* **TinyUSB costs 23.5KB of DRAM on a USB-CDC board**, which is the whole reason an S2 differs from
+  a C3 running the identical sketch (79,332 vs 42,060 static). NCM, MSC and HID-host buffers, for
+  classes a sensor node never uses, and they cannot be dropped individually - one precompiled object
+  each in `libarduino_tinyusb.a`. `ARDUINO_USB_CDC_ON_BOOT=0` reclaims it all plus 57KB of flash,
+  but an S2 Mini has no UART bridge chip, so that costs the serial console entirely.
+* **AsyncTCP's service task stack is 16KB of HEAP** (`8192 * 2`), invisible in the build's RAM
+  figure. It is an `#ifndef`, so `-D CONFIG_ASYNC_TCP_STACK_SIZE=4096` reclaims 12KB with no
+  rebuild - ample for handlers that parse a form and print a status page.
+
+### custom_sdkconfig: works in principle, blocked here
+
+`CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN` would cut the outgoing record buffer to 4KB on every board,
+PSRAM boards included. pioarduino supports `custom_sdkconfig` per env, and the settings do apply -
+but the IDF rebuild it triggers fails on this machine with
+`ModuleNotFoundError: No module named 'SCons.Tool.FortranCommon'`, which is a PlatformIO Core /
+SCons problem, not a configuration one. Installing the platform's pinned `tool-scons` 4.8.1 did not
+help; Core keeps using its own. Two things to know before trying again:
+
+* **All projects must carry the SAME custom_sdkconfig or none.** `check_reinstall_frwrk` in the
+  platform's `arduino.py` reinstalls the whole framework whenever an env WITHOUT it is built after
+  one with it - and `ota_build` walks ~20 example projects, each with its own `platformio.ini`.
+* **It leaves debris that silently changes later builds**: `sdkconfig.defaults` (3372 generated
+  lines), `sdkconfig.<env>`, `CMakeLists.txt`, `dependencies.lock` and a 176MB
+  `managed_components/`, in the project directory. Delete them if the attempt is abandoned.
+
 ### PlatformIO: a compile error in a file you did not touch
 
 A damaged `.pio/libdeps` reports the failure against an unrelated source file, and can take the
@@ -519,15 +595,32 @@ needed help. Both are gone, and it is worth knowing why before adding another:
   discards it, so a deep-sleeping node asks once per wake - six times an hour at the default
   ten-minute cycle. That is wanted, and it is why the server's per-node rate limit is 12 an hour and
   not 5; see the note on `makeRateLimiter`.
-* **An https enrolment before the clock is set cannot succeed**, because `setCACert` makes mbedTLS
-  check the certificate's dates and a node boots at 1970. `configTime()` is asynchronous and
-  `setup_after_wifi()` calls MQTT's straight after Time's, so the race is normal rather than rare.
-  It now waits for the clock instead of spending an attempt, and retries in seconds - the half hour
-  is for a node waiting on a human, not on SNTP.
+* **Pinning only ISRG Root X1 stopped being enough.** Let's Encrypt now serves
+  `leaf <- YR1 <- Root YR <- X1`, so a node pinning X1 alone walks two intermediates and a
+  cross-signature. OpenSSL accepts that chain against X1; an ESP32 returned mbedTLS **-9984**
+  (`X509 - Certificate verification failed`) on the identical chain and anchor. `rootca.cpp` now
+  pins **Root YR as well**, making the path one intermediate with no cross-signature and one fewer
+  4096-bit RSA verification. Adding it is not trusting the server's own claim about its root: X1 is
+  already compiled in and X1 signs Root YR, so verify any replacement with
+  `openssl verify -partial_chain -CAfile <X1> <the new root>` before shipping it. Keep X1 too.
+* **-9984 does not prove the certificate is at fault.** An allocation that fails partway through the
+  chain walk is reported as a verification failure, and the handshake wants two *contiguous* 16KB
+  record buffers (`CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN`, no asymmetric setting) plus the peer chain.
+  So a node with plenty of free heap in small pieces fails exactly like one with a bad chain - which
+  is why the enrolment failure prints the largest block and not only the total.
+* **An unset clock does NOT break TLS here, however much it looks like it should.** ESP32 Arduino
+  ships mbedTLS with `CONFIG_MBEDTLS_HAVE_TIME_DATE` unset on every chip
+  (`~/.platformio/packages/framework-arduinoespressif32-libs/*/sdkconfig`), so certificate validity
+  dates are not checked at all and a node at 1970 verifies a chain fine. Which is just as well,
+  since most nodes are built without `System_Time` and never set a clock - but it also means the
+  familiar "set the time before TLS" advice is wrong on this platform, and a guard enforcing it
+  would strand every node that has no Time module.
 * **A failure before the request is sent is invisible on the server.** `HTTP -1` from HTTPClient is
-  a connection or TLS failure, so nothing arrives, nothing is logged, and nothing appears on the
-  dashboard - which looks exactly like a node that is not asking. The node now says so in that line,
-  with whether its clock is set and how much heap is free, the two things that cause it.
+  DNS, a refused connection, or any TLS handshake failure - so nothing arrives, nothing is logged,
+  and nothing appears on the dashboard, which looks exactly like a node that is not asking. One
+  number over several unrelated problems, so the node now asks rather than guesses:
+  `WiFiClientSecure::lastError()` names the mbedTLS failure, and its absence means the failure was
+  before the handshake. Free heap is printed too - a handshake wants tens of kilobytes.
 * **`noteAuthFailure` gave up when the node had nothing stored.** That is the state of a node which
   has *just* discarded a refused credential, so the one node most in need of enrolling was the one
   that stopped asking.

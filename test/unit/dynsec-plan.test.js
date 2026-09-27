@@ -58,8 +58,19 @@ describe('groupsForUser', () => {
   });
 
   it('ignores capabilities the broker has no concept of', () => {
-    const g = groupsForUser([row('ADMIN', 'dev'), row('OTAUPDATE', 'dev'), row('OTAFLASH', 'dev')]);
+    // ADMIN is no longer one of them - it grants bridge-state, for the dashboard's Bridges card -
+    // so the capabilities that reach the broker as nothing are the OTA pair.
+    const g = groupsForUser([row('OTAUPDATE', 'dev'), row('OTAFLASH', 'dev')]);
     expect(g.groups).toEqual([]);
+  });
+
+  /*
+   * ADMIN is the one capability that grants something not scoped to an organization: a bridge's
+   * clientid is "bridge-<site>" with no organization in it, so one group serves every admin.
+   */
+  it('gives an admin bridge-state, once, however many organizations they administer', () => {
+    const g = groupsForUser([row('ADMIN', 'dev'), row('ADMIN', 'varta')]);
+    expect(g.groups).toEqual([names.bridgeStateGroup]);
   });
 
   it('always attaches the shared public role, so public read needs no group churn', () => {
@@ -117,6 +128,29 @@ describe('desiredRolesAndGroups', () => {
 
   it('points the anonymous group at that same role, so embedded pages need no credential', () => {
     expect(plan().groups[names.publicGroup].roles).toEqual([names.publicRole]);
+  });
+
+  /*
+   * Reading whether a bridge is up needs BOTH acls, and that is easy to lose.
+   *
+   * subscribePattern only buys the right to ask; publishClientReceive is what lets the broker
+   * actually deliver the retained 1/0 - so with one of them the subscription succeeds and nothing
+   * ever arrives, which reads as "the bridge is down" rather than as a permissions problem. Same
+   * pairing as the public role above.
+   */
+  it('lets an admin both ask for and be sent a bridge state', () => {
+    const acls = plan().roles[names.bridgeStateRole];
+    expect(acls.map((a) => a.acltype).sort()).toEqual(['publishClientReceive', 'subscribePattern']);
+    expect(acls.every((a) => a.topic === '$SYS/broker/connection/+/state' && a.allow)).toBe(true);
+  });
+
+  /*
+   * A GROUP holding that one role, not the role granted directly - applyUser removes a client from
+   * groups it no longer qualifies for but never removes a role, so granting it as a role would
+   * leave the rights behind when somebody loses ADMIN.
+   */
+  it('puts that role in a group, so losing ADMIN takes it away again', () => {
+    expect(plan().groups[names.bridgeStateGroup].roles).toEqual([names.bridgeStateRole]);
   });
 
   it('lets nodes read the whole organization, for cross-node controls', () => {
