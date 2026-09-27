@@ -185,6 +185,15 @@ trap 'on_error $LINENO' ERR
 
 randpw() { ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16 ); }
 
+# Everything a native module needs to compile. python3-setuptools is the one that is easy to miss:
+# node-gyp 8 imports Python's distutils, removed from the standard library in 3.12, and setuptools
+# is what puts an importable one back. Without it the build ends in "No module named 'distutils'".
+BUILD_PACKAGES=(build-essential python3-dev python3-setuptools)
+have_build_tools() { dpkg -s "${BUILD_PACKAGES[@]}" >/dev/null 2>&1; }
+install_build_tools() {
+  sudo_ env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${BUILD_PACKAGES[@]}"
+}
+
 REBOOT_REASONS=()
 
 # Size and modification time of every kernel and initrd image, so that the upgrade replacing one can
@@ -284,18 +293,66 @@ if [[ -r /etc/os-release ]]; then
 fi
 [[ -r /proc/device-tree/model ]] && info "board:   $(tr -d '\0' < /proc/device-tree/model)"
 ARCH="$(uname -m)"
+# What the USERLAND is, which is not necessarily what "uname -m" says. uname reports the KERNEL, and
+# Raspberry Pi OS 32-bit boots the 64-bit kernel by default on any 64-bit-capable board - so a
+# perfectly ordinary Pi 4 running the 32-bit image reports "armv8l" while every binary on it is
+# 32-bit armhf. npm resolves prebuilt binaries against the userland, so that is what decides whether
+# anything has to be compiled. Deciding it from uname installed no compiler on exactly that
+# configuration, and the install then died part-way through building sqlite3.
+DEB_ARCH="$(dpkg --print-architecture 2>/dev/null || true)"
 MEM_KB="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
-info "arch:    ${ARCH}, memory: $((MEM_KB / 1024)) MB"
+info "kernel:  ${ARCH}    userland: ${DEB_ARCH:-unknown}    memory: $((MEM_KB / 1024)) MB"
 
-# A 32-bit ARMv6 board (Pi Zero W, Pi 1) has no ready-made sqlite3 binary, so it has to compile it,
-# which needs a compiler and more memory than the board has.
+# No ready-made sqlite3 binary is published for 32-bit ARM, so there it has to be compiled.
 NEEDS_BUILD_TOOLS=0
-NPM_SLOW_FLAGS=()
-case "$ARCH" in
-  armv6l|armv7l) NEEDS_BUILD_TOOLS=1; NPM_SLOW_FLAGS=(--maxsockets 1 --no-audit --no-fund) ;;
+case "$DEB_ARCH" in
+  armhf|armel)  NEEDS_BUILD_TOOLS=1 ;;
+  arm64|amd64)  NEEDS_BUILD_TOOLS=0 ;;
+  *)
+    # dpkg could not say. Fall back to the kernel, and lean towards installing the compiler: having
+    # it and not needing it costs disk, not having it and needing it stops the install dead.
+    case "$ARCH" in
+      aarch64|arm64|x86_64) NEEDS_BUILD_TOOLS=0 ;;
+      *)              NEEDS_BUILD_TOOLS=1 ;;
+    esac
+    ;;
 esac
+
+# A 64-bit kernel over a 32-bit userland means 64-bit hardware running the 32-bit image - almost
+# always the wrong card written by mistake, and worth saying before the 40 minutes rather than
+# after. It does work, so this warns and carries on rather than refusing.
+WRONG_IMAGE=0
+if [[ "$DEB_ARCH" == armhf ]]; then
+  case "$ARCH" in
+    aarch64|armv8l) WRONG_IMAGE=1 ;;
+  esac
+fi
+if (( WRONG_IMAGE )); then
+  BOARD="$( [[ -r /proc/device-tree/model ]] && tr -d '\0' < /proc/device-tree/model || echo "this board" )"
+  warn "-----------------------------------------------------------------------"
+  warn "${BOARD} is 64-bit, but the OS on the card is 32-bit (armhf)."
+  warn "That is almost always the wrong image written to the card."
+  warn ""
+  warn "It will work, but no ready-made sqlite3 is published for 32-bit ARM, so"
+  warn "it has to be compiled: minutes here, about 40 on a Pi Zero W."
+  warn ""
+  warn "To use the right one instead: write Raspberry Pi OS Lite (64-bit) to the"
+  warn "card and start again from step 1. Nothing here is worth keeping yet."
+  warn "-----------------------------------------------------------------------"
+  if (( ! ASSUME_YES )) && [[ -t 0 ]]; then
+    printf '    Carry on with the 32-bit OS anyway? [y/N] ' > /dev/tty
+    read -r REPLY < /dev/tty
+    [[ "$REPLY" == [yY]* ]] || { echo "Stopped. Nothing has been changed."; exit 0; }
+  fi
+fi
+
+# One thing at a time, which lowers npm's peak memory as much as it spares the card. This is about
+# how little memory the board has, not about its architecture - a 32-bit Pi 4 has plenty.
+NPM_SLOW_FLAGS=()
+if (( MEM_KB > 0 && MEM_KB < 1200000 )); then NPM_SLOW_FLAGS=(--maxsockets 1 --no-audit --no-fund); fi
 if (( MEM_KB > 0 && MEM_KB < 700000 )); then NEEDS_SWAP=1; else NEEDS_SWAP=0; fi
-(( NEEDS_BUILD_TOOLS )) && info "32-bit ARM: sqlite3 will be compiled, which is slow (allow 40 minutes on a Zero W)"
+(( NEEDS_BUILD_TOOLS )) && info "no ready-made sqlite3 for ${DEB_ARCH:-this architecture}, so it is compiled here (minutes on a Pi 4, about 40 on a Zero W)"
+(( ${#NPM_SLOW_FLAGS[@]} )) && info "limited memory: npm will be told to do one thing at a time"
 (( NEEDS_SWAP ))        && info "under 700 MB of memory: a swap file will be added so the install can finish"
 
 ask ORG_ID    "Organization id (1-10 lower-case letters or digits, e.g. myfarm)" || exit 1
@@ -388,7 +445,7 @@ fi
 
 step "Installing the packages the server needs"
 PACKAGES=(nodejs npm sqlite3 zsh curl)
-(( NEEDS_BUILD_TOOLS )) && PACKAGES+=(build-essential python3-dev python3-setuptools)
+(( NEEDS_BUILD_TOOLS )) && PACKAGES+=("${BUILD_PACKAGES[@]}")
 sudo_ env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PACKAGES[@]}"
 NODE_VERSION="$(node -v)"
 info "node ${NODE_VERSION}, npm $(npm -v), sqlite3 $(sqlite3 --version | awk '{print $1}')"
@@ -448,7 +505,22 @@ else
   if (( NEEDS_BUILD_TOOLS )); then
     info "this is the slow part - sqlite3 is compiled here. Leave it running."
   fi
-  as_user_sh "cd '${INSTALL_DIR}' && npm install ${NPM_SLOW_FLAGS[*]:-} frugal-iot-server"
+  # A failure here is nearly always the native module having to be compiled with no compiler
+  # present - which means the architecture was read wrong above. Rather than stopping and making
+  # you run the whole thing again, install what a build needs and have one more go.
+  if ! as_user_sh "cd '${INSTALL_DIR}' && npm install ${NPM_SLOW_FLAGS[*]:-} frugal-iot-server"; then
+    if have_build_tools; then
+      echo "npm install failed, and the compiler it would need is already installed - so this is" >&2
+      echo "something else. The reason is above, and in ${LOG}." >&2
+      exit 1
+    fi
+    warn "npm install failed and nothing here can compile a native module - installing the"
+    warn "  compiler and trying once more. (If it ended in \"No module named 'distutils'\", that"
+    warn "  is exactly this.)"
+    install_build_tools
+    NEEDS_BUILD_TOOLS=1
+    as_user_sh "cd '${INSTALL_DIR}' && npm install ${NPM_SLOW_FLAGS[*]:-} frugal-iot-server"
+  fi
   ok "installed"
 fi
 info "server $(as_user_sh "node -e \"console.log(require('${INSTALL_DIR}/node_modules/frugal-iot-server/package.json').version)\"")"
@@ -460,6 +532,10 @@ if as_user_sh "cd '${INSTALL_DIR}' && node -e \"require('sqlite3')\"" >/dev/null
   ok "sqlite3 loads"
 else
   warn "sqlite3 did not build on the first attempt - rebuilding it"
+  if ! have_build_tools; then
+    info "installing the compiler first - a rebuild cannot work without it"
+    install_build_tools
+  fi
   (( NEEDS_BUILD_TOOLS )) && info "expect around 40 minutes on a Pi Zero W; it is working as long as output keeps appearing"
   as_user_sh "cd '${INSTALL_DIR}' && npm rebuild sqlite3 --foreground-scripts"
   as_user_sh "cd '${INSTALL_DIR}' && node -e \"require('sqlite3')\"" >/dev/null 2>&1 \
@@ -567,6 +643,18 @@ DYNSEC_SO=""
 for cand in /usr/lib/*/mosquitto_dynamic_security.so /usr/lib/mosquitto_dynamic_security.so             /usr/lib/*/mosquitto/mosquitto_dynamic_security.so /usr/lib/mosquitto/mosquitto_dynamic_security.so; do
   [[ -f "$cand" ]] && { DYNSEC_SO="$cand"; break; }
 done
+# An earlier release appended to this as whoever ran the script, so a run under sudo left it owned
+# by root - unreadable to the server, which is an ordinary user, and the symptom is every login
+# being told there is no broker credential. Put it right before anything below reads it.
+if [[ -f "${INSTALL_DIR}/config.d/secrets.yaml" ]]; then
+  SECRETS_OWNER="$(stat -c '%U' "${INSTALL_DIR}/config.d/secrets.yaml" 2>/dev/null || true)"
+  if [[ -n "$SECRETS_OWNER" && "$SECRETS_OWNER" != "$RUN_USER" ]]; then
+    sudo_ chown "${RUN_USER}" "${INSTALL_DIR}/config.d/secrets.yaml"
+    sudo_ chmod 600 "${INSTALL_DIR}/config.d/secrets.yaml"
+    ok "config.d/secrets.yaml belonged to ${SECRETS_OWNER}, not ${RUN_USER} - ownership corrected"
+  fi
+fi
+
 DYNSEC_JSON=/var/lib/mosquitto/dynamic-security.json
 if [[ -z "$DYNSEC_SO" ]]; then
   warn "mosquitto's dynamic security plugin was not found - per-user broker accounts will not work."
@@ -597,8 +685,8 @@ else
       echo "# \$CONTROL/dynamic-security/v1. Created by install-pi.sh."
       echo "dynsec_admin_user: \"frugal-admin\""
       echo "dynsec_admin_password: \"${DYNSEC_PW}\""
-    } >> "${INSTALL_DIR}/config.d/secrets.yaml"
-    chmod 600 "${INSTALL_DIR}/config.d/secrets.yaml"
+    } | as_user_sh "cat >> '${INSTALL_DIR}/config.d/secrets.yaml' && chmod 600 '${INSTALL_DIR}/config.d/secrets.yaml'"
+    # Through a pipe, not on the command line: an argument to sudo would put the password in "ps"
     ok "dynamic security initialised; admin credential saved to config.d/secrets.yaml"
   else
     warn "mosquitto_ctrl dynsec init failed - continuing without it"

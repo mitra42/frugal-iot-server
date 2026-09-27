@@ -265,22 +265,37 @@ which you may not have the password for.
 address does not change. Sensor nodes and phones then have something stable to talk to even where
 `.local` names do not work.
 
-Now the packages the server needs.
+Now the packages the server needs. Which set depends on whether this is a **32-bit or a 64-bit
+installation** — and that is not the same question as which board it is, so check rather than assume:
 
-**On a Pi 4** (or any 64-bit board):
+```
+dpkg --print-architecture
+```
+
+`arm64` is a 64-bit installation; `armhf` is a 32-bit one. **Do not use `uname -m` for this.** It
+reports the *kernel*, and Raspberry Pi OS 32-bit boots the 64-bit kernel by default on any board
+that can run it — so a Pi 4 running the 32-bit image answers `armv8l` there while every binary on
+it is 32-bit.
+
+**If it said `arm64`:**
 
 ```
 sudo apt install -y nodejs npm sqlite3 zsh
 node -v
 ```
 
-**On a Pi Zero W**, three more packages, because a 32-bit machine has to compile part of the server
-in step 4 and a Lite image has no compiler:
+**If it said `armhf`** (any 32-bit installation, on a Pi Zero W or a Pi 4 alike) — three more
+packages, because no ready-made binary is published for 32-bit ARM, so part of the server is
+compiled in step 4 and a Lite image has no compiler:
 
 ```
 sudo apt install -y nodejs npm sqlite3 zsh build-essential python3-dev python3-setuptools
 node -v
 ```
+
+> Skipping those three on a 32-bit installation does not fail until step 4, and then it fails deep
+> inside pages of `gyp` output, ending in `ModuleNotFoundError: No module named 'distutils'`. If you
+> are reading this after seeing that, install them and run step 4 again — nothing is lost.
 
 What each is for:
 
@@ -344,8 +359,8 @@ The server is an npm package. Make a directory for this server to live in and in
 that directory will hold your configuration, your data, and your database, while npm looks after
 the software itself underneath it in `node_modules`.
 
-**On a Pi 4** (or any 64-bit board) — a few minutes, everything arrives as ready-made binaries and
-nothing is compiled:
+**On a 64-bit installation** (`dpkg --print-architecture` said `arm64`) — a few minutes, everything
+arrives as ready-made binaries and nothing is compiled:
 
 ```
 mkdir ~/frugal-iot
@@ -353,8 +368,10 @@ cd ~/frugal-iot
 npm install frugal-iot-server
 ```
 
-**On a Pi Zero W** — the extra flags make npm do one thing at a time, which lowers the peak memory
-as well as being kinder to the SD card. This is the slow part; leave it running:
+**On a 32-bit installation** (`armhf`) `sqlite3` is compiled here — a few minutes on a Pi 4, about
+40 on a Pi Zero W. On a board with under about a gigabyte of memory add `--maxsockets 1 --no-audit
+--no-fund`, which makes npm do one thing at a time: that lowers its peak memory as well as being
+kinder to the SD card. This is the slow part; leave it running:
 
 ```
 mkdir ~/frugal-iot

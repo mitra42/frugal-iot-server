@@ -389,11 +389,45 @@ else
     fi
   fi
   # Can the server actually drive it? That needs the admin credential frugal-iot-init recorded.
-  DYNUSER=$(sed -n 's/^dynsec_admin_user:[[:space:]]*//p' config.d/secrets.yaml 2>/dev/null | tr -d '"'"'"'' | head -1)
-  DYNPW=$(sed -n 's/^dynsec_admin_password:[[:space:]]*//p' config.d/secrets.yaml 2>/dev/null | tr -d '"'"'"'' | head -1)
+  #
+  # Read with a sudo fallback, and report the file's ownership, because the two ways this goes wrong
+  # look identical from here: the setting really is absent, or the file belongs to somebody else and
+  # an ordinary reader gets silence. The second is the one that matters, since the SERVER is an
+  # ordinary reader too - it runs as the account in the unit file, and a secrets.yaml it cannot read
+  # leaves it with no credential to hand a browser, whatever is written inside.
+  item "  secrets file: config.d/secrets.yaml $(fileinfo config.d/secrets.yaml)"
+  SERVICE_USER=$(sed -n 's/^User=//p' /etc/systemd/system/frugaliot.service 2>/dev/null | head -1)
+  [[ -z "$SERVICE_USER" ]] && SERVICE_USER=$(sudo -n sed -n 's/^User=//p' /etc/systemd/system/frugaliot.service 2>/dev/null | head -1)
+  secret_value() {   # name -> its value, with sudo if reading it plainly gives nothing
+    local v
+    v=$(sed -n "s/^$1:[[:space:]]*//p" config.d/secrets.yaml 2>/dev/null | tr -d "\"'" | head -1)
+    if [[ -z "$v" ]] && have sudo; then
+      v=$(sudo -n sed -n "s/^$1:[[:space:]]*//p" config.d/secrets.yaml 2>/dev/null | tr -d "\"'" | head -1)
+    fi
+    print -r -- "$v"
+  }
+  if [[ -f config.d/secrets.yaml && -n "$SERVICE_USER" ]] && have stat; then
+    SECRETS_OWNER=$(stat -c '%U' config.d/secrets.yaml 2>/dev/null || true)
+    if [[ -n "$SECRETS_OWNER" && "$SECRETS_OWNER" != "$SERVICE_USER" && "$SECRETS_OWNER" != root ]]; then
+      problem "config.d/secrets.yaml belongs to ${SECRETS_OWNER} but the server runs as ${SERVICE_USER}, so the server cannot read it. Fix with: sudo chown ${SERVICE_USER} config.d/secrets.yaml"
+    elif [[ "$SECRETS_OWNER" == root && "$SERVICE_USER" != root ]]; then
+      problem "config.d/secrets.yaml belongs to root but the server runs as ${SERVICE_USER}, so the server reads nothing from it - every login is told live data is unavailable. Fix with: sudo chown ${SERVICE_USER} config.d/secrets.yaml && sudo systemctl restart frugaliot"
+    fi
+  fi
+  # Without this a login gets no broker credential at all, whatever else is right - which shows up
+  # in the dashboard as "No broker credential for this login".
+  USERSECRET=$(secret_value user_secret)
+  if [[ -z "$USERSECRET" ]]; then
+    item "  user_secret: MISSING - no login can be given a broker credential"
+    problem "config.d/secrets.yaml has no user_secret, so every login is told \"No broker credential for this login\". The server writes one at startup; if it cannot, it says so in its log."
+  else
+    item "  user_secret: present (each login's broker password is derived from it)"
+  fi
+  DYNUSER=$(secret_value dynsec_admin_user)
+  DYNPW=$(secret_value dynsec_admin_password)
   if [[ -z "$DYNUSER" || -z "$DYNPW" ]]; then
-    item "  admin credential: not in config.d/secrets.yaml - the server cannot create accounts"
-    problem "dynamic security is enabled but config.d/secrets.yaml has no dynsec_admin_user/password"
+    item "  admin credential: not readable in config.d/secrets.yaml - the server cannot create accounts"
+    problem "dynamic security is enabled but config.d/secrets.yaml has no readable dynsec_admin_user/password, so no login gets a broker credential"
   elif have mosquitto_ctrl; then
     if DYNOUT=$(mosquitto_ctrl -h localhost -u "$DYNUSER" -P "$DYNPW" dynsec listClients 2>&1 | grep -viE 'without encryption|visible on the network'); then
       item "  admin credential works ($(print -r -- $DYNOUT | tr '\n' ' ' | cut -c1-60))"
