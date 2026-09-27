@@ -732,10 +732,13 @@ export function loggedInOrFail(req, res, next) {
 }
 // While serving from frugal-iot-client it is only the dashboard we want to protect
 // as need user to be logged in to access config etc
-// Note if originalUrl is /dashboard/index.html then req.url is just /index.html
+// Note if originalUrl is /dashboard/index.html then req.path is just /index.html
 function shouldIBeLoggedIn(req, res, next) {
   //console.log("XXX shouldIBeLoggedIn", req.user, req.params.org);
-  if ((['/','/index.html'].includes(req.url)) && !req.isAuthenticated()) {
+  // req.path, not req.url: the latter carries the query string, and the page is reached with one in
+  // ordinary use - login.html passes "lang" back - so /dashboard/?lang=fr would match neither name
+  // here and be served to whoever asked.
+  if ((['/','/index.html'].includes(req.path)) && !req.isAuthenticated()) {
     console.log(`Not authenticated redirecting ${req.url} for login`);
     // Capture the full original URL as-is in "url" (so e.g. /data?... comes back with all its params
     // intact), encoded so its own query string can't corrupt this redirect's query string. Carry "lang"
@@ -743,6 +746,9 @@ function shouldIBeLoggedIn(req, res, next) {
     // renders in the right language.
     const q = new URLSearchParams({ mode: 'signin', message: 'Please login', url: req.originalUrl });
     if (req.query.lang) { q.set('lang', req.query.lang); }
+    // Whether a browser is logged in has to be asked again every time, so say so rather than
+    // relying on a 307 being uncacheable by default - as loggedInOrRedirect does for the same reason.
+    res.set('Cache-Control', 'no-store');
     res.redirect(307, `${loginUrl}?${q}`);
   } else {
     next();
