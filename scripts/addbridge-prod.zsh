@@ -190,15 +190,42 @@ if [[ -n "$ACLFILE" ]]; then
     echo "The account has been created but cannot reach anything until that is sorted out." >&2
     exit 1
   fi
-  if sudo grep -qE "^[[:space:]]*user[[:space:]]+${ACCOUNT}[[:space:]]*$" "$ACLFILE"; then
-    echo "ACL rule for ${ACCOUNT} is already in ${ACLFILE} - leaving it alone."
+  #
+  # Two grants, and the second is easy to leave out.
+  #
+  # A bridge with "notifications true" publishes a retained 1/0 to
+  # $SYS/broker/connection/<clientid>/state on the local AND the remote broker, and that is what the
+  # dashboard's Bridges card reads. The bridge's LOCAL side is exempt from the ACL, so the Pi always
+  # has it; the remote side is not, and on a deny-by-default broker the write is refused silently -
+  # so the card said "Unknown" for a bridge that was up and relaying perfectly. Measured on
+  # mosquitto 2.0.20: the write is allowed once the ACL says so, so this is an ACL matter and not
+  # one of mosquitto refusing $SYS writes outright.
+  ACL_ORG_RULE=0; ACL_SYS_RULE=0
+  sudo grep -qE "^[[:space:]]*user[[:space:]]+${ACCOUNT}[[:space:]]*$" "$ACLFILE" && ACL_ORG_RULE=1
+  sudo grep -qF "topic write \$SYS/broker/connection/${ACCOUNT}/state" "$ACLFILE" && ACL_SYS_RULE=1
+
+  if (( ACL_ORG_RULE && ACL_SYS_RULE )); then
+    echo "ACL rules for ${ACCOUNT} are already in ${ACLFILE} - leaving them alone."
+  elif (( ACL_ORG_RULE )); then
+    # An existing bridge from before the state grant existed. A second "user" stanza for the same
+    # account is valid and additive, which is simpler and safer than editing the first one in place.
+    echo "Adding the connection-state ACL rule for ${ACCOUNT} to ${ACLFILE} ..."
+    sudo tee -a "$ACLFILE" >/dev/null <<EOF
+
+# Lets the bridge report whether it is connected, for the dashboard's Bridges card
+user ${ACCOUNT}
+topic write \$SYS/broker/connection/${ACCOUNT}/state
+EOF
+    echo "  Restart the Pi's broker to have it republish that state: it is sent on connect only."
   else
-    echo "Adding ACL rule to ${ACLFILE} ..."
+    echo "Adding ACL rules to ${ACLFILE} ..."
     sudo tee -a "$ACLFILE" >/dev/null <<EOF
 
 # Pi bridge for site "${SITE}", confined to its organization's topics
 user ${ACCOUNT}
 topic readwrite ${ORG_ID}/#
+# ... and its own connection state, which the dashboard's Bridges card reads
+topic write \$SYS/broker/connection/${ACCOUNT}/state
 EOF
   fi
 else

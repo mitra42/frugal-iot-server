@@ -109,7 +109,7 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { ensureSecrets, addEnrolmentSecret, removeEnrolmentSecret } from './lib/secrets.js';
-import { syncUser, syncUserById, syncLoggers, syncNode, dropNode } from './lib/dynsec-server.js';
+import { syncUser, syncUserById, syncLoggers, syncNode, dropNode, syncBridge } from './lib/dynsec-server.js';
 import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode,
          makeAttemptLog, setGrant, clearGrant, readGrants } from './lib/enrol.js';
 import { deleteRetained } from './lib/retained.js';
@@ -1614,6 +1614,65 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                 });
               });
             });
+          },
+        );
+        /*
+         * Add a Pi bridge, or re-issue an existing one's credentials.
+         *
+         * The dashboard equivalent of frugal-iot-addbridge-prod, and it exists because that script
+         * needs root: it writes the password file and edits /etc/mosquitto/aclfile. Here the
+         * account and its rules go into the dynamic-security plugin, which the server can drive
+         * with the credential it already holds - so an organization's admin can add a bridge
+         * without anybody having a shell on this machine.
+         *
+         * The password is DERIVED from user_secret and the row's created_at, so nothing new is
+         * stored and frugal-iot-rebuild-dynsec can recreate the account exactly. Re-running this
+         * for a site that already exists moves created_at, which changes the derived password and
+         * mints a new replica token - deliberately, since that is how a Pi's credentials are
+         * rotated, and it revokes the old ones.
+         *
+         * POST because it changes things: a GET here could be triggered against a live admin
+         * session by any page that can make this browser fetch a URL (SEC-17).
+         */
+        app.post('/bridge_add/:org',
+          loggedInOrFail,
+          can_ADMIN,  // Gets org from URL - an admin may add a bridge only to their own organization
+          express.json({ limit: '4kb' }),
+          (req, res) => {
+            const org = req.params.org;
+            const site = String((req.body && req.body.site) || '').trim();
+            // The site becomes a broker account name and an MQTT topic level, so keep it to what
+            // is safe in both, and to what the Pi's own config can carry unquoted.
+            if (!/^[a-z0-9][a-z0-9-]{0,19}$/.test(site)) {
+              return res.status(400).json({ error:
+                'Site must be 1-20 characters, lower-case letters, digits and hyphens, starting with a letter or digit' });
+            }
+            const now = Date.now();
+            const token = crypto.randomBytes(32).toString('base64url');
+            db.run(`INSERT INTO bridges (org, site, token, created_at) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(org, site) DO UPDATE SET token = excluded.token,
+                                                         created_at = excluded.created_at`,
+              [org, site, token, now], (err) => {
+                if (err) { return res.status(500).json({ error: err.message }); }
+                syncBridge(config, { org, site, createdAt: now }, (serr, result) => {
+                  if (serr) {
+                    // The row is written but the broker has no account, so the Pi could not connect.
+                    // Say so plainly rather than handing over a credential that does not work.
+                    return res.status(500).json({ error:
+                      `The bridge was recorded but its broker account could not be created: ${serr.message}` });
+                  }
+                  console.log("Bridge added by", req.user.username, "-", org, site);
+                  res.status(200).json({
+                    site,
+                    account: result.username,
+                    password: result.password,
+                    replica_token: token,
+                    // What the Pi needs to be told, assembled here so the card does not have to
+                    // know the shape of the command.
+                    command: `npx --no frugal-iot-addbridge-pi ${org} <this-server-fqdn> ${result.username}`,
+                  });
+                });
+              });
           },
         );
         app.post('/node_reset/:org',

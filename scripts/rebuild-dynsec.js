@@ -21,7 +21,8 @@ import { MqttLogger } from 'frugal-iot-logger';
 import { dynsecConnect } from '../lib/dynsec.js';
 import {
   readScopes, readPublics, readProjects, readUserRows,
-  applyRolesAndGroups, applyUser, applyNode, applyLogger, applyOrgAdmin, checkRolesAndGroups,
+  applyRolesAndGroups, applyUser, applyNode, applyLogger, applyOrgAdmin, applyBridge,
+  checkRolesAndGroups,
 } from '../lib/dynsec-sync.js';
 import { names } from '../lib/dynsec-plan.js';
 
@@ -71,9 +72,11 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
           if (e2) return fail(e2.message);
          readProjects(db, (e2b, projects) => {
           if (e2b) return fail(e2b.message);
+          readBridges(db, (e2c, bridges) => {
+           if (e2c) return fail(e2c.message);
 
           if (CHECK) {
-            checkRolesAndGroups(dynsec, scopes, publics, projects, (e3, differences) => {
+            checkRolesAndGroups(dynsec, scopes, publics, projects, bridges, (e3, differences) => {
               if (e3) return fail(e3.message);
               db.all('SELECT id, username FROM users WHERE id > 0 AND username IS NOT NULL', [], (e4, users) => {
                 if (e4) return fail(e4.message);
@@ -87,6 +90,10 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
                     const want = names.loggerClient(org);
                     if (!clients.includes(want)) differences.push(`client missing: ${want}`);
                   }
+                  for (const b of bridges) {
+                    const want = names.bridgeClient(b.site);
+                    if (!clients.includes(want)) differences.push(`client missing: ${want}`);
+                  }
                   report(differences);
                   dynsec.end(() => process.exit(differences.length ? 3 : 0));
                 });
@@ -95,7 +102,7 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
             return;
           }
 
-          applyRolesAndGroups(dynsec, scopes, publics, projects, (e3) => {
+          applyRolesAndGroups(dynsec, scopes, publics, projects, bridges, (e3) => {
             if (e3) return fail(`Setting up roles and groups: ${e3.message}`);
             console.log(`Roles and groups for ${scopes.length} organization/project scope(s), ` +
                         `${projects.length} project(s), ${publics.length} publicly readable`);
@@ -111,11 +118,16 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
                   syncOrgAdmins(dynsec, orgs, userSecret, (e7, j) => {
                     if (e7) return fail(`Syncing admin accounts: ${e7.message}`);
                     console.log(`${j} server admin account(s)`);
-                    dynsec.end(() => process.exit(0));
+                    syncBridges(dynsec, bridges, userSecret, (e8, b) => {
+                      if (e8) return fail(`Syncing bridge accounts: ${e8.message}`);
+                      console.log(`${b} bridge account(s)`);
+                      dynsec.end(() => process.exit(0));
+                    });
                   });
                 });
               });
             });
+          });
           });
          });
         });
@@ -123,6 +135,31 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
     });
   });
 });
+
+/*
+ * The Pi bridges, which are accounts like any other and so belong in a rebuild.
+ *
+ * The table arrives with the first bridge ever added, so its absence is normal rather than an
+ * error - the same treatment the nodes table gets below.
+ */
+function readBridges(db, cb) {
+  db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='bridges'", [], (err, t) => {
+    if (err) return cb(err);
+    if (!t.length) return cb(null, []);
+    db.all('SELECT org, site, created_at FROM bridges', [], (e, rows) => cb(e, rows || []));
+  });
+}
+
+function syncBridges(dynsec, bridges, userSecret, cb) {
+  let i = 0;
+  const next = () => {
+    if (i >= bridges.length) return cb(null, bridges.length);
+    const b = bridges[i++];
+    applyBridge(dynsec, { org: b.org, site: b.site, createdAt: b.created_at, userSecret },
+      (e) => (e ? cb(e) : next()));
+  };
+  next();
+}
 
 function report(differences) {
   if (!differences.length) {
