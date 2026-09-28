@@ -1667,8 +1667,9 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                     account: result.username,
                     password: result.password,
                     replica_token: token,
-                    // What the Pi needs to be told, assembled here so the card does not have to
-                    // know the shape of the command.
+                    // The command to run on the Pi. Neither secret is in it on purpose: that
+                    // script prompts for both precisely so they stay out of the Pi's shell history,
+                    // and putting them here would undo that.
                     command: `npx --no frugal-iot-addbridge-pi ${org} <this-server-fqdn> ${result.username}`,
                   });
                 });

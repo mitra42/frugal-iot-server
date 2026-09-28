@@ -978,48 +978,65 @@ installed by hand, the written procedure for doing that.
 > Note the asymmetry with the Pi end below: a *certificate* change needs only `reload`, but adding
 > or changing a *bridge* needs a full `restart`, because Mosquitto does not reload bridges.
 
-#### 11b. Authorizing this Pi (run on the production server)
+#### 11b. Authorizing this Pi (on the production server)
 
-Once per Pi. On the production server, from its own directory:
+Once per Pi, and there are two ways. **Use the dashboard** unless that server's broker has no
+dynamic security plugin.
+
+**From the dashboard** — no shell account on the production server needed, which is the point:
+
+1. Log in to production as someone with ADMIN on the organization.
+2. Open the organization, gear icon → **Bridges**.
+3. Under "Add a bridge", give the Pi a short name — `northfield`, `shed`, `village2`. It only
+   distinguishes one Pi from another within an organization, and becomes part of the broker account
+   name, so it cannot be changed afterwards without reconfiguring that Pi.
+4. Copy the **broker password** and the **replica token** it shows. Both are shown once.
+
+**From a shell on the production server**, which is what to use if its broker predates the plugin:
 
 ```
 npx --no frugal-iot-addbridge-prod <org-id> <site-name>
 ```
 
-The site name only distinguishes one Pi from another within an organization — `northfield`,
-`shed`, `village2` — and becomes part of the account name. The script creates the broker account,
-adds its access-control rule, reloads the broker, and prints both the password and the exact
-command to run in 11c.
+Either way you end up with a broker account `bridge-<site-name>`, its access-control rules, a
+replica token, and the command to run in 11c.
 
-Three things it checks, because each of them is a way this quietly fails:
+Three things worth knowing, because each is a way this quietly fails:
 
 * **The organization must already exist on the production server**, or the readings will arrive at
   its broker and nothing will record them — that server's logger subscribes per organization,
   driven by the files in its `config.d/organizations/`. If it is missing, add it there first with
   `frugal-iot-addorganization`, using the *same* organization id as this Pi.
-* **Each Pi gets its own account**, rather than sharing the organization's. The organization's
-  broker password is handed to every browser that logs in, so it is not a secret; a per-Pi account
-  can be confined to one site and revoked on its own.
-* **An existing account is left alone.** Re-running it for a site that already has one is refused
-  rather than quietly issuing a new password, which would stop that Pi relaying without anyone
-  touching it.
+* **Each Pi gets its own account**, rather than sharing the organization's, so it can be confined to
+  one site and revoked on its own.
+* **Doing it again for a site that already exists re-issues both credentials**, and the ones that Pi
+  is using stop working — from the dashboard it asks first. That is how to recover from having lost
+  them, and how to revoke a Pi you no longer trust; it is not a way to look them up again.
 
-The password is shown once and is not stored anywhere you can read back — copy it before you lose
-the output.
+Neither credential is stored anywhere you can read back, so copy both before you lose the output.
 
 #### 11c. Bridging this Pi (run on the Pi)
 
-Once per Pi. Run the command 11b printed, from this installation's directory:
+Once per Pi. Have both credentials from 11b to hand first — it asks for each in turn:
+
+* the **broker password** for `bridge-<site-name>`, which the MQTT bridge authenticates with;
+* the **replica token**, which lets this Pi pull production's logins so the same people can log in
+  here. Press Enter to skip it: a bridge relays readings perfectly well without one, and you can
+  re-run this later to add it.
+
+They are two different credentials for two different connections — MQTT on port 8883 for the first,
+HTTPS for the second — so neither substitutes for the other.
 
 ```
 cd ~/frugal-iot
 npx --no frugal-iot-addbridge-pi <org-id> <prod-host> bridge-<site-name>
 ```
 
-It asks for the password, then it checks the far end is reachable and that its certificate is valid for that name,
-writes `/etc/mosquitto/conf.d/frugal-iot-bridge.conf`, restarts the broker, and reports whether the
-bridge actually connected. It briefly disconnects every node, 
-which they recover from on their own.
+Having asked for those, it checks the far end is reachable and that its certificate is valid for
+that name, writes `/etc/mosquitto/conf.d/frugal-iot-bridge.conf` and — if you gave a token —
+`config.d/replica.yaml` with the token in `config.d/secrets.yaml`, restarts the broker, and reports
+whether the bridge actually connected. It briefly disconnects every node, which they recover from on
+their own.
 
 > The configuration goes into `/etc/mosquitto/conf.d/` and not into this installation's
 > `config.d/`, to keep the password out of `/config.json`. The file is written mode 600 for the same reason.

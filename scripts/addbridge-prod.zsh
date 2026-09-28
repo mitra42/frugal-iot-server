@@ -315,11 +315,14 @@ if [[ -n "$REPLICA_TOKEN" ]]; then
 fi
 echo "Then, on the Pi at site '${SITE}':"
 echo ""
-if [[ -n "$REPLICA_TOKEN" ]]; then
-  echo "  npx --no frugal-iot-addbridge-pi ${ORG_ID} <fqdn-from-1-above> ${ACCOUNT} -- --replica-token <token-from-3>"
-else
-  echo "  npx --no frugal-iot-addbridge-pi ${ORG_ID} <fqdn-from-1-above> ${ACCOUNT}"
-fi
+echo "  npx --no frugal-iot-addbridge-pi ${ORG_ID} <fqdn-from-1-above> ${ACCOUNT}"
 echo ""
-echo "The first three are positional on purpose: npm swallows any --flag it does not recognise and"
-echo "passes only the value on, so the --org form would arrive at that script as a bare word."
+if [[ -n "$REPLICA_TOKEN" ]]; then
+  echo "It asks for the password from 2, then for the replica token from 3. Neither is given on the"
+  echo "command line on purpose, so that neither ends up in that Pi's shell history."
+else
+  echo "It asks for the password from 2. Neither secret is given on the command line on purpose, so"
+  echo "that neither ends up in that Pi's shell history."
+fi
+echo "The arguments are positional because npm swallows any --flag it does not recognise and passes"
+echo "only the value on, so the --org form would arrive at that script as a bare word."
