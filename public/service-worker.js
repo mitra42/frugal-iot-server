@@ -6,7 +6,7 @@
 // it, an installed browser keeps serving the files it already cached - and since the list now covers
 // the dashboard's own code, that means old JS behind freshly fetched HTML. Any edit to the list
 // needs this bumped, or it does not reach anyone who already has the old one.
-const CACHE_NAME = 'frugal-iot-cache-2.0.2';
+const CACHE_NAME = 'frugal-iot-cache-2.0.3';
 /*
  * Everything the app needs, so that a phone on a poor or expensive link fetches it once.
  *
