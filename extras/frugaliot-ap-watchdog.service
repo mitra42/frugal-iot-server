@@ -1,0 +1,8 @@
+[Unit]
+Description=Frugal IoT: stop the fallback access point holding the Pi for too long
+After=comitup.service
+
+[Service]
+Type=oneshot
+# Seconds the frugaliot-bridge-setup access point may stay up before comitup is made to retry
+ExecStart=/usr/local/sbin/frugaliot-ap-watchdog 900

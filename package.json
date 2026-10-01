@@ -56,6 +56,9 @@
     "extras/aclfile",
     "extras/mosquitto-bridge.conf.example",
     "extras/frugaliot.service",
+    "extras/frugaliot-ap-watchdog",
+    "extras/frugaliot-ap-watchdog.service",
+    "extras/frugaliot-ap-watchdog.timer",
     "API.md",
     "INSTALLATION.md"
   ],

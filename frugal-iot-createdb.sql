@@ -80,6 +80,11 @@ CREATE TABLE IF NOT EXISTS `bridges` (
   `token` TEXT NOT NULL,
   `created_at` INTEGER NOT NULL,
   `last_pull` INTEGER,
+  -- Where the bridge's broker password lives, and so whether frugal-iot-rebuild-dynsec may set it:
+  -- 'derived' (issued by the dashboard), 'password_file' (frugal-iot-addbridge-prod), or NULL for a
+  -- row from before this was recorded. See bridgesToSync in lib/dynsec-plan.js. Added after the
+  -- table first shipped, so lib/schema-columns.js adds it to an existing database.
+  `credential` TEXT,
   UNIQUE(`org`, `site`)
 );
 

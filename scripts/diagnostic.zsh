@@ -496,15 +496,31 @@ section "Bridge to a production server (optional)"
 # extras/mosquitto-bridge.conf.example. It is configured by a "connection" line in one of
 # mosquitto's own config files, so most installations have none, which is not a problem.
 BRIDGECONFS=(/etc/mosquitto/mosquitto.conf(N) /etc/mosquitto/conf.d/*.conf(N))
-BRIDGENAMES=""
-(( ${#BRIDGECONFS} )) && BRIDGENAMES=$(grep -hE '^[[:space:]]*connection[[:space:]]' $BRIDGECONFS 2>/dev/null | awk '{print $2}')
-if [[ -z "$BRIDGENAMES" ]]; then
+# The bridge's own file is 600 root, because it holds the bridge's password - so read as an ordinary
+# user it yields nothing, which looked exactly like "no bridge configured" on a Pi whose bridge was
+# configured and failing. Read each file with sudo when it cannot be read plainly, and say so when
+# even that fails rather than report an answer that was never looked for.
+BRIDGETEXT=""; BRIDGEUNREAD=()
+for f in $BRIDGECONFS; do
+  if [[ -r $f ]]; then
+    BRIDGETEXT+="$(<$f)"$'\n'
+  elif have sudo && t=$(sudo -n cat $f 2>/dev/null); then
+    BRIDGETEXT+="$t"$'\n'
+  else
+    BRIDGEUNREAD+=($f)
+  fi
+done
+BRIDGENAMES=$(print -r -- "$BRIDGETEXT" | grep -E '^[[:space:]]*connection[[:space:]]' | awk '{print $2}')
+if [[ -z "$BRIDGENAMES" ]] && (( ${#BRIDGEUNREAD} )); then
+  item "cannot tell whether a bridge is configured: not readable as $(id -un) - ${(j:, :)BRIDGEUNREAD}"
+  item "  sudo npx --no frugal-iot-diagnostic   reads them"
+elif [[ -z "$BRIDGENAMES" ]]; then
   item "no bridge configured - readings stay on this Pi"
 else
   for b in ${(f)BRIDGENAMES}; do item "configured bridge: $b"; done
   # What it is set to relay and where. remote_password is deliberately not among these.
   item "its settings:"
-  grep -hE '^[[:space:]]*(address|remote_username|remote_clientid|topic|cleansession|restart_timeout|notifications)[[:space:]]' $BRIDGECONFS 2>/dev/null | sed 's/^/      /'
+  print -r -- "$BRIDGETEXT" | grep -E '^[[:space:]]*(address|remote_username|remote_clientid|topic|cleansession|restart_timeout|notifications)[[:space:]]' | sed 's/^/      /'
   # Whether it is actually up, rather than what the configuration hoped for. With "notifications"
   # left on, the bridge publishes a retained 1 or 0 here each time it connects or drops.
   if have mosquitto_sub; then

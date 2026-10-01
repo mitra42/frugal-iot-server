@@ -114,6 +114,7 @@ import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode,
          makeAttemptLog, setGrant, clearGrant, readGrants } from './lib/enrol.js';
 import { deleteRetained } from './lib/retained.js';
 import { replicaFor, bridgeForToken, noteBridgePull, startReplica } from './lib/replica.js';
+import { addMissingColumns } from './lib/schema-columns.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -578,7 +579,8 @@ function execSqlStart(cb) {
           cb(err);
         } else {
           console.log("Exec-ed starting SQL");
-          cb(null, db);
+          // A column added to an existing table, which CREATE TABLE IF NOT EXISTS cannot do
+          addMissingColumns(db, (err2) => (err2 ? cb(err2) : cb(null, db)));
         }
       });
     }
@@ -1649,9 +1651,16 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             }
             const now = Date.now();
             const token = crypto.randomBytes(32).toString('base64url');
-            db.run(`INSERT INTO bridges (org, site, token, created_at) VALUES (?, ?, ?, ?)
+            // Whether this re-issues a bridge that exists, because then the Pi already has a bridge
+            // configuration, and the command it is given has to say --replace or it refuses
+            db.get('SELECT 1 AS found FROM bridges WHERE org = ? AND site = ?', [org, site], (gerr, existing) => {
+            if (gerr) { return res.status(500).json({ error: gerr.message }); }
+            // credential 'derived' is what lets frugal-iot-rebuild-dynsec recreate this account,
+            // and tells it apart from one authorized with addbridge-prod - see bridgesToSync
+            db.run(`INSERT INTO bridges (org, site, token, created_at, credential) VALUES (?, ?, ?, ?, 'derived')
                     ON CONFLICT(org, site) DO UPDATE SET token = excluded.token,
-                                                         created_at = excluded.created_at`,
+                                                         created_at = excluded.created_at,
+                                                         credential = excluded.credential`,
               [org, site, token, now], (err) => {
                 if (err) { return res.status(500).json({ error: err.message }); }
                 syncBridge(config, { org, site, createdAt: now }, (serr, result) => {
@@ -1669,11 +1678,15 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
                     replica_token: token,
                     // The command to run on the Pi. Neither secret is in it on purpose: that
                     // script prompts for both precisely so they stay out of the Pi's shell history,
-                    // and putting them here would undo that.
-                    command: `npx --no frugal-iot-addbridge-pi ${org} <this-server-fqdn> ${result.username}`,
+                    // and putting them here would undo that. Re-issuing needs --replace, which npm
+                    // would swallow without the "--" ahead of it - hence the flag form there.
+                    command: existing
+                      ? `npx --no frugal-iot-addbridge-pi -- --org ${org} --host <this-server-fqdn> --account ${result.username} --replace`
+                      : `npx --no frugal-iot-addbridge-pi ${org} <this-server-fqdn> ${result.username}`,
                   });
                 });
               });
+            });
           },
         );
         app.post('/node_reset/:org',

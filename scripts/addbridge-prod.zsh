@@ -72,6 +72,29 @@ if ! command -v mosquitto_passwd >/dev/null; then
   exit 1
 fi
 
+# A bridge issued from the dashboard has its account in the dynamic security plugin, and the
+# plugin's answer for a client it knows is final - so a password-file entry made here for the same
+# name would simply be ignored, and the Pi given it refused. The same trap the other way round cut a
+# working bridge off in 2.0.3 (see bridgesToSync in lib/dynsec-plan.js). Node, not sqlite3, for the
+# reason given at the replica token below.
+BRIDGE_CREDENTIAL=$(node -e '
+const sqlite3 = require("sqlite3");
+const [org, site] = process.argv.slice(1);
+const db = new sqlite3.Database("./frugal-iot.db", sqlite3.OPEN_READONLY, (err) => {
+  if (err) process.exit(0);
+  db.get("SELECT * FROM bridges WHERE org = ? AND site = ?", [org, site], (e, row) => {
+    process.stdout.write((row && row.credential) || "");
+    db.close();
+  });
+});
+' "$ORG_ID" "$SITE" 2>/dev/null) || true
+if [[ "$BRIDGE_CREDENTIAL" == derived ]]; then
+  echo "Error: bridge '${SITE}' was issued from the dashboard, so its account is in the broker's" >&2
+  echo "dynamic security plugin, which would ignore a password-file entry made here." >&2
+  echo "To give its Pi new credentials, re-issue it on the dashboard's Bridges card instead." >&2
+  exit 1
+fi
+
 # Which files the running broker actually uses, rather than where they usually are. Only ".conf"
 # files in conf.d are read, and the last setting wins.
 MOSQ_CONFS=(/etc/mosquitto/mosquitto.conf(N) /etc/mosquitto/conf.d/*.conf(N))
@@ -263,15 +286,24 @@ const token = randomBytes(32).toString("base64url");
 const db = new sqlite3.Database("./frugal-iot.db", (err) => {
   if (err) { console.error(err.message); process.exit(1); }
   db.run(`CREATE TABLE IF NOT EXISTS bridges (org TEXT NOT NULL, site TEXT NOT NULL,
-            token TEXT NOT NULL, created_at INTEGER NOT NULL, last_pull INTEGER,
+            token TEXT NOT NULL, created_at INTEGER NOT NULL, last_pull INTEGER, credential TEXT,
             UNIQUE(org, site))`, () => {
-    db.run(`INSERT INTO bridges (org, site, token, created_at) VALUES (?, ?, ?, ?)
-            ON CONFLICT(org, site) DO UPDATE SET token = excluded.token, created_at = excluded.created_at`,
-      [org, site, token, Date.now()], (e) => {
-        if (e) { console.error(e.message); process.exit(1); }
-        process.stdout.write(token);
-        db.close();
+    // An existing table may predate the credential column, if the server has not been restarted
+    // on this release yet - it adds it at startup, so do the same here
+    db.all("PRAGMA table_info(bridges)", [], (pe, cols) => {
+      const add = (pe || cols.some((c) => c.name === "credential")) ? "SELECT 1" : "ALTER TABLE bridges ADD COLUMN credential TEXT";
+      db.run(add, [], () => {
+        // "password_file" tells frugal-iot-rebuild-dynsec this account is not its to set
+        db.run(`INSERT INTO bridges (org, site, token, created_at, credential) VALUES (?, ?, ?, ?, 'password_file')
+                ON CONFLICT(org, site) DO UPDATE SET token = excluded.token, created_at = excluded.created_at,
+                                                     credential = excluded.credential`,
+          [org, site, token, Date.now()], (e) => {
+            if (e) { console.error(e.message); process.exit(1); }
+            process.stdout.write(token);
+            db.close();
+          });
       });
+    });
   });
 });
 ' "$ORG_ID" "$SITE") || true
@@ -316,6 +348,11 @@ fi
 echo "Then, on the Pi at site '${SITE}':"
 echo ""
 echo "  npx --no frugal-iot-addbridge-pi ${ORG_ID} <fqdn-from-1-above> ${ACCOUNT}"
+echo ""
+echo "If that Pi already has a bridge configured, to anywhere, it needs --replace, which"
+echo "npm swallows unless a \"--\" comes first:"
+echo ""
+echo "  npx --no frugal-iot-addbridge-pi -- --org ${ORG_ID} --host <fqdn-from-1-above> --account ${ACCOUNT} --replace"
 echo ""
 if [[ -n "$REPLICA_TOKEN" ]]; then
   echo "It asks for the password from 2, then for the replica token from 3. Neither is given on the"

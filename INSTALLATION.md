@@ -217,6 +217,15 @@ organization's web login - twice each, not echoed, and pressing Enter has one ge
 and `--yes` asks nothing at all, which is what to use over ssh with no terminal. A password you
 chose is not written to the log; a generated one has to be, or you would have no way of knowing it.
 
+It also asks for the password of **the login you are using on the Pi** (`pi`, normally), and gives
+that same password to the setup network the Pi raises if it ever loses its WiFi - see
+[Moving the Pi to another WiFi network](#moving-the-pi-to-another-wifi-network). Then whoever moves
+the Pi needs to know only one password. Linux keeps only a scrambled (hashed) form of a login
+password, so the installer cannot read it; it checks that what you type matches, so a typing slip
+does not give the network a password nobody knows. Press Enter instead to give the network a password
+of its own, or pass `--ap-password`. WiFi needs 8 to 63 characters, so a shorter login password
+cannot be reused. `--no-setup-ap` leaves the setup network out.
+
 The organization's *broker* credential is no longer among them: it is generated and never shown,
 because nothing on the Pi needs you to know it. Nodes are issued their own credential when they
 enrol, and browsers derive their own when they log in. `--broker-password` still sets it, for an
@@ -701,6 +710,50 @@ journalctl -u frugaliot -f
 Reboot the Pi (`sudo reboot`), wait a couple of minutes, and check `http://frugaliot.local:8080`
 still answers. Your server is now installed.
 
+### 8a. A setup network, for when the Pi loses its WiFi
+
+A Pi on WiFi that is moved to another site, or whose router is replaced, cannot be reached, and
+changing its WiFi needs a login. [comitup](https://davesteele.github.io/comitup/) fixes that: when
+no saved network is in range, the Pi raises a network of its own, `frugaliot-bridge-setup`. Its page
+lists the WiFi networks the Pi can see and takes the password for one.
+[Moving the Pi to another WiFi network](#moving-the-pi-to-another-wifi-network) is how it is used.
+
+**Write comitup's configuration before installing it.** Installing the package starts it at once,
+and without this file it uses its defaults: a network called `comitup-<nnn>` with **no password**,
+raised straight away if the Pi has no WiFi connection at that moment.
+
+```
+sudo install -m 600 /dev/null /etc/comitup.conf
+sudo nano /etc/comitup.conf
+```
+
+Put these two lines in it. The password is normally the one for the `pi` login, so that whoever moves
+the Pi needs only one. WiFi needs 8 to 63 characters.
+
+```
+ap_name: frugaliot-bridge-setup
+ap_password: <the pi login password>
+```
+
+Do not call it `frugaliot`. comitup announces its name on the network too, and announcing the Pi's own
+name a second time stops `frugaliot.local` resolving for up to 15 minutes after each reconnect.
+
+Then install comitup, and the watchdog that covers two ways comitup alone can strand a Pi (the
+comments in `extras/frugaliot-ap-watchdog` give both):
+
+```
+sudo apt-get install -y -o Dpkg::Options::=--force-confold comitup
+sudo install -m 755 node_modules/frugal-iot-server/extras/frugaliot-ap-watchdog /usr/local/sbin/
+sudo install -m 644 node_modules/frugal-iot-server/extras/frugaliot-ap-watchdog.service \
+                    node_modules/frugal-iot-server/extras/frugaliot-ap-watchdog.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now frugaliot-ap-watchdog.timer
+```
+
+`--force-confold` keeps the `/etc/comitup.conf` you just wrote, instead of stopping to ask about the
+one the package ships. `systemctl is-active comitup` should say `active`. The Pi stays on its WiFi;
+nothing changes until that WiFi goes away.
+
 ### 9. Point your sensor nodes at the Pi
 
 A node is flashed with an **enrolment secret**,
@@ -1138,6 +1191,89 @@ and read the **Wear on the SD card** section, which reports how much has been wr
 whether the machine is swapping, and whether each of the settings above is in force. Run it twice a
 few days apart — the interesting number is the rate, not the total.
 
+## Moving the Pi to another WiFi network
+
+This is how to give the Pi a new WiFi network when you cannot log in to it, because it no longer
+finds the old one: it has moved to another site, or the router has been replaced. It needs the setup
+network from [step 8a](#8a-a-setup-network-for-when-the-pi-loses-its-wifi), which the installer sets
+up.
+
+**You need:**
+
+* a phone or laptop;
+* the setup network's password - the `pi` login's password, unless the installer said otherwise;
+* the name and password of the new WiFi network.
+
+**Then:**
+
+1. Power the Pi up where it is going, and give it about three minutes. It tries every network it
+   has saved first, and each one that is not there costs it about half a minute.
+2. On the phone or laptop, join the network **`frugaliot-bridge-setup`** with that password. A
+   "sign in to network" page should open by itself. If it does not, browse to `http://10.41.0.1`.
+3. Choose the new network from the list, and type its password. The setup network disappears as the
+   Pi leaves it to join the new one.
+4. Join the phone or laptop to the new network too, and check the dashboard at
+   `http://frugaliot.local:8080`.
+5. **Tell the phone or laptop to forget `frugaliot-bridge-setup`.** Devices rejoin a network they know
+   whenever it appears. While anything is connected to the setup network, the Pi stops looking for
+   its real WiFi. It gives up waiting after 15 minutes, so nothing is stranded for good, but a phone
+   left in the house can delay the Pi's recovery after every power cut.
+
+**If the setup network comes back a minute or so later**, the Pi could not join the network you
+chose, usually because the password was mistyped. Join the setup network again and choose it again.
+
+**If `frugaliot.local` does not answer on the new network**, find the Pi's address in the router's
+list of connected devices and use that instead, e.g. `http://192.168.1.107:8080`. Some range
+extenders, and possibly phone hotspots, pass ordinary traffic but not the lookups that make `.local`
+names work.
+
+**If the page will not do it**, log in while you are joined to the setup network, and set the WiFi
+by hand as in [step 2](#2-log-in-over-the-network):
+
+```
+ssh pi@10.41.0.1
+sudo nmtui
+```
+
+**A phone hotspot as the new network** works, with two things to know on an iPhone: turn on
+*Maximise Compatibility*, and keep the *Personal Hotspot* screen open while the Pi joins. Without
+that, the iPhone often ignores a new device.
+
+### What it does by itself
+
+Nobody needs to be there for any of this:
+
+* **After a power cut**, the Pi usually boots faster than the router. It raises the setup network,
+  tries its saved networks again every three to six minutes, and rejoins the router once it is up.
+* **If a device sits on the setup network**, the Pi stops retrying while it is there - so that you
+  are not cut off while you are using the page. After 15 minutes it retries regardless.
+* **A network that connects but hands out no address** counts as a failure, and the Pi moves on.
+  Without that, a range extender whose router is switched off holds the Pi for ever, because the WiFi
+  connection itself succeeds.
+
+### Deleting networks the Pi no longer needs
+
+Every network it has saved costs the Pi about half a minute each time it searches, so remove the
+ones it will not see again. This needs a login - the setup page cannot do it:
+
+```
+nmcli connection show
+sudo nmcli connection delete "<name>"
+```
+
+or `sudo nmtui`, then *Edit a connection*. Leave `frugaliot-bridge-setup-0000`, which is the setup
+network itself.
+
+### Changing the setup network's password
+
+Changing the `pi` login's password later does **not** change the setup network's. To change that,
+edit `ap_password` in `/etc/comitup.conf` (`sudo nano /etc/comitup.conf`), then
+`sudo systemctl restart comitup`. The password matters because anyone who has it can point the Pi
+at a network of their choosing, and the Pi stops talking to your sensors until that is undone.
+
+What it has been doing is in `sudo tail -50 /var/log/comitup.log`, and the watchdog's part in
+`journalctl -u frugaliot-ap-watchdog`.
+
 ## When something does not work
 
 From your install directory:
@@ -1257,6 +1393,10 @@ install these three, because none of them can simply be copied into place:
 | `extras/mosquitto.conf` | carries `plugin PLUGIN_PATH_SET_BY_INSTALLER`. The path differs by distribution, so the installer substitutes it. Copied as-is, **the broker will not start.** |
 | `extras/aclfile` | `frugal-iot-addbridge-prod` appends a rule per Pi. Copying over it deletes them, and a mosquitto `acl_file` is deny-by-default — so every bridge goes on logging in and reaches nothing at all. |
 | `extras/frugaliot.service` | written for user `pi` in `/home/pi/frugal-iot`; the installer rewrites `User`, `WorkingDirectory` and `ExecStart` for wherever this actually went. |
+
+The setup network's watchdog, `extras/frugaliot-ap-watchdog` and its `.service` and `.timer`, *can* be
+copied as they are; step 8a has the commands. On a Pi installed before the setup network existed,
+re-running the installer adds it, and asks once for the `pi` login's password to give it.
 
 The installer will not overwrite an ACL file that has per-bridge rules in it. If this release adds a
 rule to a broker that has them, it says which lines are missing and leaves the file alone for you to

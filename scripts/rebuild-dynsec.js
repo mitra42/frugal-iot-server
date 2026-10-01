@@ -24,7 +24,7 @@ import {
   applyRolesAndGroups, applyUser, applyNode, applyLogger, applyOrgAdmin, applyBridge,
   checkRolesAndGroups,
 } from '../lib/dynsec-sync.js';
-import { names } from '../lib/dynsec-plan.js';
+import { names, bridgesToSync } from '../lib/dynsec-plan.js';
 
 const userClientName = names.userClient;
 
@@ -90,10 +90,14 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
                     const want = names.loggerClient(org);
                     if (!clients.includes(want)) differences.push(`client missing: ${want}`);
                   }
-                  for (const b of bridges) {
+                  // Only a bridge whose password this server derives can be missing - see
+                  // bridgesToSync for why the others are left alone rather than reported
+                  const { apply, skipped } = bridgesToSync(bridges, clients);
+                  for (const b of apply) {
                     const want = names.bridgeClient(b.site);
                     if (!clients.includes(want)) differences.push(`client missing: ${want}`);
                   }
+                  reportSkippedBridges(skipped);
                   report(differences);
                   dynsec.end(() => process.exit(differences.length ? 3 : 0));
                 });
@@ -118,9 +122,10 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
                   syncOrgAdmins(dynsec, orgs, userSecret, (e7, j) => {
                     if (e7) return fail(`Syncing admin accounts: ${e7.message}`);
                     console.log(`${j} server admin account(s)`);
-                    syncBridges(dynsec, bridges, userSecret, (e8, b) => {
+                    syncBridges(dynsec, bridges, userSecret, (e8, b, skipped) => {
                       if (e8) return fail(`Syncing bridge accounts: ${e8.message}`);
                       console.log(`${b} bridge account(s)`);
+                      reportSkippedBridges(skipped);
                       dynsec.end(() => process.exit(0));
                     });
                   });
@@ -146,19 +151,41 @@ function readBridges(db, cb) {
   db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='bridges'", [], (err, t) => {
     if (err) return cb(err);
     if (!t.length) return cb(null, []);
-    db.all('SELECT org, site, created_at FROM bridges', [], (e, rows) => cb(e, rows || []));
+    // "*" and not a column list: credential is absent from a database the server has not yet
+    // started on since it was added, and a missing column must read as null, not fail the query
+    db.all('SELECT * FROM bridges', [], (e, rows) => cb(e, rows || []));
   });
 }
 
+// Only the bridges whose password this server derives - see bridgesToSync in lib/dynsec-plan.js.
+// A bridge authorized with frugal-iot-addbridge-prod has its own password in mosquitto's password
+// file, and creating a plugin client of the same name would silently replace it.
 function syncBridges(dynsec, bridges, userSecret, cb) {
-  let i = 0;
-  const next = () => {
-    if (i >= bridges.length) return cb(null, bridges.length);
-    const b = bridges[i++];
-    applyBridge(dynsec, { org: b.org, site: b.site, createdAt: b.created_at, userSecret },
-      (e) => (e ? cb(e) : next()));
-  };
-  next();
+  dynsec.listClients((err, clients) => {
+    if (err) return cb(err);
+    const { apply, skipped } = bridgesToSync(bridges, clients);
+    let i = 0;
+    const next = () => {
+      if (i >= apply.length) return cb(null, apply.length, skipped);
+      const b = apply[i++];
+      applyBridge(dynsec, { org: b.org, site: b.site, createdAt: b.created_at, userSecret },
+        (e) => (e ? cb(e) : next()));
+    };
+    next();
+  });
+}
+
+function reportSkippedBridges(skipped) {
+  for (const b of skipped) {
+    if (b.reason === 'password_file') {
+      console.log(`  ${b.account}: left alone - authorized with frugal-iot-addbridge-prod, so its password`);
+      console.log('    is in mosquitto\'s password file. Re-issue it on the dashboard\'s Bridges card to move it here.');
+    } else {
+      console.log(`  ${b.account}: left alone - no account for it here, and nothing records whether its password`);
+      console.log('    is in mosquitto\'s password file. If its Pi is connected, it is, and nothing is wrong;');
+      console.log('    if not, re-issue it on the dashboard\'s Bridges card.');
+    }
+  }
 }
 
 function report(differences) {

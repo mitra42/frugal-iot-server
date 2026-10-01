@@ -1,0 +1,9 @@
+[Unit]
+Description=Frugal IoT: check every minute whether the fallback access point has been up too long
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target

@@ -25,13 +25,18 @@
 #     workstation, not here. It prints the settings to give them.
 #   * HTTPS, which over-the-air firmware updates to ESP32 need - INSTALLATION.md step 10
 #   * reboot. A reboot is worth doing afterwards if the upgrade brought a new kernel.
+#
+# It does set up what happens when the Pi later LOSES its WiFi - moved to another site, or the router
+# replaced: a network of its own, frugaliot-bridge-setup, whose page sets a new one. Otherwise a Pi
+# on WiFi is unreachable at exactly the moment it needs its WiFi changed. INSTALLATION.md, "Moving the
+# Pi to another WiFi network", is the operator's side of it.
 
 set -Eeuo pipefail
 
 # ---------------------------------------------------------------- settings and arguments
 
 ORG_ID=""; ORG_NAME=""; ORG_EMAIL=""; ORG_PHONE=""
-BROKER_PW=""; SUPER_PW=""; LOGIN_PW=""; BROKER_HOST=""
+BROKER_PW=""; SUPER_PW=""; LOGIN_PW=""; BROKER_HOST=""; AP_PW=""; SETUP_AP=1
 INSTALL_DIR=""; RUN_USER=""; ASSUME_YES=0; DRY_RUN=0; RANDOM_PASSWORDS=0
 
 usage() {
@@ -52,6 +57,12 @@ Usage: bash install-pi.sh [options]
                        thing from the broker credential above and should not be the same string.
                        Either of the two logins, if not given, is asked for - and generated if you
                        just press Enter, or if there is no terminal to ask at.
+  --ap-password        password of the frugaliot-bridge-setup network this Pi raises when it cannot
+                       find its WiFi, 8 to 63 characters. If not given you are asked for the
+                       password of this Pi's login, and that is used - so whoever moves the Pi
+                       needs to know only one. Generated if there is no terminal to ask at.
+  --no-setup-ap        do not set that network up. Leaves a Pi that loses its WiFi reachable only
+                       by plugging in a screen and keyboard, or an Ethernet cable.
   --broker-host <host> what the browser and the nodes should call this Pi.
                        Default: this Pi's hostname with ".local". Use an IP address if you will
                        view the dashboard on Android, which cannot resolve ".local" names.
@@ -76,6 +87,8 @@ while (( $# )); do
     --superuser-password)  SUPER_PW="${2:-}"; shift 2 ;;
     --login-password)      LOGIN_PW="${2:-}"; shift 2 ;;
     --broker-host)         BROKER_HOST="${2:-}"; shift 2 ;;
+    --ap-password)         AP_PW="${2:-}"; shift 2 ;;
+    --no-setup-ap)         SETUP_AP=0; shift ;;
     --dir)                 INSTALL_DIR="${2:-}"; shift 2 ;;
     --user)                RUN_USER="${2:-}"; shift 2 ;;
     --yes|-y)              ASSUME_YES=1; shift ;;
@@ -265,6 +278,91 @@ ask() { # ask <variable name> <prompt> [generated]
   [[ -n "${!var}" ]] || { echo "That cannot be empty" >&2; return 1; }
 }
 
+# ---------------------------------------------------------------- the setup network
+# What this Pi raises, through comitup, when no saved WiFi network is in range. Not "frugaliot":
+# comitup also announces its name over mDNS, and announcing the Pi's own hostname a second time made
+# avahi refuse the real one - frugaliot.local stopped resolving for up to 15 minutes after every
+# reconnect.
+AP_NAME="frugaliot-bridge-setup"
+COMITUP_CONF=/etc/comitup.conf
+AP_SOURCE=""    # login, own, given or kept - which password the network ended up with, for the summary
+
+# Why there can be no setup network on this machine, or nothing if there can be
+ap_unavailable() {
+  command -v nmcli >/dev/null 2>&1 || { echo "NetworkManager is not installed"; return 0; }
+  systemctl is-active --quiet NetworkManager 2>/dev/null || { echo "NetworkManager is not running"; return 0; }
+  nmcli -t -f TYPE device 2>/dev/null | grep -qx wifi || echo "this machine has no WiFi"
+}
+
+# Is "$1" the password of RUN_USER's login? 0 yes, 1 no, 2 cannot tell.
+# Linux keeps only a one-way hash of a password, in /etc/shadow, so there is nothing to read back -
+# instead what was typed is hashed the same way, with the same salt, and the two compared. Without
+# that a typing slip would give the network a password nobody knows. libcrypt through ctypes because
+# Python 3.13 removed its crypt module; both values go to python on stdin, since "ps" shows arguments.
+login_password_matches() {
+  local stored rc=0
+  stored="$(sudo_ getent shadow "$RUN_USER" 2>/dev/null | cut -d: -f2 || true)"
+  [[ "$stored" == \$* ]] || return 2      # locked ("!"), no password ("*"), or unreadable
+  printf '%s\n%s' "$stored" "$1" | python3 -c '
+import ctypes, sys
+stored, typed = sys.stdin.read().split("\n", 1)
+try:
+    lib = ctypes.CDLL("libcrypt.so.1")
+except OSError:
+    sys.exit(2)
+lib.crypt.restype = ctypes.c_char_p
+lib.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+result = lib.crypt(typed.encode(), stored.encode())
+sys.exit(0 if result and result.decode() == stored else 1)
+' || rc=$?
+  (( rc <= 1 )) || rc=2                   # 127 is no python3 at all, which is also "cannot tell"
+  return $rc
+}
+
+wifi_length_ok() { (( ${#1} >= 8 && ${#1} <= 63 )); }   # what WPA accepts
+
+ask_ap_password() {
+  if [[ -n "$AP_PW" ]]; then
+    AP_SOURCE=given
+    return 0
+  fi
+  if (( RANDOM_PASSWORDS )) || (( ASSUME_YES )) || [[ ! -t 0 ]]; then
+    AP_PW="$(randpw)"; GENERATED+=(AP_PW); AP_SOURCE=own
+    info "generated a password for the ${AP_NAME} network$( [[ -t 0 ]] || echo ' (no terminal to ask at)' )"
+    return 0
+  fi
+  local typed rc tries=0
+  printf '    When this Pi cannot find its WiFi it raises a network called %s,\n' "$AP_NAME" > /dev/tty
+  printf '    whose password is that of the %s login - so whoever moves it needs to know only one.\n' "$RUN_USER" > /dev/tty
+  while (( tries < 3 )); do
+    printf '    Password for the %s login\n      (or press Enter to give that network a password of its own): ' "$RUN_USER" > /dev/tty
+    read -rs typed < /dev/tty; printf '\n' > /dev/tty
+    [[ -n "$typed" ]] || break
+    rc=0; login_password_matches "$typed" || rc=$?
+    case $rc in
+      0)
+        if wifi_length_ok "$typed"; then
+          AP_PW="$typed"; AP_SOURCE=login
+          info "the ${AP_NAME} network will have the password of the ${RUN_USER} login"
+          return 0
+        fi
+        printf '      That is right, but a WiFi password must be 8 to 63 characters, so this\n      network needs one of its own.\n' > /dev/tty
+        break ;;
+      1) printf '      That is not the password for %s - try again.\n' "$RUN_USER" > /dev/tty ;;
+      *) printf '      That cannot be checked against the %s login here, so this network gets\n      a password of its own.\n' "$RUN_USER" > /dev/tty
+         break ;;
+    esac
+    tries=$((tries+1))
+  done
+  AP_SOURCE=own
+  while true; do
+    ask_password AP_PW "the ${AP_NAME} network (8 to 63 characters)"
+    wifi_length_ok "$AP_PW" && return 0
+    printf '      A WiFi password must be 8 to 63 characters - try again.\n' > /dev/tty
+    AP_PW=""
+  done
+}
+
 echo "Frugal IoT server installation"
 (( DRY_RUN )) && echo "Dry run - nothing will be changed" || echo "Log: ${LOG}"
 
@@ -375,6 +473,21 @@ if [[ -z "$BROKER_PW" ]]; then
 fi
 [[ -n "$BROKER_HOST" ]] || BROKER_HOST="$(hostname).local"
 
+# The setup network: whether it can be had here, and whether a previous run already gave it a
+# password - re-running this should not ask again. Read without a pipe into "grep -q", which under
+# pipefail can report a match as a failure when grep closes the pipe early.
+if (( SETUP_AP )); then AP_SKIP="$(ap_unavailable)"; else AP_SKIP="--no-setup-ap was given"; fi
+if [[ -n "$AP_PW" ]] && ! wifi_length_ok "$AP_PW"; then
+  echo "--ap-password must be 8 to 63 characters, which is what WiFi accepts" >&2; exit 1
+fi
+AP_KEEP=0
+if [[ -z "$AP_SKIP" && -z "$AP_PW" ]]; then
+  COMITUP_NOW="$(read_maybe_root "$COMITUP_CONF")"
+  grep -q '^ap_password:' <<< "$COMITUP_NOW" && { AP_KEEP=1; AP_SOURCE=kept; }
+fi
+# Not in a dry run: it would mean typing the login password for a run that then does nothing with it
+if [[ -z "$AP_SKIP" ]] && (( ! AP_KEEP )) && (( ! DRY_RUN )); then ask_ap_password; fi
+
 info "install into:  ${INSTALL_DIR}  (owned by ${RUN_USER})"
 info "organization:  ${ORG_ID} (${ORG_NAME})"
 info "broker URL:    ws://${BROKER_HOST}:9012"
@@ -391,6 +504,13 @@ $( (( NEEDS_SWAP )) && echo "  * add a 2G swap file, because this board has unde
   * install and configure mosquitto, with listeners on 1883 and 9012
   * create the superuser login and the ${ORG_ID} organization, and test the broker
   * install and start the frugaliot service, running as ${RUN_USER}
+$( if [[ -n "$AP_SKIP" ]]; then
+     echo "  * no setup network: ${AP_SKIP}"
+   else
+     echo "  * install comitup and the watchdog that keeps it honest, so that with no saved WiFi in"
+     echo "    range this Pi raises a network called ${AP_NAME} whose page sets a new one."
+     echo "    Its password: $( (( AP_KEEP )) && echo "kept, from ${COMITUP_CONF}" || { [[ -n "$AP_PW" ]] && echo "the one given" || echo "that of the ${RUN_USER} login, asked for"; } )"
+   fi )
 
 Passwords it would use. A generated one is different on every run, so pass it or type it if you
 want this exact set. All of them are shown here because a dry run writes no log; a real run prints
@@ -413,7 +533,9 @@ UPGRADE_PLAN="$(sudo_ apt-get -s full-upgrade 2>/dev/null | awk '/^Inst /{print 
 BOOT_BEFORE="$(boot_fingerprint)"
 # No reboot here even if this brings a new kernel, so that the run can continue unattended. Whether
 # one is needed is worked out below and said plainly in the summary.
-sudo_ env DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq
+# --force-confold: a package whose shipped configuration changed keeps the one on this machine
+# rather than stopping to ask. /etc/comitup.conf, written below, is one such.
+sudo_ env DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq -o Dpkg::Options::=--force-confold
 if [[ -n "$UPGRADE_PLAN" ]]; then
   info "upgraded: $(echo "$UPGRADE_PLAN" | wc -l | tr -d ' ') package(s)"
 else
@@ -861,6 +983,66 @@ else
 fi
 systemctl is-enabled --quiet frugaliot && ok "will start again at boot"
 
+step "A setup network, for when this Pi cannot find its WiFi"
+# Moved to another site, or the router replaced, a Pi on WiFi is unreachable - and changing its WiFi
+# needs a login. comitup raises a network of its own whenever no saved one is in range; its page
+# lists the networks it can see and takes the password for one. The watchdog covers two ways comitup
+# alone was seen to strand a Pi - see the comments in extras/frugaliot-ap-watchdog.
+if [[ -n "$AP_SKIP" ]]; then
+  info "not set up: ${AP_SKIP}"
+else
+  # The configuration goes in BEFORE the package, because installing it starts comitup at once - and
+  # without this file it uses its defaults, a network called comitup-<nnn> with NO password, raised
+  # straight away on a Pi that has no WiFi connection at that moment. Root 600: it holds a password,
+  # by default the login's, and comitup runs as root.
+  if (( AP_KEEP )); then
+    skip "${COMITUP_CONF} already has a password"
+  else
+    sudo_ install -o root -g root -m 600 /dev/null "$COMITUP_CONF"
+    printf '# Written by install-pi.sh: the network this Pi raises when no saved WiFi is in range.\n# After changing either line: sudo systemctl restart comitup\nap_name: %s\nap_password: %s\n' \
+        "$AP_NAME" "$AP_PW" | sudo_ tee "$COMITUP_CONF" >/dev/null
+    ok "${COMITUP_CONF} written"
+  fi
+  if dpkg -s comitup >/dev/null 2>&1; then
+    skip "comitup already installed"
+    # A restart while connected keeps the connection; it only matters for the next time it is lost
+    (( AP_KEEP )) || { sudo_ systemctl restart comitup; ok "comitup restarted to read the new password"; }
+  else
+    # --force-confold: the package ships its own /etc/comitup.conf, and would otherwise stop to ask
+    # which to keep
+    sudo_ env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confold comitup
+    ok "comitup installed"
+  fi
+
+  # From the installed package, not ${INSTALL_DIR}/extras - frugal-iot-init never overwrites its
+  # copy, so a release that changed one of these would otherwise never reach the system
+  install_extra() { # install_extra <file in extras/> <destination> <mode>; fails if already current
+    local src="${PKG_DIR}/extras/$1"
+    [[ -f "$src" ]] || src="${INSTALL_DIR}/extras/$1"
+    [[ -f "$src" ]] || { echo "Expected extras/$1 in ${PKG_DIR} or ${INSTALL_DIR}" >&2; exit 1; }
+    cmp -s "$src" "$2" && return 1
+    sudo_ install -o root -g root -m "$3" "$src" "$2"
+  }
+  WD_CHANGED=0
+  install_extra frugaliot-ap-watchdog         /usr/local/sbin/frugaliot-ap-watchdog            755 && WD_CHANGED=1 || true
+  install_extra frugaliot-ap-watchdog.service /etc/systemd/system/frugaliot-ap-watchdog.service 644 && WD_CHANGED=1 || true
+  install_extra frugaliot-ap-watchdog.timer   /etc/systemd/system/frugaliot-ap-watchdog.timer   644 && WD_CHANGED=1 || true
+  if (( WD_CHANGED )); then
+    sudo_ systemctl daemon-reload
+    ok "watchdog installed"
+  else
+    skip "watchdog already current"
+  fi
+  sudo_ systemctl enable -q --now frugaliot-ap-watchdog.timer
+
+  if systemctl is-active --quiet comitup; then
+    ok "comitup running: with no saved WiFi in range, this Pi raises ${AP_NAME}"
+  else
+    warn "comitup is not running, so this Pi will NOT raise ${AP_NAME} if it loses its WiFi."
+    warn "  Why: sudo tail -20 /var/log/comitup.log"
+  fi
+fi
+
 # ---------------------------------------------------------------- what is left to do
 
 IP_ADDR="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
@@ -881,6 +1063,22 @@ if (( ${#REBOOT_REASONS[@]} )); then
 else
   REBOOT_TEXT=" 3. No reboot needed. The kernel running now is the one on disk, and everything
     installed here is already running."
+fi
+
+if [[ -n "$AP_SKIP" ]]; then
+  AP_TEXT=" If this Pi loses its WiFi there is no setup network to fix it with (${AP_SKIP}).
+    It can then be reached only with a screen and keyboard, or an Ethernet cable."
+else
+  case "$AP_SOURCE" in
+    login) AP_PW_TEXT="the password of the ${RUN_USER} login" ;;
+    kept)  AP_PW_TEXT="unchanged - see ${COMITUP_CONF}" ;;
+    given) AP_PW_TEXT="the one you gave" ;;
+    *)     AP_PW_TEXT="$(shown AP_PW)" ;;
+  esac
+  AP_TEXT=" If this Pi cannot find its WiFi - moved, or a new router - it raises a network
+    called ${AP_NAME}. Join it from a phone or laptop; the password is
+    ${AP_PW_TEXT}. A page opens to choose the new WiFi.
+    INSTALLATION.md, \"Moving the Pi to another WiFi network\", has the rest."
 fi
 
 cat <<SUMMARY
@@ -938,6 +1136,8 @@ ${REBOOT_TEXT}
     instructions to follow there yet. Until then this is a plain HTTP server on your own
     network, which is all an offline installation needs. What you do not get is over-the-air
     firmware updates, since an ESP32 requires HTTPS to fetch them.
+
+${AP_TEXT}
 
  If anything looks wrong:
      cd ${INSTALL_DIR} && npx --no frugal-iot-diagnostic

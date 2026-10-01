@@ -1,0 +1,46 @@
+#!/usr/bin/zsh
+# Two guards for comitup, which raises the frugaliot-bridge-setup access point when no known WiFi
+# is in range. Installed to /usr/local/sbin by install-pi.sh, and run every minute by
+# frugaliot-ap-watchdog.timer. Argument: how many seconds the access point may stay up.
+#
+# 1. A WiFi network that gives no IPv4 address must count as FAILED. NetworkManager's default,
+#    ipv4.may-fail yes, together with the link-local IPv6 comitup sets, makes any network that
+#    completes the WiFi handshake "connected" - so a range extender that outlives its router, with
+#    no DHCP behind it, holds the Pi for ever and the access point never appears. comitup creates a
+#    new profile for each network chosen on its page, so this is applied every minute, not once.
+#
+# 2. Restart comitup when it has held the access point for too long. comitup only retries the saved
+#    networks while NOBODY is connected to its access point, and a phone or laptop that joined it
+#    once rejoins by itself whenever it appears - so after a power cut it could hold the Pi in AP
+#    mode for ever, with the real WiFi back and the bridge down. On a restart comitup tries every
+#    saved network before raising the access point again.
+
+LIMIT=${1:-900}
+MARK=/run/frugaliot-ap-since    # /run is emptied at boot, which is what we want
+
+for UUID in ${(f)"$(nmcli -t -f UUID,TYPE connection show | grep ':802-11-wireless$' | cut -d: -f1)"}; do
+  SETTINGS=("${(@f)$(nmcli -g 802-11-wireless.mode,ipv4.may-fail,connection.id connection show $UUID)}")
+  if [[ $SETTINGS[1] != ap && $SETTINGS[2] == yes ]]; then
+    echo "Requiring IPv4 on WiFi profile '$SETTINGS[3]'"
+    nmcli connection modify $UUID ipv4.may-fail no
+  fi
+done
+
+WIFI=$(nmcli -t -f DEVICE,TYPE device | awk -F: '$2 == "wifi" { print $1; exit }')
+if [[ -z $WIFI || "$(iw dev $WIFI info 2>/dev/null)" != *"type AP"* ]]; then
+  rm -f $MARK
+  exit 0
+fi
+
+NOW=$(date +%s)
+if [[ ! -f $MARK ]]; then
+  echo $NOW > $MARK
+  exit 0
+fi
+
+SINCE=$(<$MARK)
+if (( NOW - SINCE >= LIMIT )); then
+  echo "In AP mode for $(( NOW - SINCE ))s (limit ${LIMIT}s) - restarting comitup to retry saved networks"
+  rm -f $MARK
+  systemctl restart comitup
+fi

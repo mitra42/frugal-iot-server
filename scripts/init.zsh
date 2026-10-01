@@ -255,6 +255,11 @@ check_installed() {
 check_installed "${PKG}/extras/mosquitto.conf"    /etc/mosquitto/conf.d/frugal-iot.conf  plugin
 check_installed "${PKG}/extras/aclfile"           /etc/mosquitto/aclfile                 subset
 check_installed "${PKG}/extras/frugaliot.service" /etc/systemd/system/frugaliot.service  service
+# Installed as they are, so compared exactly. Absent on a machine with no WiFi, which install-pi.sh
+# leaves without a setup network - reported as "nothing to compare", which is what it is.
+check_installed "${PKG}/extras/frugaliot-ap-watchdog"         /usr/local/sbin/frugaliot-ap-watchdog             exact
+check_installed "${PKG}/extras/frugaliot-ap-watchdog.service" /etc/systemd/system/frugaliot-ap-watchdog.service  exact
+check_installed "${PKG}/extras/frugaliot-ap-watchdog.timer"   /etc/systemd/system/frugaliot-ap-watchdog.timer    exact
 
 if (( ${#DIFFER_TO} )); then
   echo

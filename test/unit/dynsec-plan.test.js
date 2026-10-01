@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { derivePassword, deriveLoggerPassword, groupsForUser, groupsForNode, groupsForLogger,
-         desiredRolesAndGroups, names } from '../../lib/dynsec-plan.js';
+         desiredRolesAndGroups, names, bridgesToSync } from '../../lib/dynsec-plan.js';
 
 const row = (capability, org, project = '') => ({ capability, org, project });
 
@@ -244,5 +244,33 @@ describe('groupsForNode', () => {
 
   it('names a node client after its own topic prefix, which is what %u expands to', () => {
     expect(names.nodeClient('dev', 'lotus', 'esp32-abc')).toBe('dev/lotus/esp32-abc');
+  });
+});
+
+describe('bridgesToSync', () => {
+  const sites = (list) => list.map((b) => b.site);
+
+  it('applies a dashboard-issued bridge whether or not the plugin has it - that is how a rebuild restores one', () => {
+    const { apply, skipped } = bridgesToSync([{ site: 'a', credential: 'derived' }], []);
+    expect(sites(apply)).toEqual(['a']);
+    expect(skipped).toEqual([]);
+  });
+
+  it('never touches a bridge authorized with addbridge-prod, even if the plugin has the name', () => {
+    // Its password is in mosquitto's password file; a plugin client of that name would replace it
+    for (const clients of [[], ['bridge-b']]) {
+      const { apply, skipped } = bridgesToSync([{ site: 'b', credential: 'password_file' }], clients);
+      expect(apply).toEqual([]);
+      expect(skipped).toMatchObject([{ site: 'b', account: 'bridge-b', reason: 'password_file' }]);
+    }
+  });
+
+  it('applies an unrecorded bridge only when the plugin already has it', () => {
+    // The 2.0.3 case: a password-file bridge with no record of being one, which a rebuild created a
+    // plugin client for and so cut off
+    const rows = [{ site: 'c', credential: null }, { site: 'd' }];
+    const { apply, skipped } = bridgesToSync(rows, ['bridge-c']);
+    expect(sites(apply)).toEqual(['c']);
+    expect(skipped).toMatchObject([{ site: 'd', reason: 'unknown' }]);
   });
 });
