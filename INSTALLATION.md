@@ -471,6 +471,14 @@ sudo cp extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf
 (Everything in `/etc/mosquitto/conf.d/` is read in addition to the packaged
 `/etc/mosquitto/mosquitto.conf`, which keeps its own settings for logging and persistence.)
 
+It also says how long the broker holds messages for a node that is asleep. Nodes keep their
+session with the broker across a sleep, so a setting changed on the dashboard while a node sleeps
+is held and handed over when it wakes - up to `max_queued_messages` (1000) per node, for up to
+`persistent_client_expiration` (14 days) of not reconnecting, after which the node simply
+subscribes afresh. Holding them across a broker restart relies on `persistence true` in the
+packaged `mosquitto.conf`, which Raspberry Pi OS and Debian both ship; check with
+`grep persistence /etc/mosquitto/mosquitto.conf`.
+
 That file also turns off the broker's per-connection logging, because a node on a weak signal
 reconnects constantly and each of those lines is a write to the SD card. Nothing is lost — the
 readings themselves are recorded by the server, and everything else the broker says, including why
