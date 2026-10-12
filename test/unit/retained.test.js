@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { deleteRetained, adminCredentialFor } from '../../lib/retained.js';
+import { deleteRetained, clearRetainedUnder, adminCredentialFor } from '../../lib/retained.js';
 import { deriveOrgAdminPassword, names } from '../../lib/dynsec-plan.js';
 
 const config = {
@@ -51,6 +51,23 @@ describe('deleteRetained refuses', () => {
   it('a configuration with no broker', async () => {
     const err = await refusal('myfarm', ['myfarm/lotus/n1/sht/x'], { secrets: config.secrets });
     expect(err.status).toBe(500);
+  });
+});
+
+describe('clearRetainedUnder refuses', () => {
+  const under = (org, prefix, cfg = config) =>
+    new Promise((resolve) => clearRetainedUnder(cfg, org, prefix, (err) => resolve(err)));
+  it('a prefix outside the organization, or only looking like it is inside', async () => {
+    expect((await under('myfarm', 'other/lotus/n1')).status).toBe(400);
+    expect((await under('myfarm', 'myfarmish/lotus/n1')).status).toBe(400);
+  });
+  it('a prefix wider than one node', async () => {
+    // The wildcard is added below the prefix, so "myfarm/lotus" would clear a whole project
+    expect((await under('myfarm', 'myfarm/lotus')).status).toBe(400);
+    expect((await under('myfarm', 'myfarm/+/n1')).status).toBe(400);
+  });
+  it('a configuration with no broker', async () => {
+    expect((await under('myfarm', 'myfarm/lotus/n1', { organizations: config.organizations })).status).toBe(500);
   });
 });
 

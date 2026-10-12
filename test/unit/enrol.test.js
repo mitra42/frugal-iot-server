@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Database } from 'sqlite3';
 import { readFileSync } from 'fs';
-import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode,
+import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode, formerProjects,
          makeAttemptLog, setGrant, clearGrant, readGrants } from '../../lib/enrol.js';
 
 const SCHEMA = readFileSync('./frugal-iot-createdb.sql', 'utf8');
@@ -415,5 +415,18 @@ describe('the record of attempts, across a restart', () => {
     const rows = await new Promise((res) =>
       db.all('SELECT * FROM node_attempts', [], (e, r) => res(r)));
     expect(rows).toEqual([]);
+  });
+});
+
+describe('a node that has moved project', () => {
+  it('enrols afresh in the new one, which then knows where it used to be', async () => {
+    await new Promise((res) => db.run(
+      "INSERT INTO projects (org, id, name) VALUES ('myfarm','developers','Developers')", res));
+    expect((await run(deps(), body())).err).toBe(null);
+    // A new project is a new node to enrolment: it holds no credential for it to prove
+    expect((await run(deps(), body({ project: 'developers' }))).err).toBe(null);
+    const olds = await new Promise((res) => formerProjects(db, 'myfarm', 'developers', 'esp32-abc',
+      (err, p) => res(p)));
+    expect(olds).toEqual(['lotus']);
   });
 });

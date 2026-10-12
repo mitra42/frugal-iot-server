@@ -110,9 +110,9 @@ import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { ensureSecrets, addEnrolmentSecret, removeEnrolmentSecret } from './lib/secrets.js';
 import { syncUser, syncUserById, syncLoggers, syncNode, dropNode, syncBridge } from './lib/dynsec-server.js';
-import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode,
+import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode, formerProjects,
          makeAttemptLog, setGrant, clearGrant, readGrants } from './lib/enrol.js';
-import { deleteRetained } from './lib/retained.js';
+import { deleteRetained, clearRetainedUnder } from './lib/retained.js';
 import { replicaFor, bridgeForToken, noteBridgePull, startReplica } from './lib/replica.js';
 import { addMissingColumns } from './lib/schema-columns.js';
 import { createLoggerClient } from './lib/logger-client.js';
@@ -780,6 +780,38 @@ function addLoggedNodesToConfig() {
     });
   });
 }
+/*
+ * A node has enrolled in a new project, so its old address is retired: enrolment, broker account,
+ * retained messages, and what the logger and /config.json remember of it.
+ *
+ * Done here, once it has arrived, rather than when the move is asked for. A sleeping node only gets
+ * the move when it next wakes, and it needs its old credential to receive it - removed earlier, the
+ * node would be refused, enrol again in the OLD project, and never hear of the move.
+ */
+function retireFormerHome(org, project, nodeid, cb) {
+  waterfall([
+    (cb1) => forgetNode(db, org, project, nodeid, (err) => cb1(err)),
+    // Best effort, as for /node_reset - frugal-iot-diagnostic reports anything left behind.
+    (cb1) => dropNode(config, org, project, nodeid, () => cb1(null)),
+    (cb1) => clearRetainedUnder(config, org, `${org}/${project}/${nodeid}`, (err, result) => {
+      if (err) { console.error("Retained messages for", `${org}/${project}/${nodeid}`, "not cleared:", err.message); }
+      cb1(null, result);
+    }),
+    (result, cb1) => {
+      // After the retained messages, or the logger would hear them again and remember the node.
+      mqttLogger.forgetNode(org, project, nodeid);
+      const nodes = config.organizations?.[org]?.projects?.[project]?.nodes;
+      if (nodes) { delete nodes[nodeid]; }
+      console.log("Node", nodeid, "moved out of", `${org}/${project}`, "-",
+        result ? `${result.deleted} retained topic(s) cleared` : "retained topics left");
+      cb1(null);
+    },
+  ], (err) => {
+    if (err) { console.error("Could not retire", `${org}/${project}/${nodeid}:`, err.message); }
+    cb(null);
+  });
+}
+
 // See lib/config-for-user.js - kept there so it can be tested without starting a server.
 function unsafeCopyConfigFor(user) {
   return buildConfigFor(config, user);
@@ -906,7 +938,13 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         req.body, (err, cred) => {
           if (!err) {
             console.log("Enrolled", cred.username, req.body.lora ? "(LoRa-capable)" : "");
-            return res.status(200).json(cred);
+            res.status(200).json(cred);
+            const { org, project, nodeid } = req.body;
+            formerProjects(db, org, project, nodeid, (ferr, olds) => {
+              if (ferr) { return console.error("Could not look for", nodeid, "elsewhere:", ferr.message); }
+              each(olds, (old, cb) => retireFormerHome(org, old, nodeid, cb), () => {});
+            });
+            return;
           }
           const status = {
             [ENROL.BAD_REQUEST]: 400,
