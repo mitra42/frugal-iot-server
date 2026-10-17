@@ -89,5 +89,8 @@
     "check-files": "node scripts/check-published-files.js"
   },
   "type": "module",
-  "version": "2.0.6"
+  "version": "2.0.6",
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
 }
