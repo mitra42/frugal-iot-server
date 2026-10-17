@@ -308,9 +308,9 @@ node -v
 
 What each is for:
 
-* `nodejs` — the server needs **Node 18 or later**. Current Raspberry Pi OS (Debian 13, trixie)
-  provides 20.19.2, which is fine, on 32-bit as well as 64-bit. Older images shipped Node 18, also
-  fine. If `node -v` reports anything below 18, install a current version from
+* `nodejs` — the server needs **Node 20.17 or later**. Current Raspberry Pi OS (Debian 13, trixie)
+  provides 20.19.2, which is fine, on 32-bit as well as 64-bit. Older images shipped Node 18, which
+  is too old. If `node -v` reports anything below 20.17, install a current version from
   [NodeSource](https://github.com/nodesource/distributions) instead.
 * `npm` — installs the server; it is a separate package from `nodejs` on Debian.
 * `sqlite3` — the database the server keeps its accounts in.

@@ -571,10 +571,11 @@ PACKAGES=(nodejs npm sqlite3 zsh curl)
 sudo_ env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PACKAGES[@]}"
 NODE_VERSION="$(node -v)"
 info "node ${NODE_VERSION}, npm $(npm -v), sqlite3 $(sqlite3 --version | awk '{print $1}')"
-# The server needs node 18 or later
+# The server needs node 20.17 or later (sqlite3 6 needs 20.17, nodemailer 10 needs 20)
 NODE_MAJOR="$(echo "${NODE_VERSION#v}" | cut -d. -f1)"
-if (( NODE_MAJOR < 18 )); then
-  echo "node ${NODE_VERSION} is too old - the server needs 18 or later." >&2
+NODE_MINOR="$(echo "${NODE_VERSION#v}" | cut -d. -f2)"
+if (( NODE_MAJOR < 20 || (NODE_MAJOR == 20 && NODE_MINOR < 17) )); then
+  echo "node ${NODE_VERSION} is too old - the server needs 20.17 or later." >&2
   echo "Install a current version from https://github.com/nodesource/distributions and run this again." >&2
   exit 1
 fi

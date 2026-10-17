@@ -8,7 +8,7 @@ thing in one go once you can ssh in.
 
 On a unix box that is already running ...
 
-Check you have node & npm installed `node -v` - version 18 or later.
+Check you have node & npm installed `node -v` - version 20.17 or later.
 If not then you'll need nodejs from [nodejs.org](https://nodejs.org) or your package manager.
 You also need `sqlite3` and `zsh` for the setup commands below.
 

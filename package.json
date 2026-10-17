@@ -19,10 +19,10 @@
     "morgan": "^1.11.0",
     "mqtt": "^5.15.2",
     "multer": "^2.1.1",
-    "nodemailer": "^9.0.6",
+    "nodemailer": "^10.1.2",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^6.0.1"
   },
   "bin": {
     "frugal-iot-server": "frugal-iot-server.js",
@@ -63,10 +63,8 @@
     "INSTALLATION.md"
   ],
   "devDependencies": {
-    "@types/jest": "^30.0.0",
-    "jest": "^30.4.2",
     "supertest": "^7.2.2",
-    "vitest": "^1.0.0"
+    "vitest": "^4.1.12"
   },
   "homepage": "https://github.com/mitra42/frugal-iot-server",
   "keywords": [
