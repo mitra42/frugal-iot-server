@@ -708,6 +708,15 @@ export function can_ADMIN(req, res, next) {
     res.sendStatus(401);
   }
 }
+// Whoever can flash a board can enrol it, so reading the enrolment secret needs no more than OTAFLASH.
+function can_ADMIN_or_OTAFLASH(req, res, next) {
+  if (req.isAuthenticated() && (hasPermissions(req.user, req.params.org, "ADMIN")
+      || hasPermissions(req.user, req.params.org, "OTAFLASH"))) {
+    next();
+  } else {
+    res.sendStatus(401);
+  }
+}
 // Exported for reuse by lib/api-routes.js - for resources (like api_platforms) that aren't scoped to a
 // single org, valid if the user has ADMIN on ANY org, rather than a specific one.
 export function can_ADMIN_SOME(req, res, next) {
@@ -1543,7 +1552,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
          */
         app.get('/enrolment_secret/:org',
           loggedInOrFail,
-          can_ADMIN,  // Gets org from URL - an admin sees only their own organization's
+          can_ADMIN_or_OTAFLASH,  // Gets org from URL - sees only their own organization's; rotating stays ADMIN
           (req, res) => {
             const org = req.params.org;
             // Worth a line: this is the one route that hands a secret to a browser.
