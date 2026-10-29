@@ -665,6 +665,15 @@ function can_OTAUPDATE(req, res, next) {
     res.sendStatus(401); // Just fail - shouldnt happen and anyway lost the file by now
   }
 }
+// Listing and downloading firmware is for anyone who can push it or flash it; deleting stays OTAUPDATE.
+function can_OTAUPDATE_or_OTAFLASH(req, res, next) {
+  if (req.isAuthenticated() && (hasPermissions(req.user, req.params.org, "OTAUPDATE")
+      || hasPermissions(req.user, req.params.org, "OTAFLASH"))) {
+    next();
+  } else {
+    res.sendStatus(401);
+  }
+}
 // Exported for reuse by lib/api-routes.js - reads org from req.params.org or res.locals.org, so callers must set one of those first.
 export function can_READ(req, res, next) {
   const org = req.params.org || res.locals.org;
@@ -1383,7 +1392,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         );
         app.get('/ota_list/:org',
           loggedInOrFail,
-          can_OTAUPDATE,
+          can_OTAUPDATE_or_OTAFLASH,
           (req,res) => {
             // TODO-N89 list all OTA files for an organization
             get_ota_dirs(req.params.org, (err, dirs) => {
@@ -1427,7 +1436,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         // and answers 304 rather than sending bytes.
         app.get('/ota_get/:org/*remainingpath',
           loggedInOrFail,
-          can_OTAUPDATE,
+          can_OTAUPDATE_or_OTAFLASH,
           (req,res) => {
             let filepath = safeJoin(config.server.otadir, req.params.org, ...[].concat(req.params.remainingpath), 'firmware.bin');
             if (!filepath) {
