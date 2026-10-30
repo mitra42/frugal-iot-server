@@ -133,11 +133,20 @@ if [[ ! -w "$MOSQUITTO_PASSWD_DIR" || ( -e "$MOSQUITTO_PASSWD_FILE" && ! -w "$MO
     fi
   fi
 fi
+# Run as root there is no sudo to go through (OpenWrt has none, and runs everything as root), and
+# mosquitto_passwd then rewrites the file as root - which the broker, running as its own account,
+# cannot read. So when root is doing it and somebody else owns the file, hand it back afterwards.
+if (( EUID == 0 )) && [[ -n "$MOSQUITTO_PASSWD_OWNER" && "$MOSQUITTO_PASSWD_OWNER" != "root" ]]; then
+  MOSQUITTO_RESTORE_OWNER=1
+fi
 # Called after any successful mosquitto_passwd run below
 restore_passwd_owner() {
   (( MOSQUITTO_RESTORE_OWNER )) || return 0
-  sudo chown "${MOSQUITTO_PASSWD_OWNER}:${MOSQUITTO_PASSWD_GROUP}" "$MOSQUITTO_PASSWD_FILE"
-  [[ -n "$MOSQUITTO_PASSWD_MODE" ]] && sudo chmod "$MOSQUITTO_PASSWD_MODE" "$MOSQUITTO_PASSWD_FILE"
+  local SUDO=(sudo)
+  (( EUID == 0 )) && SUDO=()
+  "${SUDO[@]}" chown "${MOSQUITTO_PASSWD_OWNER}:${MOSQUITTO_PASSWD_GROUP}" "$MOSQUITTO_PASSWD_FILE"
+  [[ -n "$MOSQUITTO_PASSWD_MODE" ]] && "${SUDO[@]}" chmod "$MOSQUITTO_PASSWD_MODE" "$MOSQUITTO_PASSWD_FILE"
+  return 0
 }
 
 # ---- Escaping helpers ----

@@ -60,7 +60,8 @@
     "extras/frugaliot-ap-watchdog.service",
     "extras/frugaliot-ap-watchdog.timer",
     "API.md",
-    "INSTALLATION.md"
+    "INSTALLATION.md",
+    "OPENWRT.md"
   ],
   "devDependencies": {
     "supertest": "^7.2.2",
