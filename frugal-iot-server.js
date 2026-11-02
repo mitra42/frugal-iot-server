@@ -107,6 +107,8 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 
 // API Integration - Farm IoT Interoperability Standard
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
+import { createGrafanaRouters } from './lib/grafana.js';
+import { createForwardersRouter, enabledConfigs } from './lib/forwarders.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { ensureSecrets, addEnrolmentSecret, removeEnrolmentSecret } from './lib/secrets.js';
 import { syncUser, syncUserById, syncLoggers, syncNode, dropNode, syncBridge } from './lib/dynsec-server.js';
@@ -1232,6 +1234,15 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.use('/api', apiRouter);
         console.log("Mounted API routes at /api");
 
+        // History for Grafana, by bearer token - see lib/grafana.js and GRAFANA.md
+        const grafana = createGrafanaRouters(db, config.server.datadir, loggerClient, { loggedInOrFail, can_ADMIN });
+        app.use('/grafana', grafana.data);
+        app.use('/grafana_token', grafana.admin);
+
+        // Where each organization's readings are forwarded, edited from the admin tab - lib/forwarders.js
+        app.use('/forwarders', createForwardersRouter(db, mqttLogger, () => config.organizations || {}, { loggedInOrFail, can_ADMIN }));
+        console.log("Mounted Grafana routes at /grafana");
+
         // Add API error handler
         app.use(createAPIErrorHandler()); // createAPIErrorHandler returns a function to use as error handler
         console.log("Added API error handler");
@@ -2001,7 +2012,12 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             o.logger_userid = cred.username;
             o.logger_password = cred.password;
           });
-          mqttLogger.start();
+          // Forwarders kept in the database go to the logger before it starts, so they are running when
+          // the broker connects. One that cannot be read is reported and the logger starts without it.
+          Promise.all(Object.keys(config.organizations || {}).map(async (org) => {
+            try { await mqttLogger.setForwarders(org, await enabledConfigs(db, org)); }
+            catch (ferr) { console.error(`Could not load the forwarders for ${org}:`, ferr.message); }
+          })).then(() => mqttLogger.start());
         });
 
         // On a bridged Pi, keep production's logins and permissions in step (SECURITY.md S11).

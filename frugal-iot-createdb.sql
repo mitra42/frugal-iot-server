@@ -88,6 +88,43 @@ CREATE TABLE IF NOT EXISTS `bridges` (
   UNIQUE(`org`, `site`)
 );
 
+-- Where an organization's readings are forwarded to (OpenSearch, Google Sheets), added from the
+-- dashboard's admin tab - see lib/forwarders.js. They are in addition to any "forwarders:" in the
+-- organization's YAML file, which stays as it is and is shown there read-only.
+--
+-- `config` is JSON in the same form as a YAML entry, minus "type". It includes passwords and API
+-- keys, in the clear, as the YAML file does: this database is not served and is backed up with the
+-- rest of the server, and the dashboard is only ever told THAT a secret is set, never its value.
+CREATE TABLE IF NOT EXISTS `forwarders` (
+  `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+  `org` TEXT NOT NULL,
+  `type` TEXT NOT NULL,
+  `name` TEXT NOT NULL,
+  `enabled` INTEGER NOT NULL DEFAULT 1,
+  `config` TEXT NOT NULL,
+  `created_at` INTEGER NOT NULL,
+  `updated_at` INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS `forwarders_org` ON `forwarders` (`org`);
+
+-- A credential for Grafana (or anything else that reads history over HTTP), see lib/grafana.js and
+-- GRAFANA.md. Read-only, and scoped to one organization: it can fetch that organization's readings
+-- through /grafana/:org/ and nothing else.
+--
+-- Only a SHA-256 of the token is kept, so a copy of this database does not hand out working
+-- credentials - the token itself is shown once, when it is issued. It is 32 random bytes, which is
+-- why a plain hash is enough and no salt or slow hash is needed. One token per name, so one
+-- Grafana can be revoked without disturbing another; issuing a name again replaces its token.
+CREATE TABLE IF NOT EXISTS `grafana_tokens` (
+  `org` TEXT NOT NULL,
+  `name` TEXT NOT NULL,
+  `token_hash` TEXT NOT NULL,
+  `created_at` INTEGER NOT NULL,
+  `last_used` INTEGER, -- Approximate - only rewritten if more than an hour old, to spare the SD card
+  UNIQUE(`org`, `name`)
+);
+CREATE INDEX IF NOT EXISTS `grafana_tokens_hash` ON `grafana_tokens` (`token_hash`);
+
 -- An admin's decision about one node, for the Enrolled column on the dashboard's Nodes card
 -- (SECURITY.md S12). Two states are worth storing:
 --

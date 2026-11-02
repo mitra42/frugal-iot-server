@@ -114,6 +114,26 @@ describe('what an organization block now contains', () => {
     expect(allStrings(out)).not.toContain('public');
   });
 
+  // The forwarders block holds an OpenSearch password, a Google Sheets webhook URL (which is a
+  // credential for writing to the sheet) and a Firebase service account path.
+  it('withholds where the organization forwards its readings, which is credentials', () => {
+    const c = config();
+    c.organizations.dev.forwarders = [
+      { type: 'opensearch', node: 'https://localhost:9200', username: 'admin', password: 'os-pass', apiKey: 'os-key' },
+      { type: 'gsheet', url: 'https://script.google.com/macros/s/SECRETWEBHOOK/exec' },
+    ];
+    c.organizations.dev.gsheets = [{ url: 'https://script.google.com/macros/s/OLDHOOK/exec' }];
+    c.organizations.dev.firebase = { serviceAccount: './firebase-service-account.json' };
+    for (const u of [user(['READ', 'dev']), user(['READ', 'dev'], ['ADMIN', 'dev'])]) {
+      const out = buildConfigFor(c, u);
+      for (const k of ['forwarders', 'gsheets', 'firebase']) expect(out.organizations.dev[k]).toBeUndefined();
+      const text = allStrings(out).join('\n');
+      for (const s of ['os-pass', 'os-key', 'SECRETWEBHOOK', 'OLDHOOK', 'firebase-service-account']) {
+        expect(text).not.toContain(s);
+      }
+    }
+  });
+
   it('still sends the rest of the organization', () => {
     const out = buildConfigFor(config(), user(['READ', 'dev']));
     expect(out.organizations.dev.name).toBe('Development');
