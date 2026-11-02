@@ -1,74 +1,57 @@
-# Installing OpenSearch, Dashboards and Grafana
+# Installing OpenSearch, Grafana and Dashboards
 
-This is for **browsing and charting your readings**. It is optional - the server and logger work
+This is for **browsing and charting your readings**. All of it is optional - the server and logger work
 without any of it, and the readings are always safe in the CSV files under `data/`.
 
-There are two separate ways to chart, and you can use either or both:
+## What goes where
 
-| | Gets its data from | Sees | Needs |
-|---|---|---|---|
-| **Grafana** | the server directly, over HTTP ([GRAFANA.md](GRAFANA.md)) | the complete history of every organization | Grafana + the Infinity plugin |
-| **OpenSearch Dashboards** (or Grafana's OpenSearch source) | OpenSearch, which the logger forwards readings to | only what has been forwarded, so only organizations that have the forwarder switched on | OpenSearch + Dashboards |
+There are two separate ways to chart, and they need different things in different places:
 
-If all you want is charts, **Grafana alone is enough** - skip OpenSearch. OpenSearch earns its place
-for searching and slicing readings in ways a chart-per-topic cannot, and for organizations that want
-Kibana-style tools.
+| Piece | What it is | Where it goes |
+|---|---|---|
+| **OpenSearch** | a search database the logger forwards readings to | **the server**, and only the server |
+| **Grafana** | charts - reads the server directly ([GRAFANA.md](GRAFANA.md)), or OpenSearch | **your own computer** (recommended), or the server |
+| **OpenSearch Dashboards** | OpenSearch's own browser for searching and charting | your computer or the server - but it must be able to reach OpenSearch |
+
+The simplest setup, and the one to start with: **Grafana on your own computer, reading the server
+directly.** It needs no OpenSearch at all, sees every reading ever recorded, and asks nothing of the
+server except the HTTPS it already serves. Nothing new is exposed to the internet.
+
+Add **OpenSearch on the server** when you want to search and slice readings in ways a chart per topic
+cannot. Use it from Grafana (on your computer or the server), or from OpenSearch Dashboards. Both need
+a way to reach OpenSearch, and for a computer other than the server that means opening it to the
+network, which is not set up here yet - see [Open questions](#open-questions).
+
+How heavy is each? OpenSearch is the heavy one: a Java program with its own 1 GB heap by default.
+Grafana and Dashboards are small by comparison - idle on a Mac, Grafana showed about 60 MB and
+Dashboards about 20 MB resident (macOS under-reports, so read that loosely; the packages are 810 MB and
+595 MB on disk). Either can sit on the server alongside OpenSearch; the question is who logs in to it,
+not whether it fits.
+
+**None of this is for the Raspberry Pi bridge.**
+
+> **Status:** the Grafana and Mac steps were followed on macOS with Homebrew (OpenSearch 3.9.0,
+> Dashboards 3.9.0, Grafana 13.3.0). The Linux steps are taken from OpenSearch's and Grafana's own
+> installation guides and have **not yet been run on a Linux server** - correct them where they differ.
 
 We use **OpenSearch**, not Elasticsearch: it is Apache-licensed, installs with Homebrew and apt, and
 Grafana can read it. OpenSearch Dashboards is its fork of Kibana, so Kibana guides are close but not
 identical. (The reasoning is also in a comment above the `OpenSearch` class in frugal-iot-logger's
 `index.js`, in case the decision is revisited.)
 
-**Not for the Raspberry Pi bridge.** OpenSearch is a Java program that wants a gigabyte or more of
-memory for itself. Put it on your Mac for trying things out, and on the production server.
-
-> **Status:** the Mac steps were followed on macOS with Homebrew (OpenSearch 3.9.0, Dashboards 3.9.0,
-> Grafana 13.3.0). The Linux steps are taken from OpenSearch's and Grafana's own installation guides
-> and have **not yet been run on a Linux server** - correct them where they differ, and say so under
-> [Open questions](#open-questions).
-
 ---
 
-## On a Mac (to try it out)
+## 1. On your own computer: Grafana
+
+On a Mac:
 
 ```sh
-brew install opensearch opensearch-dashboards grafana
-```
-
-Each is large, so do them one at a time on slow WiFi.
-
-### OpenSearch
-
-```sh
-brew services start opensearch
-curl http://localhost:9200          # should print a block of JSON with "cluster_name"
-```
-
-Homebrew's OpenSearch has **no security plugin**: it listens on `http://localhost:9200` with no login,
-and only your own machine can reach it. That is fine for trying things out and is not how the Linux
-install below behaves.
-
-### Dashboards
-
-Dashboards will not start until a folder exists that Homebrew forgot to create:
-
-```sh
-mkdir -p /opt/homebrew/var/run
-brew services start opensearch-dashboards
-```
-
-(Without it the service shows `error 1` in `brew services list`, and the log
-`/opt/homebrew/var/log/opensearch-dashboards.log` says it cannot open `opensearchDashboards.pid`.)
-Then open <http://localhost:5601>. The first start takes a minute or two.
-
-### Grafana
-
-```sh
+brew install grafana
 brew services start grafana
 ```
 
-Open <http://localhost:3000>. Grafana's own default login is `admin` / `admin`, and it asks you to
-change it. Then add the Infinity plugin and restart Grafana:
+Open <http://localhost:3000>. Grafana's default login is `admin` / `admin`, and it asks you to change it.
+Then add the Infinity plugin - in Grafana, Administration → Plugins → "Infinity" - or from the shell:
 
 ```sh
 /opt/homebrew/opt/grafana/bin/grafana cli --homepath /opt/homebrew/opt/grafana/share/grafana \
@@ -76,21 +59,20 @@ change it. Then add the Infinity plugin and restart Grafana:
 brew services restart grafana
 ```
 
-Continue at [GRAFANA.md](GRAFANA.md) to make a token and connect it to your server.
+For other systems, Grafana's own download page has installers for [Windows, Linux and others](https://grafana.com/grafana/download).
 
-### Stopping them again
+Then continue at [GRAFANA.md](GRAFANA.md) to make a token and chart your readings.
 
-```sh
-brew services stop grafana opensearch-dashboards opensearch
-```
-
-Homebrew restarts them at login until you do.
+To stop it: `brew services stop grafana` (Homebrew restarts it at login until you do).
 
 ---
 
-## On the production server (Debian / Ubuntu)
+## 2. On the server: OpenSearch
 
-### OpenSearch
+Only needed for the OpenSearch route above. Debian or Ubuntu.
+
+`apt-get` does the installing. The `curl` line just downloads the signing key for OpenSearch's
+repository, which apt needs in order to trust it:
 
 ```sh
 sudo apt-get update && sudo apt-get -y install lsb-release ca-certificates curl gnupg2
@@ -99,9 +81,9 @@ curl -fsSL https://artifacts.opensearch.org/publickeys/opensearch-release.pgp \
   | sudo gpg --dearmor -o /etc/apt/keyrings/opensearch.gpg
 ```
 
-Then add OpenSearch's apt repository (the `3.x/apt` line from
+Then add OpenSearch's apt repository - the `3.x/apt` line from
 [their Debian guide](https://docs.opensearch.org/latest/install-and-configure/install-opensearch/debian/),
-which is printed there for your architecture) and install, choosing an admin password now:
+which is printed there for your architecture - and install, choosing an admin password now:
 
 ```sh
 sudo apt-get update
@@ -111,10 +93,12 @@ sudo systemctl start opensearch
 curl https://localhost:9200 -u 'admin:<that password>' --insecure
 ```
 
-Unlike Homebrew's, this install **has the security plugin switched on**: HTTPS, a login, and a
-self-signed certificate (hence `--insecure`, which here just means "do not check it"). The password
-is only used to set up that demo security configuration. Config is in `/etc/opensearch/opensearch.yml`
-and the memory setting in `/etc/opensearch/jvm.options`.
+(That last `curl` only checks that it is answering. `--insecure` here means "do not check the
+certificate", because the one it ships with is self-signed.)
+
+This install **has the security plugin switched on**: HTTPS, a login, and that self-signed certificate.
+The password is only used to set up that demo security configuration. Config is in
+`/etc/opensearch/opensearch.yml` and the memory setting in `/etc/opensearch/jvm.options`.
 
 - **Memory:** the file ships with `-Xms1g` and `-Xmx1g` (a 1 GB heap). Give both lines the same value;
   more helps with a lot of history, and the machine needs that much free *beyond* what the server,
@@ -123,56 +107,52 @@ and the memory setting in `/etc/opensearch/jvm.options`.
 - **If it will not start**, look at `journalctl -u opensearch`. A common cause on Linux is the kernel
   setting `vm.max_map_count` being below 262144; `sudo sysctl -w vm.max_map_count=262144` fixes it until
   reboot, and a line in `/etc/sysctl.d/` makes it permanent.
-- **Do not open port 9200 to the internet.** The demo certificate and the password are not a basis
-  for that. Leave it listening on the machine itself, which is all the logger and Grafana need.
+- **Do not open port 9200 to the internet.** The demo certificate and the password are not a basis for
+  that. Leave it listening on the machine itself, which is all the logger needs.
 
-### Tell the logger to send to it
+### Send readings to it
 
-Easiest: in the dashboard, open the project's back, then the **Forwarders** card, and add an
-OpenSearch forwarder. It applies at once, with no restart. Or, in the organization's file under
-`config.d/organizations/` (which only whoever runs the server can edit, and where the settings the
-card does not offer - such as a CA certificate file - live):
+In the dashboard, open the project's back, then the **Forwarders** card, and add an **OpenSearch**
+forwarder:
 
-```yaml
-forwarders:
-  - type: opensearch
-    node: https://localhost:9200
-    username: admin
-    password: <the password you chose>
-    insecure: true        # the certificate is self-signed - fine for a connection that never leaves this machine
-    topics:               # optional - leave out to send everything that is logged
-      - dev/lotus/#
-```
+- OpenSearch URL: `https://localhost:9200`
+- Username `admin` and the password you chose
+- tick *Do not check the certificate* (it is self-signed, and the connection never leaves this machine)
+- optionally, *Only these topics*, e.g. `dev/lotus/#`; leave it empty to send everything that is logged
 
-The full list of settings is in frugal-iot-logger's README. Restart the server. The forwarder creates
-what it needs (an index template that makes `value` a number) the first time it starts.
+It applies at once, with no restart, and creates what it needs in OpenSearch (an index template that
+makes `value` a number) the first time it sends.
 
-> Using the `admin` account for this is the simplest thing that works, not the best: it can do
-> anything in OpenSearch. A role that can only write `frugaliot-*` indices would be better, and is
-> not yet written.
+> Using the `admin` account for this is the simplest thing that works, not the best: it can do anything
+> in OpenSearch. A role that can only write `frugaliot-*` indices would be better, and is not yet written.
 
 ### Loading the history you already have
 
-The forwarder only sends readings from the moment it starts. To bring in everything already on disk
-(safe to repeat, and safe while the logger is running):
+A forwarder only sends readings from the moment it is switched on. To bring in everything already on
+disk, from the server's directory (safe to repeat, and safe while the server is running):
 
 ```sh
-node node_modules/frugal-iot-logger/scripts/backfill-opensearch.js --config . --org dev --data data
+npx --no frugal-iot-backfill-opensearch dev dry-run     # count what would be sent
+npx --no frugal-iot-backfill-opensearch dev             # send it
+npx --no frugal-iot-backfill-opensearch dev 2026-09-01  # only files from that day on
 ```
 
-Add `--dry-run` first to see how many readings it would send.
+### Looking after it
 
-### OpenSearch Dashboards
+- **Old months.** Readings go into one index per organization per month, named like
+  `frugaliot-dev-2026.09`. To drop a month: `curl -X DELETE https://localhost:9200/frugaliot-dev-2026.02 -u admin:... --insecure`.
+  The CSV files are untouched.
+- **A gap while OpenSearch was down.** The forwarder does not retry a batch it could not send; the CSV
+  files have everything, and the backfill above fills the gap.
+- **Starting afresh.** Delete the indices (`frugaliot-*`) and run the backfill again.
 
-Dashboards is a separate package from OpenSearch, installed from
-[its own guide](https://docs.opensearch.org/latest/install-and-configure/install-dashboards/debian/).
-It listens on port 5601, and has to be told OpenSearch's address and the `admin` password in
-`/etc/opensearch-dashboards/opensearch_dashboards.yml`. Then, in Dashboards: **Dashboards Management →
-Index patterns → Create**, enter `frugaliot-*`, and choose `@timestamp` as the time field.
+---
 
-Do not expose 5601 to the internet either, without HTTPS in front of it.
+## 3. On the server too: Grafana
 
-### Grafana
+Optional - for charts that need no setup on anyone's computer. Everyone who uses it then needs a login
+to this Grafana, which is one more thing to look after. Because it is on the same machine as the
+server, its data source can reach the server at `http://localhost:8080` and nothing has to be exposed.
 
 ```sh
 sudo apt-get install -y apt-transport-https wget gnupg
@@ -191,20 +171,51 @@ sudo systemctl restart grafana-server
 ```
 
 It listens on port 3000, with Grafana's default login `admin` / `admin`, which it asks you to change.
-Continue at [GRAFANA.md](GRAFANA.md). Because Grafana is on the same machine as the server, its
-data source can use `http://localhost:8080` and nothing has to be exposed for it.
+Do not expose port 3000 to the internet without HTTPS in front of it. Then continue at
+[GRAFANA.md](GRAFANA.md).
+
+## 4. OpenSearch Dashboards
+
+Dashboards is a separate package from OpenSearch, installed from
+[its own guide](https://docs.opensearch.org/latest/install-and-configure/install-dashboards/debian/).
+It listens on port 5601, and has to be told OpenSearch's address and the `admin` password in
+`/etc/opensearch-dashboards/opensearch_dashboards.yml`. Then, in Dashboards: **Dashboards Management →
+Index patterns → Create**, enter `frugaliot-*`, and choose `@timestamp` as the time field.
+
+Do not expose 5601 to the internet either, without HTTPS in front of it. Whether to offer it to users
+at all, or only Grafana, is a decision still to make - see [Open questions](#open-questions).
 
 ---
 
-## Looking after it
+## For developers: trying the OpenSearch forwarder on a Mac
 
-- **Old months.** Readings go into one index per organization per month, named like
-  `frugaliot-dev-2026.09`. To drop a month: `curl -X DELETE http://localhost:9200/frugaliot-dev-2026.02`
-  (add `-u admin:... --insecure` and `https` on the Linux install). The CSV files are untouched.
-- **A gap while OpenSearch was down.** The forwarder does not retry a batch it could not send; the
-  CSV files have everything, and the backfill above fills the gap.
-- **Starting afresh.** Deleting the indices (`frugaliot-*`) and running the backfill again rebuilds
-  everything from the CSV files.
+Not something users do. To work on the logger's OpenSearch forwarder you want OpenSearch on your own
+machine:
+
+```sh
+brew install opensearch opensearch-dashboards
+brew services start opensearch
+curl http://localhost:9200          # a block of JSON with "cluster_name"
+```
+
+Homebrew's OpenSearch has **no security plugin**: it listens on `http://localhost:9200` with no login,
+and only your own machine can reach it. In the Forwarders card, use `http://localhost:9200` and leave
+the username and password empty.
+
+Dashboards will not start until a folder exists that Homebrew forgot to create:
+
+```sh
+mkdir -p /opt/homebrew/var/run
+brew services start opensearch-dashboards
+```
+
+(Without it the service shows `error 1` in `brew services list`, and the log
+`/opt/homebrew/var/log/opensearch-dashboards.log` says it cannot open `opensearchDashboards.pid`.)
+It is then at <http://localhost:5601>; create the `frugaliot-*` index pattern as in section 4.
+
+To stop them: `brew services stop opensearch-dashboards opensearch`.
+
+---
 
 ## Open questions
 
@@ -212,6 +223,8 @@ Please add what you find:
 
 - The Linux steps above have not been run. In particular: the exact `apt` repository line, whether
   OpenSearch Dashboards is in the same repository, and the Dashboards configuration.
+- **Reaching OpenSearch from another computer.** Grafana or Dashboards on your own computer cannot use
+  OpenSearch on the server without opening its port, with a proper certificate and per-organization
+  logins so one organization cannot read another's readings. That is not set up.
 - A write-only OpenSearch role for the logger, in place of `admin`.
-- Whether Grafana should reach the server over `http://localhost:8080` or the public URL on the
-  production machine.
+- Whether to offer OpenSearch Dashboards to users at all, or only Grafana.

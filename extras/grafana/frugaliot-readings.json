@@ -65,10 +65,41 @@
       },
       {
         "name": "topic",
-        "type": "textbox",
+        "type": "query",
         "label": "Topic",
-        "query": "dev/lotus/esp32-944104/aht20/temperature",
-        "description": "org/project/node/module/leaf - see GRAFANA.md for listing them"
+        "datasource": {
+          "type": "yesoreyeram-infinity-datasource",
+          "uid": "${DS_FRUGAL_IOT}"
+        },
+        "description": "Every topic this organization has readings for",
+        "query": {
+          "queryType": "infinity",
+          "refId": "variable",
+          "query": "",
+          "infinityQuery": {
+            "refId": "variable",
+            "type": "json",
+            "source": "url",
+            "format": "table",
+            "parser": "backend",
+            "url": "${server}/grafana/${org}/topics",
+            "url_options": {
+              "method": "GET"
+            },
+            "root_selector": "",
+            "columns": [
+              {
+                "selector": "topic",
+                "text": "topic",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "refresh": 1,
+        "sort": 1,
+        "includeAll": false,
+        "multi": false
       }
     ]
   },

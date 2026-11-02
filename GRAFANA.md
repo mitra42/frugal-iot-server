@@ -1,96 +1,88 @@
 # Charting your readings in Grafana
 
-The server can hand Grafana an organization's readings directly, from the same CSV files the logger
-writes. Nothing is copied into a second database, so Grafana sees the **complete** history of every
-topic, not just what was exported somewhere.
+Grafana can chart an organization's readings straight from this server, from the same CSV files the
+logger writes. Nothing is copied into a second database, so Grafana sees the **complete** history of
+every topic, not just what was exported somewhere.
 
-Grafana reads it with its free **Infinity** data source plugin, which can call any URL that returns
-JSON. Nothing has to be installed on the server for this beyond Frugal IoT itself.
+It needs nothing extra on the server, and Grafana can run **on your own computer**: all it asks of the
+server is ordinary HTTPS on the port the dashboard already uses, with a token you make for it. (To
+run Grafana on the server instead, see [INSTALL-OPENSEARCH.md](INSTALL-OPENSEARCH.md).)
 
-> **Status:** followed against Grafana 13.3 with Infinity 4.1.5 (a Mac, Homebrew install): the data
-> source, the query and the starter dashboard below all work. Not yet tried on a Linux server, or from
-> the Grafana UI by hand - the steps in section 3 were applied through Grafana's API with the same
-> settings, so button labels may differ slightly from what you see.
+Grafana reads the server with its free **Infinity** plugin, which can call any URL that returns JSON.
 
-Installing Grafana itself, on a Mac or a Linux server, is in [INSTALL-OPENSEARCH.md](INSTALL-OPENSEARCH.md).
+> **Status:** the server, the data source, the starter dashboard and its topic list were followed on
+> Grafana 13.3 with Infinity 4.1.5 (a Mac, Homebrew install), and the dashboard was loaded in a
+> browser to confirm it draws real readings. Two things are written but not yet tried against a real
+> Grafana: the downloadable data source file (it holds the same settings that worked when set through
+> Grafana's API), and the Grafana card on the dashboard clicked through by hand. Correct this page
+> where they differ.
 
-## 1. Make a token
+## Setting it up
 
-A token lets Grafana read **one organization**, read-only, and nothing else. Run this in the server's
-directory (the one with `frugal-iot.db`):
+You need to be an administrator of the organization.
 
-```sh
-npx --no frugal-iot-grafana-token add <org> <name>      # e.g.  add dev my-grafana
-npx --no frugal-iot-grafana-token list <org>
-npx --no frugal-iot-grafana-token revoke <org> <name>
-```
+1. **Install the Infinity plugin in Grafana.** In Grafana: Administration → Plugins, search for
+   "Infinity", install it, and restart Grafana if it asks. (Installing Grafana itself is in
+   [INSTALL-OPENSEARCH.md](INSTALL-OPENSEARCH.md).)
+2. **Make a token.** In the dashboard, open the project's back, then the **Grafana** card. Type a name
+   for this Grafana (so it can be revoked on its own later) and press *Make a token*. The token is shown
+   **once** - only a hash is kept, so it cannot be looked up again. If you lose it, make one with the
+   same name, which replaces it.
+3. **Give Grafana the data source.** Either press *Download the data source file* in the same place and
+   put it in Grafana's `provisioning/datasources` folder, then restart Grafana; or add it by hand in
+   Grafana under Connections → Data sources → Add → **Infinity**:
+   - Authentication: **Bearer Token**, with the token
+   - Allowed hosts: the address you reached this dashboard at, e.g. `https://frugaliot.naturalinnovation.org`
+4. **Import the dashboard.** In the Grafana card press *Download the dashboard*. In Grafana choose
+   Dashboards → New → Import, upload the file, and pick the data source from step 3 when it asks.
 
-The token starts `fiot_` and is printed **once** - only a hash is kept, so a copy of the database
-does not hand out working credentials. If it is lost, run `add` again with the same name: that
-replaces it. Use a different name for each Grafana, so one can be revoked without disturbing another.
+The dashboard has a list of every topic at the top to choose from, and the time range at the top right.
+The file already has this server and organization filled in.
 
-(An administrator can also issue tokens over HTTP, `POST /grafana_token/<org>` with `{"name": "..."}`
-while logged in. The dashboard has no page for this yet.)
+A token lets one Grafana read **one organization**, read-only, and nothing else. For another
+organization, make its own token, data source and import - the dashboard file is separate for each, so
+importing a second does not replace the first. *Revoke* on the card cuts off a Grafana at once.
 
-## 2. What Grafana can call
+## What the server provides
 
-All of these need the header `Authorization: Bearer fiot_...`, and the token must be for the `<org>` in
-the URL.
+For building your own panels. All of these need the header `Authorization: Bearer fiot_...`, and the
+token must be for the `<org>` in the URL.
 
 | URL | Returns |
 |---|---|
-| `/grafana/<org>/health` | `{"status":"ok"}` - for Grafana's "Save & test" |
+| `/grafana/<org>/health` | `{"status":"ok"}` |
 | `/grafana/<org>/topics` | every topic with readings: `[{topic, project, node, module, leaf}]`. Narrow with `?project=` and `?node=` |
 | `/grafana/<org>/data?topic=<topic>&from=<time>&to=<time>&maxPoints=<n>` | `[{"time": "2026-09-24T00:00:01.000Z", "value": 22.5}, ...]` |
 
 - `topic` is the full topic, `<org>/<project>/<node>/<module>/<leaf>`, e.g.
   `dev/lotus/esp32-944104/aht20/temperature`.
-- `from` and `to` are epoch **milliseconds** (which is what Grafana's `${__from}` and `${__to}` give), or an
-  ISO date. Without them you get the last 24 hours.
-- Past `maxPoints` (default 1000, at most 5000) readings are averaged into equal time buckets, so a
-  year of data does not travel as millions of rows.
+- `from` and `to` are epoch **milliseconds** (which is what Grafana's `${__from}` and `${__to}` give), or
+  an ISO date. Without them you get the last 24 hours.
+- Past `maxPoints` (default 1000, at most 5000) readings are averaged into equal time buckets, so a year
+  of data does not travel as millions of rows.
 - Readings that are not numbers (descriptions, colours) are left out - they cannot be charted.
 
-Quick check from a terminal:
+A panel in Grafana, using the Infinity data source: Type **JSON**, Parser **Backend**, Format **Time
+series**, URL
 
-```sh
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://your-server/grafana/dev/data?topic=dev/lotus/esp32-944104/aht20/temperature&from=2026-09-01T00:00:00Z"
+```
+https://your-server/grafana/dev/data?topic=dev/lotus/esp32-944104/aht20/temperature&from=${__from}&to=${__to}&maxPoints=1000
 ```
 
-## 3. Point Grafana at it (Infinity data source)
+and columns `time` → *Timestamp*, `value` → *Number*. Use a fixed `maxPoints`: Grafana has no macro for a
+panel's width in pixels, and `${__interval_ms}` is a duration, not a count.
 
-1. In Grafana, install the **Infinity** plugin (Administration → Plugins → search "Infinity"), and
-   restart Grafana. (Homebrew's Grafana has no plugin button that works from the shell; use
-   `grafana cli --homepath /opt/homebrew/opt/grafana/share/grafana --pluginsDir /opt/homebrew/var/lib/grafana/plugins plugins install yesoreyeram-infinity-datasource`.)
-2. Add a data source of type Infinity. Authentication: **Bearer Token**, with the `fiot_...` token.
-   Under *Allowed hosts* add your server's URL, e.g. `https://frugaliot.naturalinnovation.org`.
-3. In a panel, choose that data source, then Type **JSON**, Parser **Backend**, Format **Time series**:
-   - URL: `https://your-server/grafana/dev/data?topic=dev/lotus/esp32-944104/aht20/temperature&from=${__from}&to=${__to}&maxPoints=1000`
-   - Columns: `time` → *Timestamp*, `value` → *Number*.
+## From a shell instead
 
-`${__from}` and `${__to}` are Grafana's own, filled in from the time range at the top of the dashboard.
-Use a fixed `maxPoints`; Grafana has no macro for the panel's width in pixels, and `${__interval_ms}`
-is a duration, not a count.
-
-### The starter dashboard
-
-[extras/grafana/frugaliot-readings.json](extras/grafana/frugaliot-readings.json) is a ready-made
-dashboard with one chart and a **Topic** box to type any topic into. Import it with Dashboards → New →
-Import → upload the file. It asks for three things: the Infinity data source to use (one per
-organization, each holding that organization's token), the server's URL, and the organization.
-
-Import it again for another organization, choosing that organization's data source.
-
-To pick from a list instead of typing, `GET /grafana/<org>/topics` returns every topic; an Infinity
-query variable over that URL can feed a dropdown. The starter dashboard does not do this yet.
+If you can get to the server's directory, `npx --no frugal-iot-grafana-token add <org> <name>` makes a
+token, and `list` and `revoke` do what they say. It is the same as the card.
 
 ## Notes
 
-- Each organization needs its own token and its own data source in Grafana, which is what keeps one
-  organization's readings away from another's.
-- Readings are written to disk every few minutes, so the endpoint first asks the logger to write out
-  what it holds; a chart that reaches "now" is not short.
-- The CSV archive can contain a sensor's error value (an SHT sensor reports -45 or 130 when it fails).
+- Readings are written to disk every few minutes, so the server first asks the logger to write out what
+  it holds; a chart that reaches "now" is not short.
+- The CSV files can contain a sensor's error value (an SHT sensor reports -45 or 130 when it fails).
   They are real readings as far as the logger knows, so they appear on charts; set the panel's axis
   limits, or filter in Grafana, to leave them out.
+- The first topic in the list is simply the first alphabetically, and may be a sensor that has stopped,
+  which shows "No data" for a recent time range. Pick another.

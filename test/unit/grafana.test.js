@@ -184,6 +184,27 @@ describe('GET /grafana/:org/data', () => {
   });
 });
 
+describe('the starter dashboard', () => {
+  it('has this server and organization as its defaults, and is its own dashboard per organization', async () => {
+    const res = await request(app).get('/grafana_token/dev/dashboard?server=https://iot.example.org/some/path');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-disposition']).toMatch(/attachment; filename="frugaliot-dev-dashboard.json"/);
+    const byName = Object.fromEntries(res.body.__inputs.map((i) => [i.name, i.value]));
+    expect(byName.VAR_SERVER).toBe('https://iot.example.org'); // an origin, not a path
+    expect(byName.VAR_ORG).toBe('dev');
+    expect(res.body.uid).toBe('frugaliot-readings-dev');
+    expect(res.body.templating.list.some((v) => v.name === 'topic' && v.type === 'query')).toBe(true);
+  });
+  it('wants an http(s) server address', async () => {
+    for (const bad of ['', 'javascript:alert(1)', 'file:///etc/passwd', 'nonsense']) {
+      expect((await request(app).get(`/grafana_token/dev/dashboard?server=${encodeURIComponent(bad)}`)).status).toBe(400);
+    }
+  });
+  it('is for administrators of that organization only', async () => {
+    expect((await request(app).get('/grafana_token/winam/dashboard?server=https://x.org')).status).toBe(401);
+  });
+});
+
 describe('issuing tokens over HTTP', () => {
   it('an administrator gets the token once, and can list and revoke it', async () => {
     const made = await request(app).post('/grafana_token/dev').send({ name: 'home' });
