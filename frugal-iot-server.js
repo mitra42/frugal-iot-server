@@ -109,6 +109,7 @@ import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/f
 import { createAPIRouter, createAPIErrorHandler } from './lib/api-routes.js';
 import { createGrafanaRouters } from './lib/grafana.js';
 import { createForwardersRouter, enabledConfigs } from './lib/forwarders.js';
+import { createAccessRouter } from './lib/opensearch-access.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { ensureSecrets, addEnrolmentSecret, removeEnrolmentSecret } from './lib/secrets.js';
 import { syncUser, syncUserById, syncLoggers, syncNode, dropNode, syncBridge } from './lib/dynsec-server.js';
@@ -1152,7 +1153,13 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           secret: config.secrets.session_secret,
           resave: false,
           saveUninitialized: false,
-          cookie: { secure: 'auto' }  // TODO-N89 cant be secure: true while testing on HTTP
+          // "lax": the browser does not send the session cookie on a request made by a page on ANOTHER site
+          // (a form posted from there, a hidden image, a frame), only when the user themselves navigates
+          // here, e.g. by following a link. That is what stops another site acting as a logged-in
+          // administrator. Not "strict", which would also drop it on a link from an email or chat, so
+          // the first click on one would arrive logged out. Chrome and Edge already treat a cookie with
+          // no SameSite as lax; this makes it so for every browser.
+          cookie: { secure: 'auto', sameSite: 'lax' }  // TODO-N89 cant be secure: true while testing on HTTP
         }));
         // This defines he function that will be used to turn user data returned from database into object for the session
         passport.serializeUser(function(user, cb) {
@@ -1235,12 +1242,13 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         console.log("Mounted API routes at /api");
 
         // History for Grafana, by bearer token - see lib/grafana.js and GRAFANA.md
-        const grafana = createGrafanaRouters(db, config.server.datadir, loggerClient, { loggedInOrFail, can_ADMIN });
+        const grafana = createGrafanaRouters(db, config.server.datadir, loggerClient, { loggedInOrFail, can_READ });
         app.use('/grafana', grafana.data);
         app.use('/grafana_token', grafana.admin);
 
         // Where each organization's readings are forwarded, edited from the admin tab - lib/forwarders.js
-        app.use('/forwarders', createForwardersRouter(db, mqttLogger, () => config.organizations || {}, { loggedInOrFail, can_ADMIN }));
+        app.use('/forwarders', createForwardersRouter(db, mqttLogger, () => config.organizations || {}, { loggedInOrFail, can_ADMIN }, { localOpenSearch: () => config.opensearch }));
+        app.use('/opensearch_access', createAccessRouter(() => config.organizations || {}, { loggedInOrFail, can_READ }, () => config.opensearch));
         console.log("Mounted Grafana routes at /grafana");
 
         // Add API error handler
@@ -2015,7 +2023,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           // Forwarders kept in the database go to the logger before it starts, so they are running when
           // the broker connects. One that cannot be read is reported and the logger starts without it.
           Promise.all(Object.keys(config.organizations || {}).map(async (org) => {
-            try { await mqttLogger.setForwarders(org, await enabledConfigs(db, org)); }
+            try { await mqttLogger.setForwarders(org, await enabledConfigs(db, org, config.opensearch)); }
             catch (ferr) { console.error(`Could not load the forwarders for ${org}:`, ferr.message); }
           })).then(() => mqttLogger.start());
         });

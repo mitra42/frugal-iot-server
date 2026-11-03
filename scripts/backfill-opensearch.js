@@ -39,7 +39,7 @@ new MqttLogger().readYamlConfig('.', (err, config) => {
     if (dberr) { console.error(`Could not open ./frugal-iot.db: ${dberr.message}`); process.exit(1); }
     try {
       await initializeSchema(db); // makes the table if this database is from before it existed
-      const fromDb = (await enabledConfigs(db, org)).filter((c) => c.type === 'opensearch');
+      const fromDb = (await enabledConfigs(db, org, config.opensearch)).filter((c) => c.type === 'opensearch');
       // Still honoured while YAML forwarders are supported, so a server not yet moved over works
       const fromFile = (config.organizations[org].forwarders || []).filter((c) => c && c.type === 'opensearch');
       const forwarders = [...fromDb, ...fromFile];

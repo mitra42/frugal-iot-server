@@ -64,6 +64,7 @@ describe('buildConfigFor', () => {
   it('never sends the email section - it holds the SMTP password', () => {
     const c = config();
     c.email = { host: 'smtp.gmail.com', user: 'x@example.org', pass: 'app-password' };
+    c.opensearch = { node: 'http://localhost:9200', password: 'os-password', admin: { username: 'admin', password: 'os-admin' }, public: 'https://search.example.org' };
     const out = buildConfigFor(c, user(['READ', 'dev'], ['ADMIN', 'dev']));
     expect(out.email).toBeUndefined();
     expect(allStrings(out)).not.toContain('app-password');
@@ -116,6 +117,14 @@ describe('what an organization block now contains', () => {
 
   // The forwarders block holds an OpenSearch password, a Google Sheets webhook URL (which is a
   // credential for writing to the sheet) and a Firebase service account path.
+  it("withholds this server's own OpenSearch settings, which include an account that can manage logins", () => {
+    const c = config();
+    c.opensearch = { node: 'http://localhost:9200', password: 'os-password', admin: { username: 'admin', password: 'os-admin' } };
+    const text = JSON.stringify(buildConfigFor(c, user(['READ', 'dev'], ['ADMIN', 'dev'])));
+    expect(text).not.toContain('os-admin');
+    expect(text).not.toContain('os-password');
+  });
+
   it('withholds where the organization forwards its readings, which is credentials', () => {
     const c = config();
     c.organizations.dev.forwarders = [

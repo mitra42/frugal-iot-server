@@ -22,6 +22,8 @@ should exist; the database is the source of truth and the broker is rebuilt from
 | Server → organization | `<org>-admin` | Derived: `HMAC(user_secret, 'orgadmin:' ‖ org)` | Nowhere | Publish anywhere in that organization — only to clear retained messages |
 | Anonymous browser | none | — | — | Read whatever is marked public |
 | Bridged Pi | not a broker account | Random token, at pairing | `config.d/secrets.yaml` on the Pi | Read one organization's logins and permissions from production |
+| Grafana, or anything reading history | not a broker account | Random token, made by any user who can READ the organization | `frugal-iot.db`, `grafana_tokens` — only a SHA-256 of it | Read what its maker may READ in one organization, over `/grafana/<org>/`; nothing else |
+| A forwarder (OpenSearch, Google Sheets) | not a broker account | Whatever the destination takes | `frugal-iot.db`, `forwarders` — in the clear | Send one organization's logged readings where its ADMIN pointed it |
 | *Organization (legacy)* | `<org>` | Set by hand | `config.d/organizations/<org>.yaml` | Read/write its whole organization — **retires at S8** |
 
 Derived credentials are computed from `user_secret` when needed, so they can be reissued without
@@ -40,6 +42,9 @@ logins agree, and changing a login password retires the old broker credential by
 | Enrolment secrets | The dashboard's Nodes card, by an organization ADMIN |
 | Organizations | `frugal-iot-addorganization`, `frugal-iot-setpassword` |
 | Broker accounts | The server, automatically; `frugal-iot-rebuild-dynsec` to repair or report |
+| Forwarders | The dashboard's Forwarders card, by an organization ADMIN |
+| Grafana tokens | The dashboard's Grafana card, by anyone who can READ the organization (their own tokens) |
+| OpenSearch Dashboards logins | The dashboard's OpenSearch card, by anyone who can READ the whole organization (their own login) |
 | Diagnosis | `frugal-iot-diagnostic` |
 
 ---
@@ -194,6 +199,67 @@ browser, which cannot publish readings at all.
 taken from the normalised path. The API of API.md is a separate router: `READ` for data, `WRITE` for
 anything that commands a device.
 
+### Reading history from Grafana
+
+`GET /grafana/<org>/{health,topics,data}` serves an organization's readings to Grafana, authenticated by a bearer token. Shown once, stored as SHA-256.
+
+* **Scope.** One organization, read-only. Tokens with wrong organization
+refused same as unknown to prevent fishing for orgs.
+* **A token acts as the user who made it.** `grafana_tokens.user_id` records who, and each request checks current permissions for READ on the org & projects. Topic lists filtered. 
+* **Who may issue them.**  Tokens issued and revokable by anyone with READ perms on org on admin/Grafana card. Org admin can list & revoke everyone's.
+refused, as for forwarders. Max 10 tokens per user per org. The reply that carries a token is marked `no-store`.
+* **Revocation** is immediate, per token. Making a token with an existing name replaces it. There is no
+  expiry: revoke one that is no longer wanted. `last_used` (rewritten at most hourly, to spare the SD
+  card) shows which are idle.
+* **The topic** comes from the URL, so it is held to five plain levels of `[A-Za-z0-9_.+-]`, the first
+  being the token's own organization, with no `.` or `..`, before it is anywhere near a path.
+* **Load.** A token can ask for any range, so history is averaged as it is read and never held whole. Max 2 simultaneous reads per org & 4 total. Topic list cached for a minute.
+* **Transport.** The token travels in a header, over HTTPS in production. Anyone holding it can read that
+  organization, so treat it as a password; the data source file the dashboard offers contains it.
+
+### Forwarders
+
+An organization ADMIN can make this server send that organization's logged 
+readings to an OpenSearch server or a Google Sheet. 
+Server connects, so URLs restricted.
+
+* Only the settings a type lists are accepted; anything else is refused. Nothing that names
+  a file on this machine (a CA certificate, a Firebase service account) can be set from the dashboard,
+  nor the index prefix, which would let one organization write into another's index. Those stay in YAML,
+  which only whoever runs the server can edit.
+* **Where it may connect** is judged by what an address is, not how it is written (`lib/destinations.js`):
+  private, link-local (where cloud metadata lives), shared, reserved and multicast addresses are
+  refused - including IPv4 hidden inside IPv6 and numeric spellings - and so is a name that resolves to
+  one of them, or to any mix that includes one. **Nothing on this machine may be used from the dashboard,
+  for any type**: this server's own OpenSearch is the separate "OpenSearch on this server" type, whose
+  address and credentials come from `config.d/opensearch.yaml` (never from a request, never sent to a
+  browser), so an administrator cannot aim the server at another service on its own machine. A URL may not
+  carry a login. This is checked when a forwarder is saved; a name that later resolves elsewhere (DNS rebinding)
+  is not caught, and replies are never shown to the browser, which limits what a stray connection can
+  reveal. It limits what an administrator can reach and probe; the machine's own firewall is still what
+  keeps the server away from a private network.
+* **A Google Sheets request never follows a redirect**, and its address - a credential - is kept out of
+  the logs, which name only the host.
+* There is no "do not check the certificate" for another server's OpenSearch, which must be https: turning
+  it off across the internet defeats the point of TLS. (The operator's `insecure` in
+  `config.d/opensearch.yaml` is for this machine's own demo certificate, and is theirs alone to set.)
+* Secrets (an OpenSearch password or key, the Google Sheets web app URL, which is a credential for writing
+  to the sheet) are never sent back to a browser - a forwarder is listed with which are set, and a blank
+  on edit keeps the old value. They are stored in the clear in `frugal-iot.db`, as they were in YAML.
+* An organization is limited to ten forwarders, each to 100 topic patterns (every logged message is
+  matched against every pattern, in the process all organizations share). The limit on forwarders is part
+  of the insert, so requests arriving together cannot get past it.
+* **Whole-organization ADMIN is required**, not ADMIN for one project: a forwarder sends every project's
+  readings. (`can_ADMIN` answers "admin of something in this organization", which a project-scoped
+  administrator is.)
+* **JSON only.** These routes refuse a form post. The server parses form bodies for every route, and a
+  form can be sent from another site with an administrator's session without any permission from this
+  server; JSON cannot. The session cookie has no `SameSite` attribute, so the browser's own default is
+  what protects the rest of the dashboard.
+
+What a forwarder sends is only what the logger logged: not `log: false` topics, duplicates, retained
+values or `set/` commands.
+
 ### Firmware over the air
 
 `GET /ota_update/:org/:project/:node/:attribs` is unauthenticated — a node has no credential to
@@ -218,10 +284,12 @@ to be inside their root. OTA requires HTTPS, so production runs behind a reverse
 | Node credentials | `frugal-iot.db`, `nodes` |
 | Node approvals and denials | `frugal-iot.db`, `node_grants` |
 | Bridge tokens (on production) | `frugal-iot.db`, `bridges` |
+| Grafana tokens | `frugal-iot.db`, `grafana_tokens` — a SHA-256 only |
+| Forwarders (with their passwords and keys) | `frugal-iot.db`, `forwarders` |
 | Which production a Pi replicates from | `config.d/replica.yaml`, with the token in `secrets.yaml` |
 | Projects | `frugal-iot.db`, `projects` |
 | Server secrets | `config.d/secrets.yaml` — never served, generated if absent, never committed |
-| Organizations | `config.d/organizations/<org>.yaml` — served to logged-in browsers |
+| Organizations | `config.d/organizations/<org>.yaml` — served to logged-in browsers, except `mqtt_password`, `logger_password` and `forwarders` (with the older `gsheets` and `firebase`), which are credentials |
 | Broker accounts, groups, roles | `/var/lib/mosquitto/dynamic-security.json` |
 | Legacy broker passwords | `/var/lib/mosquitto/passwords`, with `/etc/mosquitto/aclfile` |
 | Bridge credentials | `/etc/mosquitto/conf.d/`, mode 600 root |
@@ -237,6 +305,42 @@ to be inside their root. OTA requires HTTPS, so production runs behind a reverse
 `<org>` from the broker's password file and `mqtt_password` from
 `config.d/organizations/*.yaml`; stop `addorganization` creating one. Until this is done, a
 credential extracted from any node's flash can still publish anything in that organization.
+
+**S10 — OpenSearch for organizations.** Built, **not yet tried on a Linux server** (Homebrew's OpenSearch
+has no security plugin). OpenSearch holds every organization's readings in `frugaliot-<org>-<month>`
+indices; what keeps one organization from another's is OpenSearch's own role system, not this server:
+
+* Each person who can read the whole organization makes their own login on the dashboard's OpenSearch card
+  (`lib/opensearch-access.js`): user `frugaliot_<org>_<username>`, so one person has a separate login per
+  organization and people can be removed one at a time. The server, using the account in
+  `config.d/opensearch.yaml` (`admin:`), makes the user and the organization's shared role through
+  OpenSearch's security API; the user is tied to the role by a backend role, so adding or removing a person
+  never rewrites a list another request is changing. The role may **read** `frugaliot-<org>-*` and
+  do anything to `.kibana_<org>` and `.kibana_<org>_*` (the organization's own saved-dashboards index, which
+  `opensearchDashboards.index` points Dashboards at), and nothing else; it is not granted `.kibana`, any
+  other organization's indices, or any cluster-wide management. The password is 24 random bytes, shown once.
+* Only an organization id of lower-case letters and digits is accepted. That is what keeps the patterns
+  exact: with `-` or `_` allowed, `frugaliot-dev-*` would match `dev-x`'s indices.
+* Needs READ for the **whole** organization (not one project): the role is not limited to a project, so a
+  project-scoped reader is refused and pointed at Grafana, whose tokens do follow project permissions. A
+  person manages their own login; an administrator of the whole organization lists and removes anyone's.
+  JSON only (a form post is refused). The username must be letters, digits, `.` `_` `-`, so it cannot
+  alter the OpenSearch name it becomes.
+* **OpenSearch does not follow this server's permissions afterwards.** A login stays until it is removed,
+  so someone whose READ is withdrawn keeps reading the organization through Dashboards until an
+  administrator removes it (the card lists them). Doing that automatically is not built.
+* **Transport.** The login and the readings cross the internet, so they must be HTTPS: Apache terminates
+  TLS in front of OpenSearch (INSTALL-OPENSEARCH.md section 3), OpenSearch stays on loopback, and Apache
+  refuses `/_plugins/_security/api` so that nobody outside can manage logins. The server's own calls go to
+  OpenSearch directly on the machine.
+* The `admin` account is now reachable from the internet through Apache by whoever guesses its password.
+  Use a long one; rate-limit failures in front of it.
+* `config.d/opensearch.yaml` (an account that can change security) is never sent to a browser - it is in
+  the list of sections withheld from `/config.json`, with a test.
+* A forwarder to **another server's** OpenSearch (an organization's own, elsewhere) is the organization's
+  own deliberate choice: what it receives is outside this system's control. It must be https on a public
+  address, as above.
+* Still to do: removing a login when its owner loses READ; a write-only role for the forwarder in place of `admin`; limiting a login to one project.
 
 **S9 — optional.**
 

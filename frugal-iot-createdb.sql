@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS `grafana_tokens` (
   `token_hash` TEXT NOT NULL,
   `created_at` INTEGER NOT NULL,
   `last_used` INTEGER, -- Approximate - only rewritten if more than an hour old, to spare the SD card
+  `user_id` INTEGER, -- whose permissions the token acts with; NULL (from before this) is not honoured
   UNIQUE(`org`, `name`)
 );
 CREATE INDEX IF NOT EXISTS `grafana_tokens_hash` ON `grafana_tokens` (`token_hash`);

@@ -19,7 +19,9 @@ Grafana reads the server with its free **Infinity** plugin, which can call any U
 
 ## Setting it up
 
-You need to be an administrator of the organization.
+Anyone who can **read** the organization can make a token for themselves - you do not need to be an
+administrator. A token is yours: Grafana sees what *you* can see, so a token made by someone who can
+read only one project shows that project only.
 
 1. **Install the Infinity plugin in Grafana.** In Grafana: Administration → Plugins, search for
    "Infinity", install it, and restart Grafana if it asks. (Installing Grafana itself is in
@@ -39,7 +41,8 @@ You need to be an administrator of the organization.
 The dashboard has a list of every topic at the top to choose from, and the time range at the top right.
 The file already has this server and organization filled in.
 
-A token lets one Grafana read **one organization**, read-only, and nothing else. For another
+A token lets one Grafana read **one organization**, read-only, and nothing else - and only the
+projects of it that the person who made the token may read. For another
 organization, make its own token, data source and import - the dashboard file is separate for each, so
 importing a second does not replace the first. *Revoke* on the card cuts off a Grafana at once.
 
@@ -72,10 +75,33 @@ https://your-server/grafana/dev/data?topic=dev/lotus/esp32-944104/aht20/temperat
 and columns `time` → *Timestamp*, `value` → *Number*. Use a fixed `maxPoints`: Grafana has no macro for a
 panel's width in pixels, and `${__interval_ms}` is a duration, not a count.
 
+## Keeping it safe
+
+- **A token is a password.** Anyone holding it can read what its maker can read, and the data
+  source file the card offers has it inside, so do not leave that file lying about or send it by mail.
+  The server cannot show a token again, only replace it.
+- It is **read-only and for one organization**. It cannot change anything, and the server refuses it for
+  any other organization.
+- It **acts as the person who made it**, and is checked against their permissions every time it is
+  used. If their access to the organization or a project is removed, the token loses it at once - there
+  is nothing to revoke. Someone cannot use a token to see more than they could on the dashboard.
+- You see and revoke your own tokens. An administrator of the whole organization sees everyone's and
+  can revoke any, for example when a Grafana is lost.
+- **Revoke** on the card cuts a Grafana off at once. Make one token per Grafana, named for it, so one
+  can go without disturbing the rest, and revoke any that is no longer used - the card shows when each
+  was last used. Tokens do not expire on their own.
+- Grafana should reach the server over **HTTPS**, since the token travels in a header.
+- On a Grafana that other people use, give **each organization its own Grafana organization**, with its
+  own data source and token: everyone in a Grafana organization shares its data sources, so anyone who
+  can edit a dashboard there can read whatever the token allows.
+- The server limits what a token can cost it: long histories are averaged as they are read, only a few
+  reads run at once - and only two for any one organization - (Grafana is told to retry), and the topic
+  list is cached for a minute. Each user can hold up to 10 tokens per organization.
+
 ## From a shell instead
 
-If you can get to the server's directory, `npx --no frugal-iot-grafana-token add <org> <name>` makes a
-token, and `list` and `revoke` do what they say. It is the same as the card.
+If you can get to the server's directory, `npx --no frugal-iot-grafana-token add <org> <username> <name>` makes a
+token for that user, and `list` and `revoke` do what they say. It is the same as the card, except you name whose token it is.
 
 ## Notes
 
