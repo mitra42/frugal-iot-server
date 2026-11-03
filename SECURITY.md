@@ -254,8 +254,13 @@ Server connects, so URLs restricted.
   administrator is.)
 * **JSON only.** These routes refuse a form post. The server parses form bodies for every route, and a
   form can be sent from another site with an administrator's session without any permission from this
-  server; JSON cannot. The session cookie has no `SameSite` attribute, so the browser's own default is
-  what protects the rest of the dashboard.
+  server; JSON cannot. The session cookie is `SameSite=Lax` (and `Secure` over HTTPS), so a
+  browser does not send it with a form posted from another site.
+
+*Send earlier readings* (`POST /forwarders/:org/backfill`) has the same guards as the rest - JSON only,
+whole-organization ADMIN - and sends the organization's own recorded readings to the forwarder's own,
+already-checked destination, never to an address in the request. It runs one job at a time per forwarder,
+and the request names only a forwarder and a date.
 
 What a forwarder sends is only what the logger logged: not `log: false` topics, duplicates, retained
 values or `set/` commands.
@@ -318,7 +323,10 @@ indices; what keeps one organization from another's is OpenSearch's own role sys
   never rewrites a list another request is changing. The role may **read** `frugaliot-<org>-*` and
   do anything to `.kibana_<org>` and `.kibana_<org>_*` (the organization's own saved-dashboards index, which
   `opensearchDashboards.index` points Dashboards at), and nothing else; it is not granted `.kibana`, any
-  other organization's indices, or any cluster-wide management. The password is 24 random bytes, shown once.
+  other organization's indices, or any cluster-wide management. It also has three read-only checks
+  Dashboards will not start without, found by running it: node info, cluster state and looking up
+  aliases. The last two let the login see the *names* of other organizations' indices and aliases
+  (so it can tell they exist), not their contents. The password is 24 random bytes, shown once.
 * Only an organization id of lower-case letters and digits is accepted. That is what keeps the patterns
   exact: with `-` or `_` allowed, `frugaliot-dev-*` would match `dev-x`'s indices.
 * Needs READ for the **whole** organization (not one project): the role is not limited to a project, so a

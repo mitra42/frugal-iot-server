@@ -49,10 +49,12 @@ describe('the role', () => {
   it('reads only this organization\'s readings, and owns only its own saved-objects index', () => {
     const role = roleFor('dev');
     const patterns = role.index_permissions.map((p) => p.index_patterns).flat();
-    expect(patterns).toEqual(['frugaliot-dev-*', '.kibana_dev', '.kibana_dev_*']);
+    expect(patterns).toEqual(['frugaliot-dev-*', '.kibana_dev', '.kibana_dev_*', '*']);
     expect(role.index_permissions[0].allowed_actions).not.toContain('write');
     expect(role.index_permissions[0].allowed_actions).not.toContain('indices_all');
-    expect(JSON.stringify(role)).not.toContain('"*"');
+    // The one grant on every index is looking aliases up - Dashboards cannot start without it
+    const everywhere = role.index_permissions.filter((p) => p.index_patterns.includes('*'));
+    expect(everywhere).toEqual([{ index_patterns: ['*'], allowed_actions: ['indices:admin/aliases/get'] }]);
   });
 });
 
@@ -177,6 +179,9 @@ describe('who may ask', () => {
     expect(calls).toEqual([]);
   });
   it('quotes the config so a value cannot add lines', () => {
+    const cfg = dashboardsConfig({ public: 'https://x.org' }, 'dev', 'mitra', 'pw');
+    expect(cfg).toContain('opensearch.requestHeadersAllowlist: []');
+    expect(cfg).toContain(`authorization: "Basic ${Buffer.from('frugaliot_dev_mitra:pw').toString('base64')}"`);
     expect(dashboardsConfig({ public: 'https://x.org/"\nevil: 1' }, 'dev', 'mitra', 'p"w')).not.toMatch(/\nevil: 1/);
     expect(namesFor('dev', 'mitra').savedIndex).toBe('.kibana_dev');
   });

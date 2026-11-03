@@ -101,7 +101,7 @@ import morgan from 'morgan'; // https://www.npmjs.com/package/morgan - http requ
 
 // If you are developing comment out the Production line, and uncomment the Development line
 // Production
-import { MqttLogger } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
+import { MqttLogger, backfillOpenSearch } from "frugal-iot-logger";  // https://github.com/mitra42/frugal-iot-logger
 // Development of Logger
 // import { MqttLogger } from "../frugal-iot-logger/index.js";  // https://github.com/mitra42/frugal-iot-logger
 
@@ -1247,7 +1247,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.use('/grafana_token', grafana.admin);
 
         // Where each organization's readings are forwarded, edited from the admin tab - lib/forwarders.js
-        app.use('/forwarders', createForwardersRouter(db, mqttLogger, () => config.organizations || {}, { loggedInOrFail, can_ADMIN }, { localOpenSearch: () => config.opensearch }));
+        app.use('/forwarders', createForwardersRouter(db, mqttLogger, () => config.organizations || {}, { loggedInOrFail, can_ADMIN }, { localOpenSearch: () => config.opensearch, backfill: backfillOpenSearch, dataDir: config.server.datadir }));
         app.use('/opensearch_access', createAccessRouter(() => config.organizations || {}, { loggedInOrFail, can_READ }, () => config.opensearch));
         console.log("Mounted Grafana routes at /grafana");
 

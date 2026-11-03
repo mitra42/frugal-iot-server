@@ -5,19 +5,23 @@
 # login for OpenSearch Dashboards on the Dashboards access card. Neither shows an address or a password:
 # they come from here, and never leave this machine.
 #
-# opensearch:
-#   node: http://localhost:9200          # where this server reaches OpenSearch - on this machine
-#   username: frugaliot_logger           # what the forwarder writes readings as
+# Write the lines at the top level, as below: the file's name already says they are about opensearch.
+#
+# node: https://localhost:9200         # where this server reaches OpenSearch - on this machine.
+#                                      # https on a Linux install (it has a login); http://localhost:9200
+#                                      # only for Homebrew's OpenSearch on a Mac, which has neither
+# username: admin                      # what the forwarder writes readings as
+# password: change-me
+# insecure: true                       # OpenSearch's own certificate is self-signed, which can't be checked.
+#                                      # Needed with https://localhost; leave it out for http
+#
+# # The account that makes and removes the per-organization logins on the Dashboards access card.
+# # It must be allowed to change security settings, which is much more than the logger needs - so it
+# # is separate, and you can leave it out if you would rather make those logins by hand.
+# admin:
+#   username: admin
 #   password: change-me
-#   # insecure: true                     # only for OpenSearch's demo certificate, which no one can check
 #
-#   # The account that makes and removes the per-organization logins on the Dashboards access card.
-#   # It must be allowed to change security settings, which is much more than the logger needs - so it
-#   # is separate, and you can leave it out if you would rather make those logins by hand.
-#   admin:
-#     username: admin
-#     password: change-me
-#
-#   # The address Dashboards on someone's own computer uses to reach OpenSearch: https, through
-#   # Apache (INSTALL-OPENSEARCH.md), never the port 9200 above.
-#   public: https://search.example.org
+# # The address Dashboards on someone's own computer uses to reach OpenSearch: https, through
+# # Apache (INSTALL-OPENSEARCH.md), never the port 9200 above.
+# public: https://search.example.org

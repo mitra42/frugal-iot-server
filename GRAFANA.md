@@ -17,7 +17,31 @@ Grafana reads the server with its free **Infinity** plugin, which can call any U
 > Grafana's API), and the Grafana card on the dashboard clicked through by hand. Correct this page
 > where they differ.
 
+## Installing
+
+#### On a Mac, 
+
+```sh
+brew install grafana
+brew services start grafana
+```
+
+Open <http://localhost:3000>. Grafana's default login is `admin` / `admin`, and it asks you to change it.
+Then add the Infinity plugin - in Grafana, Administration → Plugins → "Infinity" - or from the shell:
+
+```sh
+/opt/homebrew/opt/grafana/bin/grafana cli --homepath /opt/homebrew/opt/grafana/share/grafana \
+  --pluginsDir /opt/homebrew/var/lib/grafana/plugins plugins install yesoreyeram-infinity-datasource
+brew services restart grafana
+```
+To stop it: `brew services stop grafana` (Homebrew restarts it at login until you do).
+
+#### On Windows, Linux and other systems
+
+For other systems, Grafana's own download page has installers for [Windows, Linux and others](https://grafana.com/grafana/download).
+
 ## Setting it up
+Access Grafana from your browser at [localhost:3000](http://localhost:3000)
 
 Anyone who can **read** the organization can make a token for themselves - you do not need to be an
 administrator. A token is yours: Grafana sees what *you* can see, so a token made by someone who can
@@ -26,22 +50,29 @@ read only one project shows that project only.
 1. **Install the Infinity plugin in Grafana.** In Grafana: Administration → Plugins, search for
    "Infinity", install it, and restart Grafana if it asks. (Installing Grafana itself is in
    [INSTALL-OPENSEARCH.md](INSTALL-OPENSEARCH.md).)
-2. **Make a token.** In the dashboard, open the project's back, then the **Grafana** card. Type a name
+2. **Make a token.** In the Frugal IoT dashboard, open the project's back, then the **Grafana** card. Type a name
    for this Grafana (so it can be revoked on its own later) and press *Make a token*. The token is shown
    **once** - only a hash is kept, so it cannot be looked up again. If you lose it, make one with the
    same name, which replaces it.
-3. **Give Grafana the data source.** Either press *Download the data source file* in the same place and
-   put it in Grafana's `provisioning/datasources` folder, then restart Grafana; or add it by hand in
+3. **Give Grafana the data source.** Either:
+   a: press *Download the data source file* in the same place and
+   put it in Grafana's `provisioning/datasources` folder (On a Mac typically in /opt/homebrew/Cellar/grafana/13.3.0/share/grafana/conf/provisioning),
+   then restart Grafana:
+   - On Mac: `brew services restart grafana`;
+   
+   or add it by hand in
    Grafana under Connections → Data sources → Add → **Infinity**:
    - Authentication: **Bearer Token**, with the token
    - Allowed hosts: the address you reached this dashboard at, e.g. `https://frugaliot.naturalinnovation.org`
-4. **Import the dashboard.** In the Grafana card press *Download the dashboard*. In Grafana choose
-   Dashboards → New → Import, upload the file, and pick the data source from step 3 when it asks.
+4. **Import the dashboard.** 
+  * On FrugalIoT: In the Grafana card press *Download the dashboard*. 
+  * Then in Grafana choose
+    Dashboards → New → Import, upload the file, and pick the data source from step 3 when it asks.
 
 The dashboard has a list of every topic at the top to choose from, and the time range at the top right.
 The file already has this server and organization filled in.
 
-A token lets one Grafana read **one organization**, read-only, and nothing else - and only the
+A token lets one Grafana read **one organization**, read-only - and only the
 projects of it that the person who made the token may read. For another
 organization, make its own token, data source and import - the dashboard file is separate for each, so
 importing a second does not replace the first. *Revoke* on the card cuts off a Grafana at once.

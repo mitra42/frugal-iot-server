@@ -294,3 +294,87 @@ describe('the API', () => {
     expect((await request(app).get('/forwarders/ghost')).status).toBe(404);
   });
 });
+
+describe('sending earlier readings', () => {
+  let calls, finish, fail, appB;
+  const LOCAL = { node: 'https://localhost:9200', username: 'admin', password: 'local-secret', insecure: true };
+  const wait = () => new Promise((r) => setTimeout(r, 5));
+
+  beforeEach(() => {
+    calls = [];
+    const auth = {
+      loggedInOrFail: (req, res, next) => next(),
+      can_ADMIN: (req, res, next) => next(),
+    };
+    // A job that runs until the test says it is done
+    const backfill = (args) => new Promise((res, rej) => {
+      calls.push(args);
+      args.progress(10);
+      finish = () => res({ sent: 42, skippedFiles: 1 });
+      fail = () => rej(new Error('No data/dev'));
+    });
+    appB = express();
+    appB.use((req, res, next) => { req.user = user; next(); });
+    appB.use('/forwarders', createForwardersRouter(db, { setForwarders: async () => {} }, () => orgs, auth,
+      { lookup: fakeLookup, localOpenSearch: () => LOCAL, backfill, dataDir: '/data' }));
+  });
+  const addOne = async (type = 'opensearch', over = {}) =>
+    (await request(appB).post('/forwarders/dev').send({ type, name: 'S', config: type === 'opensearch-local' ? {} : OS, ...over })).body.id;
+  const start = (id, body = {}) => request(appB).post('/forwarders/dev/backfill').send({ id, ...body });
+
+  it('starts it, with the forwarder\'s own settings, and says how far it has got', async () => {
+    const id = await addOne();
+    const res = await start(id, { since: '2026-09-01' });
+    expect(res.status).toBe(202);
+    expect(calls[0]).toMatchObject({ org: 'dev', dataDir: '/data', since: '2026-09-01', dryRun: false });
+    expect(calls[0].config).toMatchObject({ type: 'opensearch', node: OS.node, password: 'os-secret' });
+    expect((await request(appB).get(`/forwarders/dev/backfill/${id}`)).body).toMatchObject({ running: true, sent: 10 });
+    finish(); await wait();
+    expect((await request(appB).get(`/forwarders/dev/backfill/${id}`)).body).toMatchObject({ running: false, sent: 42, skippedFiles: 1 });
+  });
+  it('gives the local one the operator\'s address and login, which never reach the browser', async () => {
+    const id = await addOne('opensearch-local');
+    expect((await start(id, { dryRun: true })).status).toBe(202);
+    expect(calls[0].config).toMatchObject({ type: 'opensearch', node: LOCAL.node, password: 'local-secret', insecure: true });
+    expect(calls[0].dryRun).toBe(true);
+    const status = JSON.stringify((await request(appB).get(`/forwarders/dev/backfill/${id}`)).body);
+    expect(status).not.toMatch(/local-secret/);
+  });
+  it('does one at a time for a forwarder, and again once it is done', async () => {
+    const id = await addOne();
+    await start(id);
+    expect((await start(id)).status).toBe(409);
+    finish(); await wait();
+    expect((await start(id)).status).toBe(202);
+  });
+  it('reports a failure', async () => {
+    const id = await addOne();
+    await start(id);
+    fail(); await wait();
+    expect((await request(appB).get(`/forwarders/dev/backfill/${id}`)).body).toMatchObject({ running: false, error: 'No data/dev' });
+  });
+  it('refuses a bad date, another type, a switched-off forwarder and one that is not there', async () => {
+    const os = await addOne();
+    const sheet = (await request(appB).post('/forwarders/dev').send({ type: 'gsheet', name: 'G', config: { url: 'https://script.google.com/x', intervalSeconds: 300, topics: ['a/b/c/d/e'] } })).body.id;
+    const off = await addOne('opensearch', { enabled: false });
+    expect((await start(os, { since: 'yesterday' })).status).toBe(400);
+    expect((await start(os, { since: '2026-02-31' })).status).toBe(400);
+    expect((await start(os, { since: '2026-13-45' })).status).toBe(400);
+    expect((await start(sheet)).status).toBe(400);
+    expect((await start(off)).status).toBe(400);
+    expect((await start(9999)).status).toBe(404);
+    expect(calls).toHaveLength(0);
+  });
+  it('is for administrators of that organization, and only for forwarders of that organization', async () => {
+    const id = await addOne();
+    orgs.winam = {};
+    expect((await request(appB).post('/forwarders/winam/backfill').send({ id })).status).toBe(403);
+  });
+  it('says so when this server cannot', async () => {
+    const bare = express();
+    bare.use((req, res, next) => { req.user = user; next(); });
+    bare.use('/forwarders', createForwardersRouter(db, { setForwarders: async () => {} }, () => orgs,
+      { loggedInOrFail: (q, s, n) => n(), can_ADMIN: (q, s, n) => n() }, { lookup: fakeLookup }));
+    expect((await request(bare).post('/forwarders/dev/backfill').send({ id: 1 })).status).toBe(501);
+  });
+});
