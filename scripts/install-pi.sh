@@ -2,7 +2,7 @@
 #
 # Install a complete Frugal IoT server - broker, server, service - on a freshly flashed Raspberry Pi.
 #
-# This does automatically what INSTALLATION.md walks through by hand, steps 3 to 8. Read that if you
+# This does automatically what docs/INSTALLATION.md walks through by hand, steps 3 to 8. Read that if you
 # want to know why any of it is being done; this only says what it is doing as it goes.
 #
 #   curl -fsSLO https://raw.githubusercontent.com/mitra42/frugal-iot-server/main/scripts/install-pi.sh
@@ -20,15 +20,15 @@
 # step: compiling sqlite3 on a Zero W takes about 40 minutes and is not repeated once it is done.
 #
 # What it does NOT do:
-#   * flash the SD card, or set up wifi - INSTALLATION.md steps 1 and 2, before you can ssh in
+#   * flash the SD card, or set up wifi - docs/INSTALLATION.md steps 1 and 2, before you can ssh in
 #   * point your sensor nodes at this server - that means flashing the nodes, which happens on your
 #     workstation, not here. It prints the settings to give them.
-#   * HTTPS, which over-the-air firmware updates to ESP32 need - INSTALLATION.md step 10
+#   * HTTPS, which over-the-air firmware updates to ESP32 need - docs/INSTALLATION.md step 10
 #   * reboot. A reboot is worth doing afterwards if the upgrade brought a new kernel.
 #
 # It does set up what happens when the Pi later LOSES its WiFi - moved to another site, or the router
 # replaced: a network of its own, frugaliot-bridge-setup, whose page sets a new one. Otherwise a Pi
-# on WiFi is unreachable at exactly the moment it needs its WiFi changed. INSTALLATION.md, "Moving the
+# on WiFi is unreachable at exactly the moment it needs its WiFi changed. docs/INSTALLATION.md, "Moving the
 # Pi to another WiFi network", is the operator's side of it.
 
 set -Eeuo pipefail
@@ -679,7 +679,7 @@ WANTED_BROKER="ws://${BROKER_HOST}:9012"
 if [[ "$CURRENT_BROKER" == "$WANTED_BROKER" ]]; then
   skip "broker already ${WANTED_BROKER}"
 else
-  as_user_sh "printf '# This Pi is its own broker - see INSTALLATION.md step 4\nbroker: %s\n' '${WANTED_BROKER}' > '${MQTT_YAML}'"
+  as_user_sh "printf '# This Pi is its own broker - see docs/INSTALLATION.md step 4\nbroker: %s\n' '${WANTED_BROKER}' > '${MQTT_YAML}'"
   ok "broker set to ${WANTED_BROKER} (was ${CURRENT_BROKER:-unset})"
 fi
 
@@ -730,7 +730,7 @@ SRC_ACL="${PKG_DIR}/extras/aclfile"
 # it root-owned 644, which works and only draws a warning from the broker; "fixing" it to 600
 # without also chowning it to mosquitto stops the broker starting, because it reads this file after
 # dropping privileges. That is a migration to make deliberately, not a side effect of an upgrade -
-# INSTALLATION.md step 11 has it.
+# docs/INSTALLATION.md step 11 has it.
 if [[ ! -e /etc/mosquitto/aclfile ]]; then
   sudo_ install -o mosquitto -g mosquitto -m 600 "$SRC_ACL" /etc/mosquitto/aclfile
   ok "access control list installed at /etc/mosquitto/aclfile"
@@ -1079,7 +1079,7 @@ else
   AP_TEXT=" If this Pi cannot find its WiFi - moved, or a new router - it raises a network
     called ${AP_NAME}. Join it from a phone or laptop; the password is
     ${AP_PW_TEXT}. A page opens to choose the new WiFi.
-    INSTALLATION.md, \"Moving the Pi to another WiFi network\", has the rest."
+    docs/INSTALLATION.md, \"Moving the Pi to another WiFi network\", has the rest."
 fi
 
 cat <<SUMMARY
@@ -1130,9 +1130,9 @@ ${REBOOT_TEXT}
 
  4. Outgoing mail, if you want people to be able to reset a forgotten password themselves.
     Without it only you can, on this Pi, with frugal-iot-setpassword.
-    Optional - see INSTALLATION.md step 9a.
+    Optional - see docs/INSTALLATION.md step 9a.
 
- 5. HTTPS. NOT WRITTEN YET: step 10 of INSTALLATION.md describes what it will cover - a DNS
+ 5. HTTPS. NOT WRITTEN YET: step 10 of docs/INSTALLATION.md describes what it will cover - a DNS
     name, port forwarding, nginx in front of port ${PORT}, and certbot - but there are no
     instructions to follow there yet. Until then this is a plain HTTP server on your own
     network, which is all an offline installation needs. What you do not get is over-the-air

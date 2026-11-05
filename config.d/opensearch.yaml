@@ -1,4 +1,4 @@
-# This server's own OpenSearch - the one INSTALL-OPENSEARCH.md sets up on the server itself.
+# This server's own OpenSearch - the one docs/INSTALL-OPENSEARCH.md sets up on the server itself.
 #
 # Leave it all commented out on a server without one. With it filled in, an organization's
 # administrator can choose "OpenSearch on this server" on the dashboard's Forwarders card, and make a
@@ -23,5 +23,5 @@
 #   password: change-me
 #
 # # The address Dashboards on someone's own computer uses to reach OpenSearch: https, through
-# # Apache (INSTALL-OPENSEARCH.md), never the port 9200 above.
+# # Apache (docs/INSTALL-OPENSEARCH.md), never the port 9200 above.
 # public: https://search.example.org

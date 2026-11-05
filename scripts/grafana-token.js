@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Issue, list or revoke the tokens Grafana uses to read an organization's history (GRAFANA.md).
+ * Issue, list or revoke the tokens Grafana uses to read an organization's history (docs/GRAFANA.md).
  *
  *   npx --no frugal-iot-grafana-token add <org> <username> <name>   prints the token - once, it is not kept
  *   npx --no frugal-iot-grafana-token list <org>

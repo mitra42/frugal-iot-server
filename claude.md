@@ -247,7 +247,7 @@ configuration was assembled by hand as several files in `conf.d/` is a normal th
 one of those re-running `install-pi.sh` is wrong: it would add `frugal-iot.conf` alongside,
 declaring the same listeners and the same plugin twice.
 
-None of the three can be installed with a plain `cp` - see the table in INSTALLATION.md's upgrade
+None of the three can be installed with a plain `cp` - see the table in docs/INSTALLATION.md's upgrade
 section. `install-pi.sh` refuses to overwrite an `aclfile` that has per-bridge rules in it, and
 names the missing lines instead.
 

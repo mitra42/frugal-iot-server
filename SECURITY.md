@@ -1,7 +1,7 @@
 # Frugal IoT — security
 
 How the Frugal IoT server, its broker, its nodes and its dashboard authenticate each other, and
-where each credential lives. Companion to INSTALLATION.md (how to set it up) and API.md (the
+where each credential lives. Companion to docs/INSTALLATION.md (how to set it up) and API.md (the
 platform-to-platform API).
 
 ---
@@ -338,7 +338,7 @@ indices; what keeps one organization from another's is OpenSearch's own role sys
   so someone whose READ is withdrawn keeps reading the organization through Dashboards until an
   administrator removes it (the card lists them). Doing that automatically is not built.
 * **Transport.** The login and the readings cross the internet, so they must be HTTPS: Apache terminates
-  TLS in front of OpenSearch (INSTALL-OPENSEARCH.md section 3), OpenSearch stays on loopback, and Apache
+  TLS in front of OpenSearch (docs/INSTALL-OPENSEARCH.md section 3), OpenSearch stays on loopback, and Apache
   refuses `/_plugins/_security/api` so that nobody outside can manage logins. The server's own calls go to
   OpenSearch directly on the machine.
 * The `admin` account is now reachable from the internet through Apache by whoever guesses its password.

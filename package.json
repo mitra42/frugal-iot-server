@@ -64,9 +64,9 @@
     "extras/frugaliot-ap-watchdog.service",
     "extras/frugaliot-ap-watchdog.timer",
     "API.md",
-    "GRAFANA.md",
-    "INSTALL-OPENSEARCH.md",
-    "INSTALLATION.md"
+    "docs/GRAFANA.md",
+    "docs/INSTALL-OPENSEARCH.md",
+    "docs/INSTALLATION.md"
   ],
   "devDependencies": {
     "supertest": "^7.2.2",

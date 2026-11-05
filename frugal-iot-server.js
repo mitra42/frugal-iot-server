@@ -1241,7 +1241,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.use('/api', apiRouter);
         console.log("Mounted API routes at /api");
 
-        // History for Grafana, by bearer token - see lib/grafana.js and GRAFANA.md
+        // History for Grafana, by bearer token - see lib/grafana.js and docs/GRAFANA.md
         const grafana = createGrafanaRouters(db, config.server.datadir, loggerClient, { loggedInOrFail, can_READ });
         app.use('/grafana', grafana.data);
         app.use('/grafana_token', grafana.admin);

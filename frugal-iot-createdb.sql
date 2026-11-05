@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS `forwarders` (
 CREATE INDEX IF NOT EXISTS `forwarders_org` ON `forwarders` (`org`);
 
 -- A credential for Grafana (or anything else that reads history over HTTP), see lib/grafana.js and
--- GRAFANA.md. Read-only, and scoped to one organization: it can fetch that organization's readings
+-- docs/GRAFANA.md. Read-only, and scoped to one organization: it can fetch that organization's readings
 -- through /grafana/:org/ and nothing else.
 --
 -- Only a SHA-256 of the token is kept, so a copy of this database does not hand out working

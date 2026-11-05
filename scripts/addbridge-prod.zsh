@@ -24,7 +24,7 @@
 # printed - it is needed once, to type into the Pi.
 #
 # This assumes the server has already been set up to accept bridges at all: a TLS listener on 8883
-# with a certificate. That is a one-off, and INSTALLATION.md step 11 covers it.
+# with a certificate. That is a one-off, and docs/INSTALLATION.md step 11 covers it.
 
 set -euo pipefail
 
@@ -255,7 +255,7 @@ else
   echo ""
   echo "NOTE: this broker has no acl_file, so ${ACCOUNT} can reach every topic on it, not just"
   echo "  ${ORG_ID}/#. That is how the broker already treats every other account, so this is no"
-  echo "  worse than what is there - but see INSTALLATION.md step 11 for restricting it."
+  echo "  worse than what is there - but see docs/INSTALLATION.md step 11 for restricting it."
 fi
 
 # password_file and acl_file are both re-read on a reload, so nothing needs to be disconnected.

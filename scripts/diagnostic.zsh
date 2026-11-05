@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 #
-# Report the state of a Frugal IoT installation, for working out why something in INSTALLATION.md
+# Report the state of a Frugal IoT installation, for working out why something in docs/INSTALLATION.md
 # did not do what it said it would. It only looks - it changes nothing.
 #
 # Run it from the directory the server is installed in (the one holding frugal-iot.db):
@@ -85,7 +85,7 @@ for c in node npm sqlite3 zsh mosquitto mosquitto_passwd mosquitto_sub; do
     esac
   else
     item "$c: NOT INSTALLED"
-    [[ $c == (node|npm|sqlite3) ]] && problem "$c is not installed - see INSTALLATION.md step 3"
+    [[ $c == (node|npm|sqlite3) ]] && problem "$c is not installed - see docs/INSTALLATION.md step 3"
   fi
 done
 
@@ -355,7 +355,7 @@ broker_setting() {  # name -> value from the broker's own configuration, sudo on
 broker_setting acl_file; ACLFILE="$BROKER_SETTING"
 if [[ -z "$ACLFILE" ]]; then
   item "acl_file: NOT SET - every account that can log in can reach every topic, across all organizations"
-  problem "The broker has no acl_file. Re-run the install script, or see INSTALLATION.md 'Turn on access control'"
+  problem "The broker has no acl_file. Re-run the install script, or see docs/INSTALLATION.md 'Turn on access control'"
 else
   item "acl_file: $ACLFILE"
   if [[ -r "$ACLFILE" ]] || { have sudo && sudo -n test -r "$ACLFILE" 2>/dev/null; }; then
@@ -608,7 +608,7 @@ else
 fi
 
 # Swapping to an SD card wears it fast. On a Pi 4 there should be little or none; a Pi Zero W may
-# need some. See INSTALLATION.md, "Wear and tear on the SD card".
+# need some. See docs/INSTALLATION.md, "Wear and tear on the SD card".
 if have free; then
   item "swap:        $(free -h | awk '/^Swap:/ {print $3 " used of " $2}')"
 fi

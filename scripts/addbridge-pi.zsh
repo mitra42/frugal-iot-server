@@ -5,7 +5,7 @@
 # After this, the Pi's readings also appear on the production server, and its nodes can be
 # controlled from there - while the Pi carries on recording and serving on its own whenever the
 # link is down. Readings taken during an outage stay on the Pi: production gets a gap rather than
-# a backlog delivered later with the wrong timestamps. INSTALLATION.md step 11 explains why.
+# a backlog delivered later with the wrong timestamps. docs/INSTALLATION.md step 11 explains why.
 #
 # The relaying is done by the broker, so the server, the logger and the nodes are untouched.
 #

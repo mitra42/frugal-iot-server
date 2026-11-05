@@ -3,7 +3,7 @@
 #
 # Leave it commented out on a server that should not send mail.
 #
-# For Gmail - the common case, written out step by step in INSTALLATION.md section 9a:
+# For Gmail - the common case, written out step by step in docs/INSTALLATION.md section 9a:
 #   1. Turn on 2-Step Verification: https://myaccount.google.com/signinoptions/twosv
 #      App passwords do not exist until you do, which is where most people get stuck.
 #   2. Create an app password:      https://myaccount.google.com/apppasswords

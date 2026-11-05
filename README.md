@@ -3,7 +3,7 @@
 ## Installation
 
 For a self-contained server on a Raspberry Pi - including the MQTT broker, and starting from a
-blank SD card - see [INSTALLATION.md](INSTALLATION.md), which also has a script that does the whole
+blank SD card - see [docs/INSTALLATION.md](docs/INSTALLATION.md), which also has a script that does the whole
 thing in one go once you can ssh in.
 
 On a unix box that is already running ...
@@ -91,7 +91,7 @@ verbose: true
 and each message reappears as `Received dev/lotus/esp8266-85ea2b/humidity   71.8`. `morgan: true`
 in `config.d/server.yaml` does the same for web requests. Turn both off again afterwards.
 There is more on what gets written, and how to see how much, under
-[Wear and tear on the SD card](INSTALLATION.md#wear-and-tear-on-the-sd-card).
+[Wear and tear on the SD card](docs/INSTALLATION.md#wear-and-tear-on-the-sd-card).
 
 Open a browser pointing at for example `localhost:8080` and you should see the UI.
 
@@ -161,7 +161,7 @@ expensive on an SD card.
 To set it up as a service that runs at startup (and instructions vary between flavors of Linux)
 
 copy and edit `extras/frugaliot.service` to `/etc/systemd/system/frugaliot.service`. As shipped it
-matches the Raspberry Pi install in [INSTALLATION.md](INSTALLATION.md) - user `pi`, installed in
+matches the Raspberry Pi install in [docs/INSTALLATION.md](docs/INSTALLATION.md) - user `pi`, installed in
 `/home/pi/frugal-iot` - so on any other machine change `User`, `WorkingDirectory` and `ExecStart`
 to the account and directory you installed into.
 ```

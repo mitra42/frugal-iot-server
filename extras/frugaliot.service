@@ -1,6 +1,6 @@
 # Systemd unit for the Frugal IoT server.
 #
-# As shipped this matches the Raspberry Pi installation in INSTALLATION.md: user "pi", installed
+# As shipped this matches the Raspberry Pi installation in docs/INSTALLATION.md: user "pi", installed
 # with npm into /home/pi/frugal-iot. If that is what you have, install it unedited:
 #   sudo cp extras/frugaliot.service /etc/systemd/system/frugaliot.service
 #   sudo systemctl daemon-reload
