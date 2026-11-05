@@ -323,6 +323,41 @@ the role), then restart Dashboards. A stalled "Another OpenSearch Dashboards ins
 migrating" means a first start was interrupted; as the message says, delete the index it names
 (`.kibana_<org>_1`, see "Looking after it" for the command) and restart it.
 
+### Seeing your readings as a chart
+
+Checked step by step against OpenSearch Dashboards 3.9 in a browser. Each reading has these fields:
+`value` (the number), `@timestamp`, and `topic` split into `node` (the device), `module` and `leaf`
+(e.g. `temperature`). First look at **Discover** (☰ menu, top left): with `frugaliot-<org>-*` chosen you
+see a bar chart of how many readings arrived, and the readings below it.
+
+Now a chart of one kind of reading, a line per device:
+
+1. Go to **Visualize** (<http://localhost:5601/app/visualize>) and press **Create new visualization**.
+   Choose **Line**, then your `frugaliot-<org>-*` index pattern.
+2. At the top right, click the calendar icon beside the time and choose **Last 24 hours**. The default
+   is the last 15 minutes, which is nearly always empty.
+3. In the right-hand panel, under **Metrics**, open **Y-axis**. Set **Aggregation** to **Average**
+   (type "Average" and pick it). **Field** fills itself in with `value`.
+4. Under **Buckets** press **Add**, choose **X-axis**, and set **Aggregation** to **Date Histogram**
+   (**Field** fills itself in with `@timestamp`). Press **Update** at the bottom right.
+   You now have one line, but it averages every kind of reading together (temperature, humidity,
+   wifi...), so the numbers mean nothing.
+5. In the search bar above the chart type `leaf:temperature` and press Enter. Now only temperatures
+   are charted.
+6. Under **Buckets** press **Add** again, choose **Split series**, set **Sub aggregation** to **Terms**
+   and **Field** to `node`. Press **Update**. You get one line per device, with its name in the legend.
+7. Press **Save** (top right), give it a title such as `Temperature by device`, and **Save**.
+
+Put it on a dashboard:
+
+1. Go to **Dashboards** (<http://localhost:5601/app/dashboards>) and **Create new dashboard**.
+2. Press **Add** (top right), click your chart in the list, and close the list with the **X**.
+3. Press **Save**, give it a title, switch on **Store time with dashboard** (otherwise it opens on the
+   last 15 minutes and looks empty), and **Save**.
+
+To chart something else, change `temperature` in step 5 to `humidity` or another `leaf`, or leave the
+search empty and split by `topic` instead of `node`.
+
 You can use the same login in **Grafana** instead, with its OpenSearch data source and the same address.
 
 ---
