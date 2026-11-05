@@ -460,8 +460,25 @@ ask ORG_EMAIL "Contact email" || exit 1
 ask ORG_PHONE "Contact phone ('+' and digits only)" || exit 1
 [[ "$ORG_PHONE" =~ ^[+]?[0-9]+$ ]] || { echo "Phone must be '+' and digits only: '${ORG_PHONE}'" >&2; exit 1; }
 # Asked for in the order they matter. Each may be typed, passed as an option, or generated.
-ask_password SUPER_PW  "the superuser login (this server's administrator)"
-ask_password LOGIN_PW  "the ${ORG_ID} web login"
+#
+# But not on a re-run where the account is already there: further down, an existing superuser or
+# organization keeps the password it has, so asking for one would take what you typed and quietly
+# ignore it - and the summary would then print a made-up password that was never set. What stands
+# in for the password is shown in the summary instead.
+KEPT_PW="(unchanged - set by an earlier run)"
+if [[ -f "${INSTALL_DIR}/frugal-iot.db" ]] && command -v sqlite3 >/dev/null 2>&1 \
+   && [[ -n "$(sqlite3 "${INSTALL_DIR}/frugal-iot.db" "SELECT 1 FROM users WHERE username='superuser' AND hashed_password IS NOT NULL;" 2>/dev/null || true)" ]]; then
+  SUPER_PW="$KEPT_PW"
+  info "the superuser already has a password - leaving it alone"
+else
+  ask_password SUPER_PW  "the superuser login (this server's administrator)"
+fi
+if [[ -f "${INSTALL_DIR}/config.d/organizations/${ORG_ID}.yaml" ]]; then
+  LOGIN_PW="$KEPT_PW"
+  info "organization ${ORG_ID} already exists - leaving its login password alone"
+else
+  ask_password LOGIN_PW  "the ${ORG_ID} web login"
+fi
 # Not asked for. addorganization.zsh requires one, and lib/retained.js falls back to it on a broker
 # with no dynamic security - but this installer always sets dynamic security up, so on this Pi every
 # node is issued its own credential when it enrols and every browser derives its own when it logs
@@ -875,6 +892,7 @@ ok "broker running"
 step "Creating the administrator login"
 if as_user_sh "cd '${INSTALL_DIR}' && sqlite3 frugal-iot.db \"SELECT 1 FROM users WHERE username='superuser' AND hashed_password IS NOT NULL;\"" | grep -q 1; then
   skip "superuser already has a password"
+  SUPER_PW="$KEPT_PW"   # whatever was asked or generated above was never used
 else
   as_user_sh "cd '${INSTALL_DIR}' && npx --no frugal-iot-setpassword superuser '${SUPER_PW}'" >/dev/null
   ok "superuser password set"
@@ -883,6 +901,7 @@ fi
 step "Creating the organization"
 if [[ -f "${INSTALL_DIR}/config.d/organizations/${ORG_ID}.yaml" ]]; then
   skip "organization ${ORG_ID} already exists"
+  LOGIN_PW="$KEPT_PW"
   BROKER_PW="$(sed -n 's/^mqtt_password:[[:space:]]*//p' "${INSTALL_DIR}/config.d/organizations/${ORG_ID}.yaml" | head -1 | tr -d "\"'" || true)"
   info "using the broker password already in its configuration"
 else
@@ -980,6 +999,18 @@ else
   echo "The server is not answering on port ${PORT} (last response: ${CODE:-none})." >&2
   echo "What it logged:" >&2
   sudo_ journalctl -u frugaliot -n 30 --no-pager >&2 || true
+  if [[ "${CODE:-}" == "404" ]]; then
+    # The server is up but cannot find its web pages. Seen when an earlier frugal-iot-init stopped
+    # part-way: the re-run leaves an existing server.yaml alone, still saying "publicdir: ./public".
+    echo "A 404 means the server is up but cannot find its web pages. Look at publicdir and htmldir in" >&2
+    echo "${INSTALL_DIR}/config.d/server.yaml: after a normal install they point into ./node_modules." >&2
+    echo "If publicdir is still './public', set these four lines there and restart" >&2
+    echo "(sudo systemctl restart frugaliot):" >&2
+    echo "    htmldir: ./node_modules/frugal-iot-client" >&2
+    echo "    nodemodulesdir: ./node_modules" >&2
+    echo "    publicdir: ./node_modules/frugal-iot-server/public" >&2
+    echo "    privatedir: ./node_modules/frugal-iot-server/private" >&2
+  fi
   exit 1
 fi
 systemctl is-enabled --quiet frugaliot && ok "will start again at boot"
@@ -1055,7 +1086,10 @@ ENROL_SECRET="$(as_user_sh "grep -A1 '^enrolment_${ORG_ID}:' '${INSTALL_DIR}/con
 # Only the generated ones are worth printing - and printing a password you typed would put it in the
 # log for no reason
 was_generated() { local v; for v in ${GENERATED[@]+"${GENERATED[@]}"}; do [[ "$v" == "$1" ]] && return 0; done; return 1; }
-shown() { if was_generated "$1"; then echo "${!1}"; else echo "(the one you gave)"; fi; }
+shown() {
+  [[ "${!1}" == "("* ]] && { echo "${!1}"; return; }   # not set by this run
+  if was_generated "$1"; then echo "${!1}"; else echo "(the one you gave)"; fi
+}
 
 if (( ${#REBOOT_REASONS[@]} )); then
   REBOOT_TEXT=" 3. REBOOT NEEDED - $(printf '%s' "${REBOOT_REASONS[0]}")."
