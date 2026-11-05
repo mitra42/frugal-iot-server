@@ -66,7 +66,8 @@
     "API.md",
     "docs/GRAFANA.md",
     "docs/INSTALL-OPENSEARCH.md",
-    "docs/INSTALLATION.md"
+    "docs/INSTALLATION.md",
+    "docs/OPENWRT.md"
   ],
   "devDependencies": {
     "supertest": "^7.2.2",

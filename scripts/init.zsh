@@ -48,7 +48,11 @@ copy_if_missing() {
     fi
   elif [[ -e "$from" ]]; then
     mkdir -p "${to:h}"
-    cp "$from" "$to"
+    # extras/ holds a directory (grafana/) as well as files, and a plain cp refuses a directory -
+    # which under "set -e" ended the whole init, after server.yaml had been created but before it
+    # was pointed at node_modules. The re-run then saw an existing server.yaml and left it alone, so
+    # "/" 404ed. -R for a directory, so a failure here cannot strand a half-initialised install.
+    if [[ -d "$from" ]]; then cp -R "$from" "$to"; else cp "$from" "$to"; fi
     COPIED+=("$to")
     echo "  created ${to}"
   fi
