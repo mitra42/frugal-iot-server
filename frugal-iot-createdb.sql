@@ -269,3 +269,12 @@ CREATE TABLE IF NOT EXISTS `node_attempts` (
   `count` INTEGER NOT NULL DEFAULT 1,
   UNIQUE(`org`, `nodeid`)
 );
+
+-- Which languages browsers ask for, counted at each sign-in, to choose what to translate next - see
+-- lib/language-requests.js. Codes only: nothing records who asked.
+CREATE TABLE IF NOT EXISTS `language_requests` (
+  `code` TEXT PRIMARY KEY, -- lower-case, as the browser sent it: hi-in, pt-br
+  `count` INTEGER NOT NULL,
+  `last_seen` INTEGER NOT NULL,
+  `supported` INTEGER NOT NULL -- 1 if the client had a file for it at the last count
+);

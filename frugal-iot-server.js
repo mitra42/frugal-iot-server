@@ -140,6 +140,7 @@ import crypto from 'crypto'; /* https://nodejs.org/api/crypto.html */
 import {waterfall, each} from 'async';
 import { mailInit, mailConfigured, sendMail } from './lib/mailer.js';
 import { resetCodeMake, resetCodeCheck, resetRateOk } from './lib/resetcode.js';
+import { countLanguages, parseBrowserLanguages } from './lib/language-requests.js';
 // import { openDB } from 'sqlite-express-package'; /* appContent, appSelect, validateId, validateAlias, tagCloud, atom, rss,*/
 
 export let config; // Live binding - lib/api-routes.js reads the current value at request time
@@ -155,7 +156,15 @@ function loginRedirect(res, { mode = 'signin', message, messagetype, url }) {
   if (message) { q.set('message', message); }
   if (messagetype) { q.set('messagetype', messagetype); }
   if (url) { q.set('url', url); }   // Encoded here: a return url usually has a query string of its own
+  const lang = langOf(url);
+  if (lang) { q.set('lang', lang); }
   res.redirect(`${loginUrl}?${q}`);
+}
+// The language of the page being returned to. login.html reads only its own ?lang=, and without it
+// falls back to the browser's language rather than the one picked before signing in.
+function langOf(url) {
+  if (!url) return null;
+  try { return new URL(url, 'http://localhost').searchParams.get('lang'); } catch (e) { return null; }
 }
 // A password reset link carries its token in the query string, and everything that logs a URL goes
 // to the journal, which outlives the ten minutes the token is good for.
@@ -1273,21 +1282,33 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           (req,res,next) => {
             console.log("Trying to login with redirect to",req.body.url);
             // This is ugly, but I cannot see how to pass the URL to passport.authenticate options
-            // Default the destination rather than trusting every caller to supply one: with no
-            // successRedirect, passport calls next() on success and the request 404s as
-            // "Cannot POST /login" - a confusing way to report a missing form field.
+            // Default the destination rather than trusting every caller to supply one - a missing
+            // form field should still land somewhere, here and in the success handler below.
             const returnTo = req.body.url || '/dashboard';
             const failureQuery = new URLSearchParams({
               mode: 'signin', messagetype: 'error',
               message: 'Incorrect username or password', url: returnTo });
+            const lang = langOf(returnTo);
+            if (lang) { failureQuery.set('lang', lang); }
             passport.authenticate('local', {
               session: true,
               //failWithError: true,
               failureRedirect: `${loginUrl}?${failureQuery}`,
-              successRedirect: returnTo,
+              // No successRedirect: on success passport calls next(), which counts and then redirects
               // In failure case will also be messages in the session which need clearing out TODO-N89
               //failureRedirect: `${loginUrl}?register=false&message=Incorrect+username+or+password&url=${req.body.url}`,
             })(req, res, next);
+          },
+          // Counted only once signed in, so failed attempts cannot pad the numbers. Not waited for.
+          (req, res) => {
+            const codes = parseBrowserLanguages(req.body.browserlangs);
+            if (codes.length) {
+              console.log("Browser languages", codes.join(','));
+              countLanguages(db, config.server.htmldir, codes, (err) => {
+                if (err) console.error("Could not count browser languages:", err.message);
+              });
+            }
+            res.redirect(req.body.url || '/dashboard');
           }
         );
         app.post('/register', (req, res) => {
