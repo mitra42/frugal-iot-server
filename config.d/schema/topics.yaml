@@ -549,6 +549,40 @@ percent:
     significantvalue: 1
   graphable:  true
   units:    "%"
+# Particulate matter, from the SDS011 - see sensor/sds011.h in Frugal-IoT. The sensor reads to 0.1
+# ug/m3 but is noisy, and is unreliable above ~70% humidity (it counts droplets as particles).
+pm10:
+  leaf:     pm10
+  name:     PM10
+  type:     float
+  display:  bar
+  min:      0
+  max:      200
+  width:    5
+  color:    "#696969"
+  units:    ug/m3
+  rw:       r
+  graphable:  true
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
+pm25:
+  leaf:     pm25
+  name:     PM2.5
+  type:     float
+  display:  bar
+  min:      0
+  max:      100
+  width:    5
+  color:    "#a0522d"
+  units:    ug/m3
+  rw:       r
+  graphable:  true
+  log:      true
+  duplicates:
+    significantdate: 900000
+    significantvalue: 1
 position:
   leaf:     position
   name:     Position

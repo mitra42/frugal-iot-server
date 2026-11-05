@@ -617,6 +617,12 @@ sector:
     - leaf: valve
       leaf_from: controlouttoggle
       name: Valve
+# Nova Fitness SDS011 particulate sensor, as in sensor.community's airRohr - Sensor_SDS011.
+sds011:
+  name: "SDS011"
+  topics:
+    - leaf: pm25
+    - leaf: pm10
 sht:
   name: SHT
   topics:
