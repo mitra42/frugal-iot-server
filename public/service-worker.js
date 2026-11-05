@@ -100,6 +100,14 @@ self.addEventListener('fetch', event => {
         // Scoped to CACHE_NAME: a bare caches.match searches every cache in the origin, so a
         // leftover older cache answers first and the version bump achieves nothing
         caches.match(event.request, {cacheName: CACHE_NAME})
-            .then(response => response || fetch(event.request))
+            .then(response => response || fetch(event.request).then(fetched => {
+                // A language is cached when first used, not at install: there are many, and a
+                // phone wants one
+                if (fetched.ok && new URL(event.request.url).pathname.startsWith('/dashboard/languages/')) {
+                    const copy = fetched.clone();
+                    caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+                }
+                return fetched;
+            }))
     );
 });
