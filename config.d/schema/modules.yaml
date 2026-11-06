@@ -383,6 +383,13 @@ heatsink:
       name: Heatsink Temperature
       min: 0
       max: 120
+# Seeed HM3301 particulate sensor ("Grove - Laser PM2.5 Sensor") - Sensor_HM3301.
+hm3301:
+  name: "HM3301"
+  topics:
+    - leaf: pm1
+    - leaf: pm25
+    - leaf: pm10
 ht:
   name: HT
   topics:
