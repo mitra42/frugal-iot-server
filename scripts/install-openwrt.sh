@@ -635,6 +635,9 @@ CODE=""; i=0
 while [ "$i" -lt 20 ]; do
   CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://localhost:${PORT}/" || true)
   [ "$CODE" = 200 ] && break
+  # "/" is the static front page; the login page is the thing that proves the dashboard is served
+  CODE2=$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://localhost:${PORT}/dashboard/login.html" || true)
+  [ "$CODE2" = 200 ] && { CODE=200; break; }
   sleep 2; i=$((i+1))
 done
 if [ "$CODE" = 200 ]; then

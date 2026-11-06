@@ -344,7 +344,8 @@ fi
 # ---------------------------------------------------------------- ports
 head_ "Ports"
 for port in 1883 9012 8080; do
-  if netstat -ln 2>/dev/null | grep -q "[:.]${port} "; then warn "port ${port} is already in use here - something else is listening on it"
+  if netstat -lnp 2>/dev/null | grep "[:.]${port} " | grep -q mosquitto; then info "port ${port} is in use by mosquitto itself (fine)"
+  elif netstat -ln 2>/dev/null | grep -q "[:.]${port} "; then warn "port ${port} is already in use here - something else is listening on it"
   else info "port ${port} is free"; fi
 done
 
