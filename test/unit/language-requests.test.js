@@ -49,6 +49,10 @@ describe('isSupported', () => {
     expect(isSupported(htmldir, 'fr-ca')).toBe(true);
     expect(isSupported(htmldir, 'de-de')).toBe(false);
   });
+  it('knows Filipino by the name its file has, Tagalog', () => {
+    writeFileSync(join(htmldir, 'languages', 'tl.yaml'), 'Yes: Oo\n');
+    expect(isSupported(htmldir, 'fil-ph')).toBe(true);
+  });
   it('counts any English as supported, since the keys are English', () => {
     expect(isSupported(htmldir, 'en-gb')).toBe(true);
   });
