@@ -264,32 +264,34 @@ fi
 #    rewrites those for whoever runs it and wherever the server went
 STALE=()        # "installed|packaged" - and STALE_LINES, what differs, in the same order
 STALE_LINES=()
-UNREADABLE=()   # there, but not readable without sudo
+UNREADABLE=()   # there, but not readable even with sudo -n
 
-# norm_file <how> <file>: settings only - comments and blank lines gone - with what an installer
-# legitimately rewrites reduced to its name
-norm_file() {
+# norm_text <how>: settings only - comments and blank lines gone - with what an installer
+# legitimately rewrites reduced to its name. Reads its standard input.
+norm_text() {
   local expr='s#^##'
   [[ $1 == service ]] && expr='s#^(User|WorkingDirectory|ExecStart)=.*#\1=(set by the installer)#'
-  sed -E "$expr" "$2" | grep -vE '^[[:space:]]*(#|$)' || true
+  sed -E "$expr" | grep -vE '^[[:space:]]*(#|$)' || true
 }
 
 # check_installed <packaged file> <installed path> <exact|service|subset>
+# The installed file is read with broker_conf_cat, which retries with sudo -n: the aclfile is
+# mosquitto:mosquitto 600, so reading it plainly as the service user always fails.
 check_installed() {
-  local from=$1 to=$2 how=$3 lines
+  local from=$1 to=$2 how=$3 here lines
   [[ -e "$from" && -e "$to" ]] || return 0
-  if [[ ! -r "$to" ]]; then
+  if ! here=$(broker_conf_cat "$to"); then
     UNREADABLE+=("$to")
     return 0
   fi
   case "$how" in
     subset)
-      lines=$(comm -23 <(norm_file exact "$from" | sort -u) <(norm_file exact "$to" | sort -u) |
+      lines=$(comm -23 <(norm_text exact < "$from" | sort -u) <(print -r -- "$here" | norm_text exact | sort -u) |
         sed 's/^/release only: /') || true
       ;;
     *)
       # "here" and "release", from diff's < and >; its hunk headers say nothing to a reader
-      lines=$(diff <(norm_file "$how" "$to") <(norm_file "$how" "$from") |
+      lines=$(diff <(print -r -- "$here" | norm_text "$how") <(norm_text "$how" < "$from") |
         sed -n -e 's/^< /here only:    /p' -e 's/^> /release only: /p') || true
       ;;
   esac
@@ -374,7 +376,8 @@ fi
 
 if (( ${#UNREADABLE} )); then
   echo
-  echo "There, but not readable as $(id -un), so not compared: ${(j:, :)UNREADABLE}"
+  echo "There, but not readable as $(id -un) without a sudo password, so not compared: ${(j:, :)UNREADABLE}"
+  echo "To compare them too: sudo -v, then run this again"
 fi
 
 echo

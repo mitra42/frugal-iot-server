@@ -234,9 +234,13 @@ for i in {1..${#P_DST}}; do
   if [[ ! -e "$P_DST[$i]" ]]; then st="new"
   elif cmp -s "$P_SRC[$i]" "$P_DST[$i]" 2>/dev/null; then st="unchanged"
   elif [[ -r "$P_DST[$i]" ]]; then st="replaces what is there"
-  else st="replaces what is there"
+  # check runs as the service user, which cannot read the broker's files - ask sudo before
+  # reporting an identical file as one that will be replaced
+  elif (( EUID != 0 )) && have sudo && sudo -n cmp -s "$P_SRC[$i]" "$P_DST[$i]" 2>/dev/null; then st="unchanged"
+  elif (( EUID != 0 )) && have sudo && sudo -n test -r "$P_DST[$i]" 2>/dev/null; then st="replaces what is there"
+  else st="replaces (needs root to compare)"
   fi
-  printf '  %-60s %-24s %s\n' "$P_DST[$i]" "$st" "$P_OWNMODE[$i]"
+  printf '  %-60s %-32s %s\n' "$P_DST[$i]" "$st" "$P_OWNMODE[$i]"
 done
 if (( ${#ASIDE} )); then
   echo
@@ -279,7 +283,10 @@ unit_exists() { have systemctl && systemctl cat "$1" >/dev/null 2>&1; }
 
 echo "1. A snapshot of what is here now, in case this is the wrong thing to have done"
 PRE_RESTORE="$BACKUP_DIR/pre-restore"
-if ! zsh "${SCRIPT:h}/backup.zsh" "$PRE_RESTORE"; then
+if zsh "${SCRIPT:h}/backup.zsh" "$PRE_RESTORE"; then
+  # The one just written, so the way back can be named exactly rather than as "the newest"
+  PRE_RESTORE=( $PRE_RESTORE/frugal-iot-state-*.tar.gz(Nom[1]) )
+else
   (( FORCE )) || die "could not take it - add \"force\" to restore without a copy of what is here"
   warn "carrying on without it, because of \"force\""
   PRE_RESTORE=""
@@ -326,7 +333,7 @@ if unit_exists mosquitto; then
   if [[ "$(systemctl is-active mosquitto 2>/dev/null)" != active ]]; then
     echo "The broker did not start. The server has been left stopped." >&2
     echo "See why:      journalctl -u mosquitto -n 30 --no-pager   (and its own log, named in its configuration)" >&2
-    [[ -n "$PRE_RESTORE" ]] && echo "Put it back:  npx --no frugal-iot-restore $PRE_RESTORE/<newest> all force" >&2
+    [[ -n "$PRE_RESTORE" ]] && echo "Put it back:  npx --no frugal-iot-restore $PRE_RESTORE all force" >&2
     exit 1
   fi
 fi
@@ -359,7 +366,7 @@ fi
 echo
 echo "Restored $SNAPSHOT."
 if [[ -n "$PRE_RESTORE" ]]; then
-  echo "What was here before is in $PRE_RESTORE/ - to go back: npx --no frugal-iot-restore <that snapshot> all force"
+  echo "What was here before is in $PRE_RESTORE - to go back: npx --no frugal-iot-restore $PRE_RESTORE all force"
 else
   echo "Nothing was kept of what was here before."
 fi

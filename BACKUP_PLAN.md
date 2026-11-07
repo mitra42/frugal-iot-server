@@ -108,7 +108,8 @@ All zsh, positional arguments, runnable via `npx --no`.
 
 **`frugal-iot-backup [check|destdir]`**
 Writes `frugal-iot-state-<host>-<timestamp>.tar.gz`, mode 600, into `/var/backups/frugal-iot/` by
-default, then prunes. Run as **root from a systemd timer**, not from inside the server like
+default, then prunes that directory (never one named on the command line - restore keeps its undo
+points in one). Run as **root from a systemd timer**, not from inside the server like
 housekeeping: it has to read root- and mosquitto-only files, and it should work when the server is
 down. The directory is owned by the service user so the offsite pull can read it.
 

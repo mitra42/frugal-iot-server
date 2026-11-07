@@ -6,7 +6,7 @@
 # Usage, from the server's own directory (or anywhere, once the frugaliot service is installed):
 #   npx --no frugal-iot-backup check       # say what would be taken, from where; writes nothing
 #   npx --no frugal-iot-backup             # take one, into /var/backups/frugal-iot
-#   npx --no frugal-iot-backup <dir>       # take one into <dir> (an absolute path)
+#   npx --no frugal-iot-backup <dir>       # take one into <dir> (an absolute path), pruning nothing there
 #   npx --no frugal-iot-backup install     # run it nightly, from a systemd timer
 #
 # Positional, never --flags: npm swallows those (see "Shell scripts" in CLAUDE.md).
@@ -36,12 +36,13 @@ usage() {
 
 MODE=backup
 DEST=/var/backups/frugal-iot
+PRUNE=1     # only the timer's own directory - see "prune" below
 case "${1:-}" in
   "")              ;;
   check)           MODE=check ;;
   install)         MODE=install ;;
   help|-h|--help)  usage ;;
-  /*)              DEST=$1 ;;
+  /*)              DEST=$1; PRUNE=0 ;;
   *)               echo "Unexpected argument: $1" >&2; usage ;;
 esac
 (( $# <= 1 )) || usage
@@ -327,6 +328,10 @@ mv "$STAGE/$NAME" "$DEST/$NAME"
 echo "wrote $DEST/$NAME ($(du -h "$DEST/$NAME" | awk '{print $1}'), ${#ITEM_SRC} items)"
 
 # ---- prune ----
+# Only in the default directory: one named on the command line is the caller's. frugal-iot-restore
+# keeps its undo points in pre-restore/, and pruning there to one a day deleted the previous undo
+# point - the snapshot a second restore that day was being asked to put back.
+(( PRUNE )) || exit 0
 # Only this machine's snapshots, by name - so a directory that also holds copies pulled from
 # elsewhere, or anything else at all, is left alone. Newest first; names sort by time.
 typeset -A SEEN COUNT

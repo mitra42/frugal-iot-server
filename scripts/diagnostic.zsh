@@ -193,23 +193,6 @@ broker_conf_text() { print -r -- "$BROKER_CONF_TEXT"; }
 PKG_EXTRAS="node_modules/frugal-iot-server/extras"
 [[ -d "$PKG_EXTRAS" ]] || PKG_EXTRAS="${0:A:h:h}/extras"
 
-# Which password file does the running configuration actually name?
-broker_setting password_file; CONFIGURED_PWFILE="$BROKER_SETTING"
-section "Mosquitto password file"
-if [[ -n "$CONFIGURED_PWFILE" ]]; then
-  item "configuration names: $CONFIGURED_PWFILE"
-  item "  that file:         $(fileinfo $CONFIGURED_PWFILE)"
-  if [[ ! -e "$CONFIGURED_PWFILE" ]]; then
-    problem "Mosquitto is configured to use $CONFIGURED_PWFILE but that file does not exist - it will refuse to start"
-  else
-    # Account names only, never the hashes
-    item "  accounts in it:    $(cut -d: -f1 "$CONFIGURED_PWFILE" 2>/dev/null | tr '\n' ' ')"
-    [[ ! -s "$CONFIGURED_PWFILE" ]] && item "  (the file is empty - no accounts yet)"
-  fi
-else
-  item "no password_file line found in any mosquitto configuration"
-  problem "No password_file configured - the broker would allow anonymous access or reject everything"
-fi
 # What this release ships, against what the broker is actually running.
 #
 # This used to be "diff ./extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf", which
@@ -231,12 +214,33 @@ if [[ -f "${PKG_EXTRAS}/mosquitto.conf" ]] && (( ${#BROKER_CONF_FILES} )); then
     CONF_REAL=0
     for l in ${(f)CONF_FINDINGS}; do
       case ${l%%$'\t'*} in
-        elsewhere) item "    ${l#*$'\t'}" ;;
-        *)         item "    ${l#*$'\t'}"; (( CONF_REAL++ )) || true ;;
+        missing)   item "    missing:   ${l#*$'\t'}"; (( CONF_REAL++ )) || true ;;
+        differs)   item "    different: ${l#*$'\t'}"; (( CONF_REAL++ )) || true ;;
+        elsewhere) item "    (fine)     ${l#*$'\t'}" ;;
       esac
     done
-    (( CONF_REAL )) && problem "The broker's configuration differs from this release's in ${CONF_REAL} setting(s) - see \"Mosquitto password file\" above. Add them to a file in /etc/mosquitto/conf.d/ (or re-run install-pi.sh on a Pi it set up), then: sudo systemctl restart mosquitto"
+    (( CONF_REAL )) && problem "The broker's configuration differs from this release's in ${CONF_REAL} setting(s) - see \"Mosquitto configuration\" above. Add them to a file in /etc/mosquitto/conf.d/ (or re-run install-pi.sh on a Pi it set up), then: sudo systemctl restart mosquitto"
   fi
+fi
+
+# Which password file does the running configuration actually name?
+broker_setting password_file; CONFIGURED_PWFILE="$BROKER_SETTING"
+section "Mosquitto password file"
+if [[ -n "$CONFIGURED_PWFILE" ]]; then
+  item "configuration names: $CONFIGURED_PWFILE"
+  item "  that file:         $(fileinfo $CONFIGURED_PWFILE)"
+  if [[ ! -e "$CONFIGURED_PWFILE" ]]; then
+    problem "Mosquitto is configured to use $CONFIGURED_PWFILE but that file does not exist - it will refuse to start"
+  else
+    # Account names only, never the hashes
+    # Read through the helper: the file is mosquitto:mosquitto 600, so a plain cut as the service
+    # user returns nothing, which looks exactly like a file with no accounts in it
+    item "  accounts in it:    $(broker_conf_cat "$CONFIGURED_PWFILE" | cut -d: -f1 | tr '\n' ' ')"
+    [[ ! -s "$CONFIGURED_PWFILE" ]] && item "  (the file is empty - no accounts yet)"
+  fi
+else
+  item "no password_file line found in any mosquitto configuration"
+  problem "No password_file configured - the broker would allow anonymous access or reject everything"
 fi
 item "candidate locations, whether or not configured:"
 for f in /var/lib/mosquitto/passwords /etc/mosquitto/mosquitto_passwords; do
