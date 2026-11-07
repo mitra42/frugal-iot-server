@@ -125,6 +125,8 @@ import { APIError } from './lib/api-errors.js';
 import { access, constants, createReadStream, mkdir, readdir, readFile, rm } from 'fs'; // https://nodejs.org/api/fs.html
 import { createGunzip } from 'zlib'; // https://nodejs.org/api/zlib.html - for serving compressed readings
 import { startHousekeeping } from './lib/housekeeping.js';
+import { createTileCache, parseTile, startTileHousekeeping } from './lib/tiles.js';
+import { loggerLocations, startPrefetch } from './lib/tile-prefetch.js';
 import { detectSeries } from 'async'; // https://caolan.github.io/async/v3/docs.html
 import { createMD5 } from 'hash-wasm';
 import multer from 'multer'; // https://www.npmjs.com/package/multer
@@ -945,12 +947,8 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     "Content-Length", "0"]
      */
 
-    // Just log the request for now
-    // noinspection JSCheckFunctionSignatures
-    app.use('/', (req, res, next) => {
-      console.log(redactUrl(req.url));
-      next();
-    })
+    // No request logging of its own: morgan, above, is the one switch for it, and on an SD card
+    // every line is a write.
 
     // Nodes enrol here to get their own broker credential. Deliberately not behind a session: a node
     // has no session, and this is what replaces the shared password compiled into its firmware.
@@ -1847,7 +1845,6 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         const routerDashboard = express.Router();
         app.use('/dashboard', routerDashboard);
         routerDashboard.use(
-          (req,res,next) => {console.log("/dashboard handler for", req.url); next(); }, // Log attempt
           shouldIBeLoggedIn, // redirect to ./login.html if not logged in then back here
           //(req,res,next) => {console.log("XXX back to /dashboard handler for", req.url); next(); }, // Log attempt
           //(req,res,next) => {console.log("XXX", config.server.htmldir); next(); }, // Log attempt
@@ -1855,6 +1852,27 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
           // that serves the dashboard's own code, which changes every release at the same URL.
           express.static(config.server.htmldir, revalidate) // Serve static
         );
+
+        // Map tiles, kept here so the map works offline. Behind the login, or every server would be a
+        // free proxy to OpenStreetMap. Off unless config.d/mapping.yaml turns it on.
+        const mapping = config.mapping || {};
+        if (mapping.cache && mapping.cache.enabled) {
+          const tiles = createTileCache({ ...mapping.cache, sources: mapping.sources });
+          console.log("Serving /tiles from", tiles.dir, "for", Object.keys(tiles.sources).join(", "));
+          startTileHousekeeping(tiles);
+          if (mapping.prefetch && mapping.prefetch.enabled) {
+            startPrefetch(tiles, mapping.prefetch, () => loggerLocations(mqttLogger));
+          }
+          app.get('/tiles/:source/:z/:x/:y', loggedInOrFail, (req, res) => {
+            const t = parseTile(req.params.z, req.params.x, req.params.y);
+            if (!t) { res.sendStatus(404); return; }
+            tiles.get(req.params.source, t, (err, file) => {
+              if (!file) { res.sendStatus(404); return; }
+              res.set('Cache-Control', 'private, max-age=86400');
+              res.sendFile(path.resolve(file));
+            });
+          });
+        }
 
         // Serve frugal-iot-logger data at /data but configure where to get them.
         console.log("Serving /data from", config.server.datadir);

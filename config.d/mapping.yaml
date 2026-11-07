@@ -1,0 +1,56 @@
+# The map: where its tiles come from, and whether this server keeps them.
+
+# Each source is a set of tiles the map can draw. Sources named "Map" are drawn everywhere; any other
+# name (e.g. "Imagery") is drawn over the map where the source has tiles, and the map offers a switch
+# between them. Sources sharing a name switch together. bounds ([[south, west], [north, east]]) and
+# minzoom are optional - outside them nothing is asked for.
+sources:
+  osm:
+    name: Map
+    enabled: true
+    upstream: https://tile.openstreetmap.org/{z}/{x}/{y}.png
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    maxzoom: 19
+  nsw:
+    name: Imagery
+    # Aerial imagery of New South Wales from NSW Spatial Services, free and with no key.
+    # Licence: Creative Commons Attribution 4.0, though their own information sheet links the
+    # no-derivatives version - https://www.spatial.nsw.gov.au/__data/assets/pdf_file/0005/202559/NSW_Imagery_rebranded.pdf
+    # Showing it with the attribution is fine either way. It is unclear whether caching it here
+    # (cache and prefetch, below) constitutes redistribution, or is just good behaviour.
+    enabled: false
+    upstream: https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}
+    attribution: '&copy; State Government of NSW and Spatial Services (DCS)'
+    bounds: [[-38.4, 138.4], [-26.5, 159.3]]
+    minzoom: 15
+    maxzoom: 21
+
+# Keeping tiles on this server. Off, the browser fetches them from each source itself.
+# On, this server keeps every tile anyone looks at and serves it to the map from then on, so a Pi
+# that goes offline still has a map. On a server that is always online it means one fetch from a
+# source per tile rather than one per browser.
+cache:
+  enabled: false
+  # Not under datadir: that is served at /data, and its housekeeping walks every file in it
+  dir: ./tiles
+  # A kept tile is checked with its source after this many days. Never less than 7 - OSM asks that.
+  # A check that finds it unchanged costs no rewrite, and offline the old tile is served regardless.
+  refreshdays: 30
+  # Tiles looked at beyond this are dropped once a day, least recently used first. A tile is 5-50 KB.
+  maxmb: 200
+
+# Fetching, while online, the tiles nobody has looked at yet - for a Pi that will go offline. Needs
+# the cache on. Not needed on a server that is always online. Tiles it fetches are never dropped
+# while still wanted.
+prefetch:
+  enabled: false
+  # Each organization's area, at every zoom while it fits in this many tiles - zoom 3 for the
+  # whole world, about 12 for a district. So zooming out always finds a map. Not for sources with
+  # bounds, which get only the squares around devices inside them.
+  organizationtiles: 64
+  # The same for each project's area
+  projecttiles: 256
+  # A square this many metres around each device, down to devicezoom (19 is OSM's deepest).
+  # About 100 tiles, 1-2 MB, per device and source. Each zoom deeper is four times as many.
+  deviceradius: 250
+  devicezoom: 19

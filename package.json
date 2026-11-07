@@ -47,6 +47,7 @@
     "config.yaml",
     "config.d/email.yaml",
     "config.d/logger.yaml",
+    "config.d/mapping.yaml",
     "config.d/mqtt.yaml",
     "config.d/opensearch.yaml",
     "config.d/server.yaml",
