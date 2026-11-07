@@ -239,3 +239,34 @@ describe('hasPermissions', () => {
     });
   });
 });
+
+describe('the map\'s tiles', () => {
+  const sources = {
+    osm: { name: 'Map', enabled: true, upstream: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: 'OSM', maxzoom: 19 },
+    nsw: { name: 'Imagery', enabled: true, upstream: 'https://maps.six.nsw.gov.au/tile/{z}/{y}/{x}', attribution: 'NSW',
+           bounds: [[-38.4, 138.4], [-26.5, 159.3]], minzoom: 15, maxzoom: 21 },
+    off: { name: 'Imagery', enabled: false, upstream: 'https://example.org/{z}/{x}/{y}' },
+  };
+  const served = (mapping) => buildConfigFor({ ...config(), mapping }, user(['READ', 'dev'])).mapping;
+
+  it('come through this server while it keeps them', () => {
+    const { sources: out } = served({ sources, cache: { enabled: true, dir: './tiles', maxmb: 200 } });
+    expect(out.map((s) => s.url)).toEqual(['/tiles/osm/{z}/{x}/{y}', '/tiles/nsw/{z}/{x}/{y}']);
+    expect(out[1]).toMatchObject({ id: 'nsw', name: 'Imagery', bounds: [[-38.4, 138.4], [-26.5, 159.3]], minzoom: 15, maxzoom: 21 });
+  });
+  it('straight from each source while it does not', () => {
+    expect(served({ sources, cache: { enabled: false } }).sources.map((s) => s.url))
+      .toEqual([sources.osm.upstream, sources.nsw.upstream]);
+  });
+  it('only what the map draws - nothing about the cache, and no disabled source', () => {
+    const out = served({ sources, cache: { enabled: true, dir: './tiles', maxmb: 200 }, prefetch: { enabled: true } });
+    expect(Object.keys(out)).toEqual(['sources']);
+    expect(out.sources.map((s) => s.id)).toEqual(['osm', 'nsw']);
+    expect(JSON.stringify(out)).not.toMatch(/dir|maxmb|upstream|enabled/);
+  });
+  it('OpenStreetMap when mapping.yaml names no sources, or is not there at all', () => {
+    expect(served({ cache: { enabled: false } }).sources.map((s) => s.id)).toEqual(['osm']);
+    expect(buildConfigFor(config(), user(['READ', 'dev'])).mapping.sources[0].url)
+      .toBe('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+  });
+});

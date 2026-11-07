@@ -50,6 +50,8 @@ bower_components/
 
 # data folder
 data/
+# map tiles kept by the server - config.d/mapping.yaml
+tiles/
 
 #do not upload db files.
 *.db
