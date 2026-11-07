@@ -31,18 +31,33 @@ fi
 COPIED=()      # which files this run actually created, so existing ones are never rewritten below
 DIFFER_TO=()   # files kept that no longer match what this release ships, and where to compare them
 DIFFER_FROM=()
+DIFFER_OURS=() # ...and the lines in each that this release does not have
 # copy_if_missing <packaged file> <local file> [compare]
-# "compare" asks for a warning when the file exists but differs from the one this release ships.
-# Only pass it for files nobody is expected to edit - config.yaml, mqtt.yaml and server.yaml are
-# this installation's own settings, so of course they differ, and warning about them every time
-# would train you to ignore the warning that matters.
+# "compare" is for a file a release extends - the schema - and that someone may also have added to
+# here. When it differs, the question is whether this copy has anything the release does not:
+#  - nothing: every line here is still in the release's version, so all the release did was add
+#    (a new sensor type, a new field). Installing it loses nothing, so it is installed. Asking
+#    instead was a question with only one answer, put to someone who then had to read a diff of a
+#    file they never touched to find that out.
+#  - something: either it was added here, or the release changed or removed it - and only a person
+#    can tell which. So it is kept, and those lines, and only those, are shown.
+# Only pass "compare" for files like that - config.yaml, mqtt.yaml and server.yaml are this
+# installation's own settings, so of course they differ, and warning about them every time would
+# train you to ignore the warning that matters.
 copy_if_missing() {
-  local from=$1 to=$2 compare=${3:-}
+  local from=$1 to=$2 compare=${3:-} ours
   if [[ -e "$to" ]]; then
     if [[ "$compare" == compare && -e "$from" ]] && ! cmp -s "$from" "$to"; then
-      DIFFER_TO+=("$to")
-      DIFFER_FROM+=("$from")
-      echo "  kept    ${to} (DIFFERS from this release - see below)"
+      ours=$(diff "$to" "$from" | sed -n 's/^< //p') || true
+      if [[ -z "$ours" ]]; then
+        cp "$from" "$to"
+        echo "  updated ${to} (this release only adds to it)"
+      else
+        DIFFER_TO+=("$to")
+        DIFFER_FROM+=("$from")
+        DIFFER_OURS+=("$ours")
+        echo "  kept    ${to} (has lines this release does not - see below)"
+      fi
     else
       echo "  kept    ${to} (already present)"
     fi
@@ -192,110 +207,169 @@ else
   echo "  kept    ${DB} permissions.project (already present)"
 fi
 
+# ---- 3b. Dependency overrides, which npm reads only from THIS directory's package.json ----
+# frugal-iot-server's package.json carries "overrides" that fix vulnerable transitive dependencies
+# (uuid, below firebase-admin in the logger). npm honours overrides only in the top-level project,
+# and here that is this directory's package.json, which just lists frugal-iot-server - so the
+# package's own overrides are ignored, and "npm audit" on an install reports what it reports clean
+# in a checkout. Copied here so that they apply. A dependency needing an override has to have it
+# repeated in the server's package.json, since the logger's own is ignored for the same reason.
+#
+# The release's value replaces a different one here: these exist to raise a floor, and a stale one
+# would bring the vulnerability back. One a release drops is left in place - it is harmless.
+if [[ "$PKG" == */node_modules/frugal-iot-server && -f ./package.json ]]; then
+  echo "Dependencies:"
+  OVR_SET=$(node -e '
+    const fs = require("fs");
+    const want = JSON.parse(fs.readFileSync(process.argv[1])).overrides || {};
+    const local = JSON.parse(fs.readFileSync("./package.json"));
+    const have = local.overrides || {};
+    const changed = Object.keys(want).filter(k => JSON.stringify(have[k]) !== JSON.stringify(want[k]));
+    if (changed.length) {
+      local.overrides = { ...have, ...want };
+      fs.writeFileSync("./package.json", JSON.stringify(local, null, 2) + "\n");
+    }
+    console.log(changed.map(k => k + " " + JSON.stringify(want[k])).join("\n"));
+  ' "${PKG}/package.json") || OVR_SET="ERROR"
+  if [[ "$OVR_SET" == ERROR ]]; then
+    echo "  ERROR: could not read or update ./package.json - its overrides are unchanged" >&2
+  elif [[ -z "$OVR_SET" ]]; then
+    echo "  kept    ./package.json overrides (already present)"
+  else
+    for l in ${(f)OVR_SET}; do echo "  set     ./package.json override ${l}"; done
+    # The override changes nothing in node_modules until npm installs again
+    if npm install --no-fund --no-audit; then
+      echo "  updated ./node_modules to match"
+    else
+      echo "  ERROR: npm install failed - run it again in $(pwd) before restarting the server" >&2
+    fi
+  fi
+fi
+
 # ---- 4. Is what was installed FROM extras/ still current? ----
 # The files in extras/ are templates for files that live somewhere else - the broker's
-# configuration, its ACL, the systemd unit. Whether this directory's copy matches the release says
-# nothing about any of them, so the question is asked where the file actually is.
+# configuration, its ACL, the systemd units. Whether this directory's copy matches the release says
+# nothing about any of them, so the question is asked of the file actually in use - found by asking
+# the broker and systemd where that is, never by assuming a Pi's layout. Production's broker
+# configuration is several hand-written files in conf.d, its unit is in /usr/lib/systemd/system, and
+# checking "the usual place" there reported everything as absent, which was true and no help.
 #
-# Each of these is checked in the way that file is allowed to differ, because two of them are
-# *supposed* to differ and a plain cmp would cry wolf at every upgrade:
-#  - mosquitto.conf carries a placeholder for the dynamic security plugin, which the installer
-#    replaces with a path that varies by distribution.
-#  - aclfile gets a stanza appended per bridge by addbridge-prod, so the installed file is
-#    expected to be a superset - only a line this release ships and it lacks is a finding.
-STALE=()        # installed, and older than this release
-UNINSTALLED=()  # nothing at the usual place, so there was nothing to compare
+# Each is compared in the way it is allowed to differ, and what is reported is the lines that
+# differ, not an instruction to go and diff it:
+#  - the broker's configuration, setting by setting across every file it reads
+#    (broker_conf_compare in scripts/broker-config.zsh)
+#  - aclfile as a subset: addbridge-prod appends a stanza per bridge, so only a line this release
+#    ships and the installed file lacks is a finding
+#  - frugaliot.service with User, WorkingDirectory and ExecStart normalised, because the installer
+#    rewrites those for whoever runs it and wherever the server went
+STALE=()        # "installed|packaged" - and STALE_LINES, what differs, in the same order
+STALE_LINES=()
 UNREADABLE=()   # there, but not readable without sudo
 
-# check_installed <packaged file> <installed path> <exact|plugin|subset>
+# norm_file <how> <file>: settings only - comments and blank lines gone - with what an installer
+# legitimately rewrites reduced to its name
+norm_file() {
+  local expr='s#^##'
+  [[ $1 == service ]] && expr='s#^(User|WorkingDirectory|ExecStart)=.*#\1=(set by the installer)#'
+  sed -E "$expr" "$2" | grep -vE '^[[:space:]]*(#|$)' || true
+}
+
+# check_installed <packaged file> <installed path> <exact|service|subset>
 check_installed() {
-  local from=$1 to=$2 how=$3 a b missing
-  [[ -e "$from" ]] || return 0
-  if [[ ! -e "$to" ]]; then
-    UNINSTALLED+=("${to}|${from}")
-    return 0
-  fi
+  local from=$1 to=$2 how=$3 lines
+  [[ -e "$from" && -e "$to" ]] || return 0
   if [[ ! -r "$to" ]]; then
     UNREADABLE+=("$to")
     return 0
   fi
-  # Both sides through the same filter, so only a real difference survives. Note the "#"
-  # delimiter: an alternation inside an "s|...|" would end the expression at its first branch, and
-  # the "|| true" below would then hide the error and report the two files as identical.
-  local norm
   case "$how" in
-    plugin)  norm='s#^plugin .*#plugin -#' ;;
-    # The installer rewrites User, WorkingDirectory and ExecStart for whoever runs it and wherever
-    # the server went, so those three are normalised - comparing them exactly would report every
-    # installation that is not user "pi" in /home/pi/frugal-iot as out of date at every upgrade.
-    service) norm='s#^(User|WorkingDirectory|ExecStart)=.*#\1=-#' ;;
-    *)       norm='' ;;
-  esac
-
-  case "$how" in
-    plugin|service)
-      a=$(sed -E "$norm" "$from" | grep -vE '^[[:space:]]*(#|$)' | sort || true)
-      b=$(sed -E "$norm" "$to"   | grep -vE '^[[:space:]]*(#|$)' | sort || true)
-      # Neither of these files is ever empty once the comments are gone. Both blank means the
-      # filter failed rather than that they agree, and reporting "current" on that would be the
-      # worst answer of the three.
-      if [[ -z "$a" || -z "$b" ]]; then
-        UNREADABLE+=("$to")
-      elif [[ "$a" != "$b" ]]; then
-        STALE+=("${to}|${from}")
-      fi
-      ;;
     subset)
-      missing=$(comm -23 <(grep -vE '^[[:space:]]*(#|$)' "$from" | sort -u || true) \
-                         <(grep -vE '^[[:space:]]*(#|$)' "$to"   | sort -u || true) || true)
-      [[ -z "$missing" ]] || STALE+=("${to}|${from}")
+      lines=$(comm -23 <(norm_file exact "$from" | sort -u) <(norm_file exact "$to" | sort -u) |
+        sed 's/^/release only: /') || true
       ;;
     *)
-      cmp -s "$from" "$to" || STALE+=("${to}|${from}")
+      # "here" and "release", from diff's < and >; its hunk headers say nothing to a reader
+      lines=$(diff <(norm_file "$how" "$to") <(norm_file "$how" "$from") |
+        sed -n -e 's/^< /here only:    /p' -e 's/^> /release only: /p') || true
       ;;
   esac
+  if [[ -n "$lines" ]]; then
+    STALE+=("${to}|${from}")
+    STALE_LINES+=("$lines")
+  fi
 }
 
-check_installed "${PKG}/extras/mosquitto.conf"    /etc/mosquitto/conf.d/frugal-iot.conf  plugin
-check_installed "${PKG}/extras/aclfile"           /etc/mosquitto/aclfile                 subset
-check_installed "${PKG}/extras/frugaliot.service" /etc/systemd/system/frugaliot.service  service
-# Installed as they are, so compared exactly. Absent on a machine with no WiFi, which install-pi.sh
-# leaves without a setup network - reported as "nothing to compare", which is what it is.
-check_installed "${PKG}/extras/frugaliot-ap-watchdog"         /usr/local/sbin/frugaliot-ap-watchdog             exact
-check_installed "${PKG}/extras/frugaliot-ap-watchdog.service" /etc/systemd/system/frugaliot-ap-watchdog.service  exact
-check_installed "${PKG}/extras/frugaliot-ap-watchdog.timer"   /etc/systemd/system/frugaliot-ap-watchdog.timer    exact
+# Where systemd keeps a unit, if it has one - /etc/systemd/system on a Pi, /usr/lib/systemd/system
+# on production
+unit_path() {
+  command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl show -p FragmentPath --value "$1" 2>/dev/null || true
+}
+
+# The broker: what it reads, asked of its own configuration
+source "${PKG}/scripts/broker-config.zsh"
+broker_conf_read
+BROKER_FINDINGS=""
+if (( ${#BROKER_CONF_FILES} )); then
+  BROKER_FINDINGS=$(broker_conf_compare "${PKG}/extras/mosquitto.conf")
+  broker_setting acl_file
+  [[ -n "$BROKER_SETTING" ]] && check_installed "${PKG}/extras/aclfile" "$BROKER_SETTING" subset
+fi
+
+SERVICE_UNIT=$(unit_path frugaliot.service)
+[[ -n "$SERVICE_UNIT" ]] && check_installed "${PKG}/extras/frugaliot.service" "$SERVICE_UNIT" service
+# The setup network's watchdog exists only on a Pi with WiFi that install-pi.sh gave one. Anywhere
+# else it is simply not there, and saying so at every upgrade was noise.
+WATCHDOG_UNIT=$(unit_path frugaliot-ap-watchdog.service)
+if [[ -n "$WATCHDOG_UNIT" ]]; then
+  check_installed "${PKG}/extras/frugaliot-ap-watchdog.service" "$WATCHDOG_UNIT" exact
+  check_installed "${PKG}/extras/frugaliot-ap-watchdog.timer" "$(unit_path frugaliot-ap-watchdog.timer)" exact
+  check_installed "${PKG}/extras/frugaliot-ap-watchdog" /usr/local/sbin/frugaliot-ap-watchdog exact
+fi
 
 if (( ${#DIFFER_TO} )); then
   echo
-  echo "These files were left as you have them, but this release ships a different version:"
+  echo "Kept as you have them, because they have lines this release's version does not:"
   for i in {1..${#DIFFER_TO}}; do
     echo "  ${DIFFER_TO[$i]}"
-    echo "    compare with:  diff ${DIFFER_TO[$i]} ${DIFFER_FROM[$i]}"
+    print -r -- "${DIFFER_OURS[$i]}" | head -10 | sed 's/^/      /'
+    (( $(print -r -- "${DIFFER_OURS[$i]}" | wc -l) > 10 )) && echo "      ..."
   done
-  echo "The schema describes the sensor types the software understands. If you added one of your"
-  echo "own that is exactly as it should be; if you did not, this release changed it and the"
-  echo "difference is worth reading."
+  echo "If you added those, nothing needs doing. If you did not, this release changed or removed"
+  echo "them, and taking its version is safe:"
+  for i in {1..${#DIFFER_TO}}; do echo "  cp ${DIFFER_FROM[$i]} ${DIFFER_TO[$i]}"; done
 fi
+
+if [[ -n "$BROKER_FINDINGS" ]]; then
+  echo
+  echo "The broker's configuration, compared setting by setting with this release's"
+  echo "extras/mosquitto.conf, across the ${#BROKER_CONF_FILES} file(s) it reads:"
+  BROKER_REAL=0
+  for l in ${(f)BROKER_FINDINGS}; do
+    case ${l%%$'\t'*} in
+      missing)   echo "  missing:     ${l#*$'\t'}"; (( BROKER_REAL++ )) || true ;;
+      differs)   echo "  different:   ${l#*$'\t'}"; (( BROKER_REAL++ )) || true ;;
+      elsewhere) echo "  (fine)       ${l#*$'\t'}" ;;
+    esac
+  done
+  if (( BROKER_REAL )); then
+    echo "To bring it in line, put the settings above in any file in /etc/mosquitto/conf.d/ - on a Pi"
+    echo "set up by install-pi.sh, re-running it does that - then: sudo systemctl restart mosquitto"
+  fi
+fi
+(( ${#BROKER_CONF_UNREADABLE} )) &&
+  { echo; echo "Broker configuration not readable as $(id -un), so the comparison above is incomplete: ${(j:, :)BROKER_CONF_UNREADABLE}"; }
 
 if (( ${#STALE} )); then
   echo
-  echo "Installed elsewhere from extras/, and older than this release:"
-  for e in $STALE; do
-    echo "  ${e%%|*}"
-    echo "    compare with:  sudo diff ${e%%|*} ${e#*|}"
+  echo "Installed elsewhere from extras/, and different from this release:"
+  for i in {1..${#STALE}}; do
+    echo "  ${STALE[$i]%%|*}"
+    print -r -- "${STALE_LINES[$i]}" | sed 's/^/      /'
   done
-  echo "Re-running the installer brings these up to date and is the safe way to do it - it"
-  echo "substitutes the plugin path and will not discard ACL rules added per bridge:"
-  echo "  bash node_modules/frugal-iot-server/scripts/install-pi.sh"
-fi
-
-if (( ${#UNINSTALLED} )); then
-  echo
-  echo "Nothing at the usual place, so these were not compared:"
-  for e in $UNINSTALLED; do echo "  ${e%%|*}  (would come from extras/${${e#*|}:t})"; done
-  echo "Either install-pi.sh has not been run here, or this machine's broker configuration was put"
-  echo "together by hand under another name - several small files in /etc/mosquitto/conf.d is a"
-  echo "normal way to have done it. Nothing is out of date; there is simply nothing to compare."
+  echo "Bring them in line by hand - change the \"here only\" lines to the \"release only\" ones - or on"
+  echo "a Pi set up by it, by re-running install-pi.sh. The whole difference, if you want it:"
+  for e in $STALE; do echo "  sudo diff ${e%%|*} ${e#*|}"; done
 fi
 
 if (( ${#UNREADABLE} )); then

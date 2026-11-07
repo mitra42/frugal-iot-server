@@ -119,3 +119,67 @@ broker_named_files() {
   broker_conf_lines 'persistence_location' | awk '{print $1, $2, "live"}'
   broker_conf_lines 'log_dest' | awk '$2 == "file" {print "log_dest", $3, "live"}'
 }
+
+# Compare a shipped configuration (extras/mosquitto.conf) with what this broker actually reads,
+# setting by setting - not file against file. Production's configuration is several hand-written
+# files in conf.d and a Pi's is one frugal-iot.conf, and the same settings in a different file, a
+# different order or with different comments are the same configuration. One finding per line:
+#
+#   missing<TAB>text     the release sets something this broker does not set at all
+#   differs<TAB>text     both set it, to different values
+#   elsewhere<TAB>text   a file the release names at one path and this broker at another - normal,
+#                        and only information: a hand-built broker keeps its files where it likes
+#
+# Nothing printed means nothing to say. Three kinds of setting, because they differ in what counts:
+#  - listener and protocol: a listener is a port, and the protocol line after it belongs to it -
+#    so "listener 1883 0.0.0.0" is the release's "listener 1883", and its protocol is compared there
+#  - a setting whose value is a path (or the installer's PLUGIN_PATH placeholder): only that it is
+#    set; where is this machine's business
+#  - anything else: the value, last one read winning, as in mosquitto
+broker_conf_compare() {
+  local shipped=$1 line d v port
+  local -a w
+  local -A ship_proto here_proto ship_val here_val
+  local -a ship_order
+  local -A seen
+  # Shipped side
+  port=""
+  for line in ${(f)"$(grep -vE '^[[:space:]]*(#|$)' "$shipped" 2>/dev/null)"}; do
+    w=(${=line}); d=$w[1]; v="${w[2,-1]}"
+    case $d in
+      listener) port=$w[2]; ship_proto[$port]=mqtt ;;
+      protocol) [[ -n "$port" ]] && ship_proto[$port]=$w[2] ;;
+      *)        ship_val[$d]=$v; (( ${+seen[$d]} )) || { seen[$d]=1; ship_order+=("$d"); } ;;
+    esac
+  done
+  # This broker's side, in the order it reads its files
+  port=""
+  for line in ${(f)BROKER_CONF_TEXT}; do
+    w=(${=line}); d=${w[1]:-}; v="${w[2,-1]}"
+    [[ -n "$d" ]] || continue
+    case $d in
+      listener) port=$w[2]; here_proto[$port]=mqtt ;;
+      protocol) [[ -n "$port" ]] && here_proto[$port]=$w[2] ;;
+      *)        here_val[$d]=$v ;;
+    esac
+  done
+  for port in ${(ok)ship_proto}; do
+    if (( ! ${+here_proto[$port]} )); then
+      print -r -- "missing	listener $port ($ship_proto[$port]) - not declared"
+    elif [[ $here_proto[$port] != $ship_proto[$port] ]]; then
+      print -r -- "differs	listener $port - this release speaks $ship_proto[$port] on it, this broker $here_proto[$port]"
+    fi
+  done
+  for d in $ship_order; do
+    v=$ship_val[$d]
+    if (( ! ${+here_val[$d]} )); then
+      print -r -- "missing	$d $v - not set (mosquitto's default applies)"
+    elif [[ $v == /* || $v == *PLUGIN_PATH* ]]; then
+      [[ $here_val[$d] == $v || $v == *PLUGIN_PATH* ]] ||
+        print -r -- "elsewhere	$d - here $here_val[$d] (this release's default is $v)"
+    elif [[ $here_val[$d] != $v ]]; then
+      print -r -- "differs	$d - this release sets $v, this broker $here_val[$d]"
+    fi
+  done
+  return 0    # callers run under "set -e"; a comparison that found nothing has not failed
+}

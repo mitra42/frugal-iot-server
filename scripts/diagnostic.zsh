@@ -220,25 +220,22 @@ fi
 # the normal state of a broker whose configuration was assembled by hand as several small files in
 # conf.d. A check that is always wrong is one you stop reading, so this asks the question that
 # actually matters instead: is the broker missing a setting this release ships?
-if [[ -f "${PKG_EXTRAS}/mosquitto.conf" ]]; then
-  item "this release's mosquitto.conf names: $(grep -hE '^[[:space:]]*password_file' "${PKG_EXTRAS}/mosquitto.conf" 2>/dev/null | awk '{print $2}')"
-  if (( ${#BROKER_CONF_FILES} )); then
-    # The plugin line is normalised: the installer substitutes a path that varies by distribution.
-    # Comparing settings rather than files means this works whether the configuration arrived as one
-    # frugal-iot.conf or as several hand-written pieces.
-    MISSING_CONF=$(comm -23 \
-      <(sed -E 's#^plugin .*#plugin -#' "${PKG_EXTRAS}/mosquitto.conf" | grep -vE '^[[:space:]]*(#|$)' | sort -u) \
-      <(broker_conf_text | sed -E 's#^plugin .*#plugin -#' | grep -vE '^[[:space:]]*(#|$)' | sort -u) 2>/dev/null)
-    # password_file and the listeners are allowed to be sited differently on an older installation,
-    # so a difference in those is reported without being called a fault.
-    MISSING_REAL=$(print -r -- "$MISSING_CONF" | grep -vE '^[[:space:]]*(password_file|listener|protocol)[[:space:]]' || true)
-    if [[ -n "$MISSING_CONF" ]]; then
-      item "settings this release ships that the broker does not have:"
-      print -r -- "$MISSING_CONF" | while IFS= read -r l; do [[ -n "$l" ]] && item "    $l"; done
-    else
-      item "the broker has every setting this release ships"
-    fi
-    [[ -n "$MISSING_REAL" ]] && problem "The broker is missing $(print -r -- "$MISSING_REAL" | grep -c .) setting(s) this release ships - see \"Mosquitto password file\" above. Re-run install-pi.sh, or add them by hand if this broker's config.d was written by hand."
+if [[ -f "${PKG_EXTRAS}/mosquitto.conf" ]] && (( ${#BROKER_CONF_FILES} )); then
+  # Setting by setting against what the broker reads, wherever it reads it from - see
+  # broker_conf_compare. A file kept at another path is information, not a fault.
+  CONF_FINDINGS=$(broker_conf_compare "${PKG_EXTRAS}/mosquitto.conf")
+  if [[ -z "$CONF_FINDINGS" ]]; then
+    item "the broker has every setting this release ships"
+  else
+    item "compared with this release's mosquitto.conf:"
+    CONF_REAL=0
+    for l in ${(f)CONF_FINDINGS}; do
+      case ${l%%$'\t'*} in
+        elsewhere) item "    ${l#*$'\t'}" ;;
+        *)         item "    ${l#*$'\t'}"; (( CONF_REAL++ )) || true ;;
+      esac
+    done
+    (( CONF_REAL )) && problem "The broker's configuration differs from this release's in ${CONF_REAL} setting(s) - see \"Mosquitto password file\" above. Add them to a file in /etc/mosquitto/conf.d/ (or re-run install-pi.sh on a Pi it set up), then: sudo systemctl restart mosquitto"
   fi
 fi
 item "candidate locations, whether or not configured:"

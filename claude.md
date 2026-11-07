@@ -232,22 +232,34 @@ survived several releases. The same applies by hand: copy from `node_modules/...
 Which is also why `frugal-iot-init` does **not** compare its own `extras/` copy any more. That copy
 is a fossil it refuses to overwrite, so once a release changes one of these files it differs for
 ever and says so at every upgrade, whether or not anything is actually out of date - and a warning
-that is always wrong is one you skip past on the day it is right. It checks the **installed** file
-instead (`check_installed` in `scripts/init.zsh`), each in the way that file is allowed to differ:
+that is always wrong is one you skip past on the day it is right. It checks the file **in use**
+instead, found by asking the broker's configuration (`scripts/broker-config.zsh`) and systemd
+(`FragmentPath`) where it is - production keeps its broker settings in several hand-written
+`conf.d` files and its unit in `/usr/lib/systemd/system`, so "the usual place" found nothing there.
+Each is compared in the way it is allowed to differ, and what is printed is the differing lines:
 
-* `mosquitto.conf` → `/etc/mosquitto/conf.d/frugal-iot.conf`, with the `plugin` line normalised,
-  because the installer substitutes a path that varies by distribution.
-* `aclfile` → `/etc/mosquitto/aclfile`, as a **subset** check: `addbridge-prod` appends a stanza per
-  bridge, so the installed file is expected to be a superset and only a missing shipped line counts.
-* `frugaliot.service` → `/etc/systemd/system/frugaliot.service`, with `User`, `WorkingDirectory` and
-  `ExecStart` normalised, because the installer rewrites those for wherever the server went.
+* `mosquitto.conf` → **setting by setting** across every file the broker reads
+  (`broker_conf_compare`): a listener by port with its protocol, a path-valued setting only for
+  being set at all (a different path is reported as fine), anything else by value. The diagnostic
+  uses the same function.
+* `aclfile` → wherever `acl_file` points, as a **subset** check: `addbridge-prod` appends a stanza
+  per bridge, so the installed file is expected to be a superset and only a missing shipped line
+  counts.
+* `frugaliot.service` → wherever systemd has it, with `User`, `WorkingDirectory` and `ExecStart`
+  normalised, because the installer rewrites those for wherever the server went.
+* The AP watchdog files only if the watchdog unit exists - most machines have no setup network.
 
-A target that does not exist is reported as "nothing to compare", not as a problem - a broker whose
-configuration was assembled by hand as several files in `conf.d/` is a normal thing to have, and on
-one of those re-running `install-pi.sh` is wrong: it would add `frugal-iot.conf` alongside,
-declaring the same listeners and the same plugin twice.
+The schema files in `config.d/schema/` are one of two things `frugal-iot-init` updates by itself: when
+every local line is still in the release's version, the release only added to it, and installing
+it loses nothing. Otherwise it keeps the local copy and shows just the lines the release lacks.
 
-None of the three can be installed with a plain `cp` - see the table in docs/INSTALLATION.md's upgrade
+The other is the install directory's `package.json`, which gets this package's `overrides`, followed
+by an `npm install`. **npm reads `overrides` only from the top-level project**, and on an install that
+is the directory's own `package.json`, so the ones in this package (and the logger's) are silently
+ignored there. That is how `npm audit` came to be clean in a checkout and report `uuid` on every Pi.
+Any override a dependency needs must be repeated in this package's `package.json`, for the same reason.
+
+None of the first three can be installed with a plain `cp` - see the table in docs/INSTALLATION.md's upgrade
 section. `install-pi.sh` refuses to overwrite an `aclfile` that has per-bridge rules in it, and
 names the missing lines instead.
 

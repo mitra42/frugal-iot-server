@@ -1448,8 +1448,11 @@ sudo systemctl restart frugaliot
 Taking those in turn:
 
 * `npm update` fetches the new version of the server, and of the client and logger it depends on.
+  It may report vulnerabilities, typically in `uuid`. `frugal-iot-init`, next, is what fixes those,
+  so ignore that report and do not run `npm audit fix`.
 * `frugal-iot-init` adds any configuration file or directory the new version expects and you do not
-  have yet. It never changes files you already have, so your settings, database and data are safe.
+  have yet. It never changes your settings, database or data. It also copies the release's
+  dependency `overrides` into your `package.json` and re-runs `npm install` - see below.
 * `systemctl restart frugaliot` is what actually puts the new version into service — without it the
   old one keeps running from memory, and nothing appears to have changed. (Skip this if you are
   running the server by hand rather than as a service; stop it with `Ctrl-C` and start it again.)
@@ -1462,17 +1465,37 @@ journalctl -u frugaliot -n 30
 npm ls frugal-iot-server
 ```
 
-`frugal-iot-init` leaves your own files alone. Two sections of its output are worth reading.
+`frugal-iot-init` leaves your own files alone, with two exceptions, and tells you what differs.
 
-**"These files were left as you have them, but this release ships a different version"** covers the
-sensor schema under `config.d/schema/`, and gives you a `diff` command for each. If you added a
-sensor type of your own, that is exactly what it should say; if you did not, this release changed
-the schema and the difference is worth reading.
+**`package.json`** in the install directory gets the `overrides` section from frugal-iot-server's
+own. These pin transitive dependencies (such as `uuid`, deep below the logger) to versions without
+known vulnerabilities. npm only reads `overrides` from the top-level project, which here is your
+`package.json`, not the package's, so without this step `npm audit` reports problems that a checkout
+of the same release does not. When it adds or changes one it prints `set ./package.json override ...`
+and runs `npm install` to apply it; `npm audit` should then come back clean.
 
-**"Installed elsewhere from extras/, and older than this release"** covers the files that live
-somewhere else — the broker configuration, its ACL, the systemd unit. It compares what is actually
-in `/etc`, not the copy in `extras/`, because that copy is never overwritten and so differs for ever
-once a release changes it. To bring anything it names up to date, re-run the installer:
+**The sensor schema** under `config.d/schema/` is the other. If every line of your copy is still
+in this release's version, all the release did was add to it, so it installs the new one and says
+`updated ... (this release only adds to it)`. If your copy has lines the release does not, it keeps
+yours and shows just those lines: if you added them, that is exactly right; if you did not, this
+release changed or removed them, and it prints the `cp` that takes its version.
+
+**The broker's configuration** is compared setting by setting across every file the broker reads,
+wherever they are - one `frugal-iot.conf` from the installer, or several files in
+`/etc/mosquitto/conf.d/` assembled by hand. Each difference is one line:
+
+```
+  missing:     connection_messages false - not set (mosquitto's default applies)
+  (fine)       password_file - here /etc/mosquitto/mosquitto_passwords (this release's default is /var/lib/mosquitto/passwords)
+```
+
+A file kept at a different path is fine. A `missing:` or `different:` line is something this release
+sets that your broker does not. Add it to any file in `/etc/mosquitto/conf.d/`, then
+`sudo systemctl restart mosquitto` - or, on a Pi set up by `install-pi.sh`, re-run that.
+
+**"Installed elsewhere from extras/, and different from this release"** covers the ACL file and the
+systemd units, found where the broker and systemd say they are. It lists the differing lines,
+marked `here only` and `release only`. To bring them up to date on a Pi, re-run the installer:
 
 ```
 bash node_modules/frugal-iot-server/scripts/install-pi.sh
@@ -1488,29 +1511,18 @@ install these three, because none of them can simply be copied into place:
 | `extras/frugaliot.service` | written for user `pi` in `/home/pi/frugal-iot`; the installer rewrites `User`, `WorkingDirectory` and `ExecStart` for wherever this actually went. |
 
 The setup network's watchdog, `extras/frugaliot-ap-watchdog` and its `.service` and `.timer`, *can* be
-copied as they are; step 8a has the commands. On a Pi installed before the setup network existed,
-re-running the installer adds it, and asks once for the `pi` login's password to give it.
+copied as they are; step 8a has the commands. It is only checked where it is installed. On a Pi
+installed before the setup network existed, re-running the installer adds it, and asks once for the
+`pi` login's password to give it.
 
 The installer will not overwrite an ACL file that has per-bridge rules in it. If this release adds a
 rule to a broker that has them, it says which lines are missing and leaves the file alone for you to
 add them by hand, then `sudo systemctl reload mosquitto`.
 
 > **If your broker's configuration was assembled by hand** — several small files in
-> `/etc/mosquitto/conf.d/` rather than the single `frugal-iot.conf` the installer writes — then
-> `frugal-iot-init` reports those files under "Nothing at the usual place, so these were not
-> compared", and re-running the installer is *not* what you want: it would add `frugal-iot.conf`
-> alongside what you already have, declaring the same listeners and the same plugin twice. Compare
-> by hand instead, and add only what is missing:
->
-> ```
-> sudo grep -hvE '^\s*(#|$)' /etc/mosquitto/conf.d/*.conf | sort -u > /tmp/running.txt
-> grep -hvE '^\s*(#|$)' node_modules/frugal-iot-server/extras/mosquitto.conf | sort -u > /tmp/shipped.txt
-> diff /tmp/running.txt /tmp/shipped.txt
-> ```
->
-> Lines only in the running config are usually this machine's own — TLS `certfile`/`keyfile`, a
-> bridge `listener`, a `password_file` in a different place. Lines only in the shipped one are what
-> this release added.
+> `/etc/mosquitto/conf.d/` rather than the single `frugal-iot.conf` the installer writes — do not
+> re-run the installer: it would add `frugal-iot.conf` alongside what you already have, declaring the
+> same listeners and the same plugin twice. Add the `missing:` and `different:` settings by hand.
 
 > It does not compare `config.yaml`, `config.d/mqtt.yaml`, `config.d/logger.yaml` or
 > `config.d/server.yaml`, because those hold your own settings and would differ every time. If a
@@ -1522,7 +1534,7 @@ which for the settings under [Wear and tear on the SD card](#wear-and-tear-on-th
 goes on writing as often as it did. A server that has been running since before those settings
 existed keeps logging every message and every web request, and writing every reading as it arrives —
 deliberately, since quietening somebody's server without being asked is not a thing an upgrade should
-do. On a Pi, compare the two files above and copy across the settings you want.
+do. On a Pi, compare the files named above and copy across the settings you want.
 
 Your organizations, accounts, database and logged data are untouched by an upgrade — they live in
 this directory, not in `node_modules`.
