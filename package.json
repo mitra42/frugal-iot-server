@@ -28,6 +28,7 @@
     "frugal-iot-server": "frugal-iot-server.js",
     "frugal-iot-init": "scripts/init.zsh",
     "frugal-iot-addorganization": "scripts/addorganization.zsh",
+    "frugal-iot-backup": "scripts/backup.zsh",
     "frugal-iot-setpassword": "scripts/setpassword.zsh",
     "frugal-iot-diagnostic": "scripts/diagnostic.zsh",
     "frugal-iot-clearretained": "scripts/clearretained.js",
@@ -36,6 +37,7 @@
     "frugal-iot-rebuild-dynsec": "scripts/rebuild-dynsec.js",
     "frugal-iot-dynsec-init": "scripts/dynsec-init.js",
     "frugal-iot-resetnode": "scripts/resetnode.js",
+    "frugal-iot-restore": "scripts/restore.zsh",
     "frugal-iot-grafana-token": "scripts/grafana-token.js",
     "frugal-iot-backfill-opensearch": "scripts/backfill-opensearch.js"
   },

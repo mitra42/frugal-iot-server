@@ -18,6 +18,7 @@ extras/mosquitto_passwords
 .gitignore
 claude.md
 create-favicon.js
+BACKUP_PLAN.md
 jest.config.js
 vitest.config.js
 test/**

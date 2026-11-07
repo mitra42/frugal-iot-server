@@ -133,36 +133,59 @@ if [[ -f frugal-iot.db ]] && have sqlite3; then
 fi
 
 section "Mosquitto configuration"
-if [[ -f /etc/mosquitto/mosquitto.conf ]]; then
-  item "/etc/mosquitto/mosquitto.conf: $(fileinfo /etc/mosquitto/mosquitto.conf)"
-else
-  item "/etc/mosquitto/mosquitto.conf: missing - is mosquitto installed?"
-fi
-item "files in /etc/mosquitto/conf.d:"
-for f in /etc/mosquitto/conf.d/*(N); do
-  item "  ${f}: $(fileinfo $f)"
-  grep -nE '^[[:space:]]*(listener|protocol|password_file|allow_anonymous)' $f 2>/dev/null | sed 's/^/      /'
+# Which files the broker reads, asked of its own configuration - production's is several hand-made
+# files in conf.d, a Pi's is one frugal-iot.conf. scripts/broker-config.zsh explains the sudo retry,
+# which is per file: a root-only bridge file used to be skipped silently among readable ones.
+# docs/INSTALLATION.md has this script copied on its own to a machine not yet installed, so the
+# helper may not be beside it - look in the installed package too before giving up.
+BROKER_HELPER=""
+for f in "${0:A:h}/broker-config.zsh" node_modules/frugal-iot-server/scripts/broker-config.zsh; do
+  [[ -r "$f" ]] && { BROKER_HELPER="$f"; break; }
 done
-[[ -z "$(print -r -- /etc/mosquitto/conf.d/*(N))" ]] && problem "Nothing in /etc/mosquitto/conf.d - the Frugal IoT config was never copied there (step 5)"
-
-# The files the broker actually reads. mosquitto's include_dir only loads names ending in .conf,
-# so look at exactly those - and the last setting wins, hence "tail -1" everywhere below.
-BROKER_CONF_FILES=(/etc/mosquitto/mosquitto.conf(N) /etc/mosquitto/conf.d/*.conf(N))
-
-# Everything the broker reads, as one stream - with sudo if reading it plainly gives nothing. A
-# file under /etc can be readable only by root, and an ordinary user then gets silence rather than
-# an error, which is indistinguishable from "that setting is not configured". Left unguarded, the
-# comparison below reported a broker as missing EVERY setting this release ships, which as a
-# periodic check is worse than no check at all.
-broker_conf_text() {
-  local t
-  (( ${#BROKER_CONF_FILES} )) || return 0
-  t=$(cat "${BROKER_CONF_FILES[@]}" 2>/dev/null) || true
-  if [[ -z "$t" ]] && have sudo; then
-    t=$(sudo -n cat "${BROKER_CONF_FILES[@]}" 2>/dev/null) || true
+if [[ -z "$BROKER_HELPER" ]]; then
+  print -u3 "diagnostic.zsh needs broker-config.zsh beside it - copy that from the same scripts/ directory"
+  exit 2
+fi
+source "$BROKER_HELPER"
+broker_conf_read
+if (( ! ${#BROKER_CONF_FILES} )); then
+  item "$(broker_conf_main): missing - is mosquitto installed?"
+else
+  item "files the broker reads, in order:"
+  for f in $BROKER_CONF_FILES; do
+    item "  ${f}: $(fileinfo $f)"
+    # Read through the helper rather than grep, so a root-only file is shown as well
+    print -r -- "$(broker_conf_cat $f 2>/dev/null)" | grep -nE '^[[:space:]]*(listener|protocol|password_file|allow_anonymous)' | sed 's/^/      /'
+  done
+  (( ${#BROKER_CONF_FILES} == 1 )) && problem "$BROKER_CONF_FILES reads no other files - the Frugal IoT config was never copied into conf.d (step 5)"
+fi
+if (( ${#BROKER_CONF_UNREADABLE} )); then
+  item "NOT READABLE as $(id -un), even with sudo -n: ${(j:, :)BROKER_CONF_UNREADABLE}"
+  item "  everything below about the broker is missing whatever those files say - run with sudo"
+  problem "Could not read ${(j:, :)BROKER_CONF_UNREADABLE} - re-run with sudo for a complete answer about the broker"
+fi
+item "files the configuration names, and what a backup does with each (the files above are taken too):"
+# NAMED_FILE, not "path": zsh ties $path to $PATH, so reading into it wipes out every command after
+broker_named_files | while read -r setting NAMED_FILE role; do
+  case $role in
+    backup)      role="taken" ;;
+    tls)         role="taken (TLS)" ;;
+    rebuildable) role="taken - its admin account matches secrets.yaml; the rest is rebuilt from the db" ;;
+    package)     role="not taken - part of mosquitto" ;;
+    live)        role="not taken - running state" ;;
+  esac
+  # A certificate under /etc/letsencrypt/live sits in a root-only directory, so it is invisible to
+  # an ordinary user - which is not the same thing as missing.
+  if [[ ! -e "$NAMED_FILE" ]] && have sudo && sudo -n test -e "$NAMED_FILE" 2>/dev/null; then
+    item "  ${(r:22:)setting} ${NAMED_FILE}: present, needs root to see"
+  else
+    item "  ${(r:22:)setting} ${NAMED_FILE}: $(fileinfo $NAMED_FILE)"
   fi
-  print -r -- "$t"
-}
+  item "      -> ${role}"
+done
+
+# Everything the broker reads, as one stream, comments removed
+broker_conf_text() { print -r -- "$BROKER_CONF_TEXT"; }
 
 # Where the packaged copy of a shipped file is. What is in ./extras is NOT it: frugal-iot-init
 # copies extras/ in and then never overwrites it, so once a release changes one of these files the
@@ -171,7 +194,7 @@ PKG_EXTRAS="node_modules/frugal-iot-server/extras"
 [[ -d "$PKG_EXTRAS" ]] || PKG_EXTRAS="${0:A:h:h}/extras"
 
 # Which password file does the running configuration actually name?
-CONFIGURED_PWFILE=$(broker_conf_text | grep -hE '^[[:space:]]*password_file[[:space:]]' | tail -1 | awk '{print $2}')
+broker_setting password_file; CONFIGURED_PWFILE="$BROKER_SETTING"
 section "Mosquitto password file"
 if [[ -n "$CONFIGURED_PWFILE" ]]; then
   item "configuration names: $CONFIGURED_PWFILE"
@@ -238,7 +261,7 @@ else
   item "systemctl not available on this machine"
 fi
 # Debian's mosquitto logs to a file rather than the journal, so this is where the real reason is.
-MOSQUITTO_LOG=$(grep -hE '^[[:space:]]*log_dest[[:space:]]+file' /etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*(N) 2>/dev/null | tail -1 | awk '{print $3}')
+MOSQUITTO_LOG=$(broker_conf_lines log_dest | awk '$2 == "file" {print $3}' | tail -1)
 [[ -z "$MOSQUITTO_LOG" ]] && MOSQUITTO_LOG=/var/log/mosquitto/mosquitto.log
 item "its own log file: ${MOSQUITTO_LOG} ($(fileinfo $MOSQUITTO_LOG))"
 if [[ -r "$MOSQUITTO_LOG" ]]; then
@@ -347,11 +370,6 @@ section "Broker access control"
 # An acl_file confines each account to its own organization's topics; without one, every account
 # that can log in reaches every topic on the broker. Reported here because a broker installed before
 # the ACL shipped will not have one, and nothing else says so.
-BROKER_SETTING=""
-broker_setting() {  # name -> value from the broker's own configuration, sudo only if needed
-  # broker_conf_text carries the sudo fallback this used to spell out for itself
-  BROKER_SETTING=$(broker_conf_text | grep -hE "^[[:space:]]*$1[[:space:]]" | tail -1 | awk '{print $2}') || true
-}
 broker_setting acl_file; ACLFILE="$BROKER_SETTING"
 if [[ -z "$ACLFILE" ]]; then
   item "acl_file: NOT SET - every account that can log in can reach every topic, across all organizations"
@@ -495,24 +513,13 @@ section "Bridge to a production server (optional)"
 # A bridge relays this Pi's readings to a production server - see
 # extras/mosquitto-bridge.conf.example. It is configured by a "connection" line in one of
 # mosquitto's own config files, so most installations have none, which is not a problem.
-BRIDGECONFS=(/etc/mosquitto/mosquitto.conf(N) /etc/mosquitto/conf.d/*.conf(N))
 # The bridge's own file is 600 root, because it holds the bridge's password - so read as an ordinary
 # user it yields nothing, which looked exactly like "no bridge configured" on a Pi whose bridge was
-# configured and failing. Read each file with sudo when it cannot be read plainly, and say so when
-# even that fails rather than report an answer that was never looked for.
-BRIDGETEXT=""; BRIDGEUNREAD=()
-for f in $BRIDGECONFS; do
-  if [[ -r $f ]]; then
-    BRIDGETEXT+="$(<$f)"$'\n'
-  elif have sudo && t=$(sudo -n cat $f 2>/dev/null); then
-    BRIDGETEXT+="$t"$'\n'
-  else
-    BRIDGEUNREAD+=($f)
-  fi
-done
-BRIDGENAMES=$(print -r -- "$BRIDGETEXT" | grep -E '^[[:space:]]*connection[[:space:]]' | awk '{print $2}')
-if [[ -z "$BRIDGENAMES" ]] && (( ${#BRIDGEUNREAD} )); then
-  item "cannot tell whether a bridge is configured: not readable as $(id -un) - ${(j:, :)BRIDGEUNREAD}"
+# configured and failing. broker_conf_read retried it with sudo; say so when even that failed rather
+# than report an answer that was never looked for.
+BRIDGENAMES=$(broker_conf_lines connection | awk '{print $2}')
+if [[ -z "$BRIDGENAMES" ]] && (( ${#BROKER_CONF_UNREADABLE} )); then
+  item "cannot tell whether a bridge is configured: not readable as $(id -un) - ${(j:, :)BROKER_CONF_UNREADABLE}"
   item "  sudo npx --no frugal-iot-diagnostic   reads them"
 elif [[ -z "$BRIDGENAMES" ]]; then
   item "no bridge configured - readings stay on this Pi"
@@ -520,7 +527,7 @@ else
   for b in ${(f)BRIDGENAMES}; do item "configured bridge: $b"; done
   # What it is set to relay and where. remote_password is deliberately not among these.
   item "its settings:"
-  print -r -- "$BRIDGETEXT" | grep -E '^[[:space:]]*(address|remote_username|remote_clientid|topic|cleansession|restart_timeout|notifications)[[:space:]]' | sed 's/^/      /'
+  broker_conf_lines 'address|remote_username|remote_clientid|topic|cleansession|restart_timeout|notifications' | sed 's/^/      /'
   # Whether it is actually up, rather than what the configuration hoped for. With "notifications"
   # left on, the bridge publishes a retained 1 or 0 here each time it connects or drops.
   if have mosquitto_sub; then
@@ -581,6 +588,37 @@ if [[ -d data ]]; then
   else
     item "data/ is empty - no readings logged yet, which is expected until a node reports (step 9)"
   fi
+fi
+
+section "Backups"
+# A nightly timer that has quietly stopped looks exactly like one that works, so say how old the
+# newest snapshot is. Only a problem once the timer is installed - before that, nothing promised one.
+BACKUP_DIR=/var/backups/frugal-iot
+BACKUP_TIMER=""
+have systemctl && { BACKUP_TIMER=$(systemctl is-enabled frugal-iot-backup.timer 2>/dev/null) || true; }
+# is-enabled answers "not-found" for a unit that does not exist, rather than nothing
+[[ "$BACKUP_TIMER" == not-found ]] && BACKUP_TIMER=""
+item "timer:       ${BACKUP_TIMER:-not installed - npx --no frugal-iot-backup install}"
+# The directory is 700, owned by the account the server runs as - so sudo for anyone else
+NEWEST_BACKUP=$( (ls -1t "$BACKUP_DIR" 2>/dev/null || { have sudo && sudo -n ls -1t "$BACKUP_DIR" 2>/dev/null; }) |
+  grep -m1 '^frugal-iot-state-.*\.tar\.gz$') || true
+if [[ -n "$NEWEST_BACKUP" ]]; then
+  # The time is in the name, which saves a stat that might need sudo too
+  BACKUP_STAMP=${${NEWEST_BACKUP%.tar.gz}[-15,-1]}     # YYYYmmdd-HHMMSS
+  zmodload zsh/datetime 2>/dev/null
+  if strftime -r -s BACKUP_SECS '%Y%m%d-%H%M%S' "$BACKUP_STAMP" 2>/dev/null; then
+    BACKUP_HOURS=$(( (EPOCHSECONDS - BACKUP_SECS) / 3600 ))
+    item "newest:      ${BACKUP_DIR}/${NEWEST_BACKUP} (${BACKUP_HOURS} hours old)"
+    [[ "$BACKUP_TIMER" == enabled ]] && (( BACKUP_HOURS > 48 )) &&
+      problem "The newest backup is ${BACKUP_HOURS} hours old although the nightly timer is enabled - see: journalctl -u frugal-iot-backup"
+  else
+    item "newest:      ${BACKUP_DIR}/${NEWEST_BACKUP}"
+  fi
+elif [[ "$BACKUP_TIMER" == enabled ]]; then
+  item "newest:      none in ${BACKUP_DIR} (or not readable as $(id -un))"
+  problem "The backup timer is enabled but there is no snapshot in ${BACKUP_DIR} - see: journalctl -u frugal-iot-backup"
+else
+  item "newest:      none"
 fi
 
 section "Wear on the SD card"

@@ -95,27 +95,23 @@ if [[ "$BRIDGE_CREDENTIAL" == derived ]]; then
   exit 1
 fi
 
-# Which files the running broker actually uses, rather than where they usually are. Only ".conf"
-# files in conf.d are read, and the last setting wins.
-MOSQ_CONFS=(/etc/mosquitto/mosquitto.conf(N) /etc/mosquitto/conf.d/*.conf(N))
-if (( ${#MOSQ_CONFS} == 0 )); then
-  echo "Error: no mosquitto configuration found in /etc/mosquitto" >&2
+# Which files the running broker actually uses, rather than where they usually are - production's
+# configuration is several hand-made files in conf.d. scripts/broker-config.zsh reads each file with
+# sudo when it is root-only; this script needs sudo below anyway, so it may prompt.
+BROKER_SUDO=(sudo)
+source "${0:A:h}/broker-config.zsh"
+broker_conf_read
+if (( ${#BROKER_CONF_FILES} == 0 )); then
+  echo "Error: no mosquitto configuration found at $(broker_conf_main)" >&2
   exit 1
 fi
-# Read one setting out of the broker's configuration. Two things to be careful of: a conf.d file
-# can be root-only (a bridge configuration holds a password, so it should be), which makes grep
-# fail rather than return nothing - and under "set -e" a failing command substitution would end
-# this script silently, before it had printed anything at all. Hence "|| true" and the sudo retry.
-mosq_setting() {
-  local out
-  out=$(grep -hE "^[[:space:]]*$1[[:space:]]" "${MOSQ_CONFS[@]}" 2>/dev/null | tail -1 | awk '{print $2}') || true
-  if [[ -z "$out" ]] && command -v sudo >/dev/null; then
-    out=$(sudo grep -hE "^[[:space:]]*$1[[:space:]]" "${MOSQ_CONFS[@]}" 2>/dev/null | tail -1 | awk '{print $2}') || true
-  fi
-  print -r -- "$out"
-}
-PWFILE=$(mosq_setting password_file)
-ACLFILE=$(mosq_setting acl_file)
+if (( ${#BROKER_CONF_UNREADABLE} )); then
+  echo "Error: could not read ${(j:, :)BROKER_CONF_UNREADABLE}, so cannot tell where the broker" >&2
+  echo "keeps its password and ACL files. Re-run with sudo." >&2
+  exit 1
+fi
+broker_setting password_file; PWFILE="$BROKER_SETTING"
+broker_setting acl_file; ACLFILE="$BROKER_SETTING"
 
 if [[ -z "$PWFILE" ]]; then
   echo "Error: no password_file in the mosquitto configuration - this broker is not using accounts." >&2

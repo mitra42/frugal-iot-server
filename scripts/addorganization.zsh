@@ -77,9 +77,15 @@ fi
 
 # Ask the broker's own configuration where its password file is, rather than guessing - that way
 # this works whatever layout a machine uses, including installations older than this script.
-# Mosquitto reads /etc/mosquitto/mosquitto.conf and then the .conf files in conf.d, last one wins.
-MOSQUITTO_PASSWD_FILE=$(grep -hE '^[[:space:]]*password_file[[:space:]]' \
-  /etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*.conf(N) 2>/dev/null | tail -1 | awk '{print $2}')
+# sudo may prompt: a Pi's bridge file is root-only, and the password file needs sudo below anyway.
+BROKER_SUDO=(sudo)
+source "${0:A:h}/broker-config.zsh"
+broker_conf_read
+broker_setting password_file; MOSQUITTO_PASSWD_FILE="$BROKER_SETTING"
+if (( ${#BROKER_CONF_UNREADABLE} )); then
+  echo "Warning: could not read ${(j:, :)BROKER_CONF_UNREADABLE} - if the password file is named there," >&2
+  echo "         the one used below may be the wrong one." >&2
+fi
 USED_LOCAL_MOSQUITTO_FILE=0
 if [[ -n "$MOSQUITTO_PASSWD_FILE" ]]; then
   MOSQUITTO_PASSWD_FROM_CONFIG=1

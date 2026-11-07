@@ -1164,8 +1164,8 @@ but close enough for sensor data.
 ### Wear and tear on the SD card
 
 SD cards wear out from being written to, and a server recording sensor readings writes all the time.
-We have not yet seen a card fail, but plan for one eventually: keep a copy of `config.d/` and
-`frugal-iot.db` somewhere else, and treat the readings in `data/` as valuable but not irreplaceable.
+We have not yet seen a card fail, but plan for one eventually: see [Backups](#backups), and keep
+the snapshots somewhere other than the card.
 
 A new installation is set up to write as little as it reasonably can, and the settings are worth
 knowing about, because turning one of them back on for debugging and forgetting is easy to do:
@@ -1198,6 +1198,90 @@ npx --no frugal-iot-diagnostic
 and read the **Wear on the SD card** section, which reports how much has been written since boot,
 whether the machine is swapping, and whether each of the settings above is in force. Run it twice a
 few days apart — the interesting number is the rate, not the total.
+
+## Backups
+
+`frugal-iot-backup` takes a snapshot of everything on this machine that cannot be rebuilt: the
+database, `config.d/` (including `secrets.yaml`), the broker's configuration, password file, ACL
+file and TLS certificate, and the server's systemd unit. It finds the broker's files by asking the
+broker's own configuration, so it works however this machine is laid out.
+
+Not in it: `data/` (large, and copied separately - see below), `ota/` (rebuilt at each release),
+and anything the broker rebuilds or is running on.
+
+First see what it would take, and from where - this writes nothing:
+
+```
+cd ~/frugal-iot
+npx --no frugal-iot-backup check
+```
+
+Then take one now, and install a timer that takes one every night:
+
+```
+npx --no frugal-iot-backup
+npx --no frugal-iot-backup install
+```
+
+Both ask for `sudo`, because the broker's files belong to root and to `mosquitto`. Snapshots go to
+`/var/backups/frugal-iot/`, keeping one a day for a week, one a week for a month, one a month for
+three months, one a quarter for a year, and one a year for ever - about 20 small files.
+
+**A snapshot holds every credential this server has** - with it, someone can log in as any node or
+user on the broker. So each one is mode 600, owned by the account the server runs as, in a directory
+nobody else can open. Copy them off the machine the same way: by `rsync` or `scp` as that account,
+to a machine you trust as much as this one.
+
+A snapshot on the same SD card is lost with the card, so it only protects against mistakes. To
+protect against losing the machine, copy `/var/backups/frugal-iot/` and `data/` somewhere else
+regularly - for example from a laptop:
+
+```
+rsync -a pi@frugaliot.local:/var/backups/frugal-iot/ ~/frugal-iot-backups/frugaliot/state/
+rsync -a pi@frugaliot.local:frugal-iot/data/ ~/frugal-iot-backups/frugaliot/data/
+```
+
+Leave out `--delete` on the second: the server may delete old readings to save space, and this way
+the copy keeps them.
+
+`npx --no frugal-iot-diagnostic` reports how old the newest snapshot is, and calls it a problem if
+the timer is installed and nothing has been written for two days.
+
+### Restoring
+
+Restore onto a machine where the server is already installed - after re-flashing a Pi, run the
+installer first, then restore over what it set up. Copy the snapshot onto the machine, then from
+the server's directory see what would happen - this changes nothing:
+
+```
+npx --no frugal-iot-restore <snapshot>
+```
+
+`latest` in place of a file name means the newest one in `/var/backups/frugal-iot/`. Then do it,
+in one of two ways:
+
+* **`state`** - onto a machine its own installer set up, laid out however that is. It restores the
+  database, `config.d/` (including `secrets.yaml`) and the broker's password file, ACL file and
+  account state, each to wherever *this* broker keeps them. It keeps this machine's own broker
+  configuration, TLS certificate, systemd unit, `mqtt.yaml` and `server.yaml`.
+* **`all`** - onto the same machine, or one laid out exactly like it: everything goes back where it
+  came from. Broker configuration files the snapshot does not have are renamed to
+  `<name>.pre-restore`, so the broker does not read both.
+
+```
+npx --no frugal-iot-restore <snapshot> state
+```
+
+If the machine already has logins of its own, add `force` as the last word - it says so rather
+than replacing them silently.
+
+Before changing anything it takes a snapshot of what is there into
+`/var/backups/frugal-iot/pre-restore/`, so a restore can be undone with
+`npx --no frugal-iot-restore <that snapshot> all force`. It stops the server and the broker while it
+works - every node disconnects for a few seconds - and finishes by checking the broker's accounts
+against the database and running the diagnostic.
+
+`data/` is not in a snapshot: copy it back from wherever it is mirrored.
 
 ## Moving the Pi to another WiFi network
 
@@ -1317,7 +1401,8 @@ Two things to know:
 
 If you have not reached step 4 yet, the command does not exist. Copy
 [scripts/diagnostic.zsh](https://github.com/mitra42/frugal-iot-server/blob/main/scripts/diagnostic.zsh)
-to the Pi and run `zsh diagnostic.zsh` instead.
+and [scripts/broker-config.zsh](https://github.com/mitra42/frugal-iot-server/blob/main/scripts/broker-config.zsh),
+which it needs, into the same directory on the Pi and run `zsh diagnostic.zsh` instead.
 
 ### A topic that will not go away
 

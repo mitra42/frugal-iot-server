@@ -24,7 +24,8 @@ Sorted by the two questions that decide what to do with it: can it be rebuilt, a
 | Broker: password file | Shrinking as nodes move to dynsec; until then, no | **Yes** | State snapshot |
 | Broker: `dynamic-security.json` | **Yes** - `frugal-iot-rebuild-dynsec` from db + secrets | | Not needed; included as a cross-check only |
 | `ota/` | Yes - rebuilt every release anyway | No | No |
-| TLS certificates, retained messages | Yes - re-issued; nodes republish | | No |
+| Broker TLS `certfile`/`keyfile` | Yes, re-issued - but production's were placed by hand, and restoring them spares every bridge an outage | `keyfile`: yes | State snapshot |
+| Broker plugin `.so`, `persistence_location` (retained messages), log | Part of mosquitto / running state; nodes republish | | No |
 
 What the db holds that is secret: user password hashes, **`nodes.password` in plaintext**, `bridges`
 tokens, `grafana_tokens`, `api_platforms.auth_token`, and possibly credentials inside
@@ -62,7 +63,8 @@ Option 1 looks right. A separate change, but worth doing before backups start be
 * the systemd unit, and a `MANIFEST` - hostname, date, package versions, db schema, and **the path
   each file was taken from**
 
-Nightly, keeping 7 daily and 4 weekly copies locally.
+Nightly, keeping locally the newest of each of the last 7 days, 4 weeks, 3 months and 4 quarters,
+and of every year.
 
 **Data mirror** - large, incremental, unversioned:
 
@@ -110,11 +112,19 @@ default, then prunes. Run as **root from a systemd timer**, not from inside the 
 housekeeping: it has to read root- and mosquitto-only files, and it should work when the server is
 down. The directory is owned by the service user so the offsite pull can read it.
 
-**`frugal-iot-restore <snapshot> [force]`**
-Onto a machine with the package installed: stop the service, unpack to the paths in the `MANIFEST`,
-`PRAGMA integrity_check`, `rebuild-dynsec`, reload or restart mosquitto (restart if bridge files
-changed), start the service, then `rebuild-dynsec check` and `frugal-iot-diagnostic`. Refuses to
-overwrite a db that has users in it without `force`.
+**`frugal-iot-restore <snapshot|latest> [check|state|all] [force]`** - built.
+`check` (the default) says what it would do. `state` restores onto a machine its own installer set
+up: db, `config.d/`, and the broker's password, ACL and dynsec files, each to wherever THAT broker's
+configuration keeps them - which is why the manifest records the setting that named each file. It
+keeps the machine's own broker configuration, TLS, systemd unit, `mqtt.yaml` and `server.yaml`. `all`
+puts everything back where it came from, and moves aside broker configuration the snapshot lacks.
+Both take a pre-restore snapshot first, stop server and broker, run `frugal-iot-init` (migrations
+for an older db) and `rebuild-dynsec`, restart, then `rebuild-dynsec check` and the diagnostic.
+Refuses without `force` if the machine already has logins, and refuses a snapshot from a newer
+release than is installed.
+
+The dynsec JSON goes back with `secrets.yaml` because it holds the admin account whose password is
+in `secrets.yaml`: restoring the secrets alone onto another broker locks the server out of it.
 
 **`frugal-iot-backup verify <snapshot>`**
 Unpacks into a scratch directory, opens the db, checks the schema, parses `secrets.yaml`. Run after
@@ -171,9 +181,11 @@ Still to work out:
 * Replicated users (`id >= REPLICA_ID_OFFSET`) come from production on the next poll; including them
   is harmless, but a restore does not depend on them.
 
-## Open questions
+## Later: a second offsite copy
 
-* **A second offsite copy** beyond the laptop?
+Wanted, but not yet. Either a second machine pulling from the server the same way (its own `rrsync`
+key), or this laptop syncing on to another machine. Both machines in view are secured, so neither
+needs TODO-BACKUP-ENCRYPT; a copy anywhere less trusted - a cloud folder, a shared disk - would.
 
 ## Separate project: moving an organization
 
