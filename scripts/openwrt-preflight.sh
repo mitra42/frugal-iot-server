@@ -156,8 +156,20 @@ info "install directory ${DIR} is on ${DMNT} (${DFS}), ${DFREE} MB free"
 case "$DFS" in
   vfat|exfat|msdos|ntfs|fuseblk) fail "${DIR} is on ${DFS}, which cannot hold the install. Put it on an ext4 drive: --dir /mnt/<drive>/frugal-iot" ;;
   *) if [ "$DFREE" -lt 400 ]; then
-       fail "only ${DFREE} MB free for ${DIR}. Attach a USB/SSD drive (extroot, or mount it) and use --dir"
-       if ! ls /dev/sd[a-z]* /dev/mmcblk[1-9]* /dev/nvme* >/dev/null 2>&1; then
+       # A drive that is already mounted is the usual answer: the --dir may simply name the wrong mount
+       # point (/mnt/sda1 when the drive is at /mnt/sda). Suggest any real filesystem with room.
+       BIGMNT=$(awk '$3 ~ /^(ext2|ext3|ext4|f2fs|btrfs|xfs)$/ && $2 != "/" && $2 !~ /^\/(overlay|rom)/ {print $2}' /proc/mounts | sort -u | while read -r m; do
+         [ "$(free_mb "$m")" -ge 400 ] 2>/dev/null && { echo "$m"; break; }; done)
+       if [ -n "$BIGMNT" ]; then
+         fail "only ${DFREE} MB free for ${DIR}, which is not on the drive. ${BIGMNT} has room: try --dir ${BIGMNT}/frugal-iot"
+       else
+         fail "only ${DFREE} MB free for ${DIR}. Attach a USB/SSD drive (extroot, or mount it) and use --dir"
+       fi
+       # (ls with several patterns fails if ANY has no match, so test each separately)
+       SEEN_DRIVE=0
+       for d in /dev/sd[a-z]* /dev/mmcblk[1-9]* /dev/nvme*; do [ -e "$d" ] && SEEN_DRIVE=1; done
+       if [ -n "$BIGMNT" ]; then :
+       elif [ "$SEEN_DRIVE" = 0 ]; then
          # Seen on a real router: the drive was plugged in and formatted ext4, and invisible, because
          # the image carried no USB storage driver.
          info "No USB, SD or NVMe drive is visible at all. If one is plugged in, this OpenWrt image has no"

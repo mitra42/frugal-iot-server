@@ -24,8 +24,8 @@ Run the preflight script (below) and it checks every line of this table for you.
 
 | | Needed | Why |
 | --- | --- | --- |
-| **CPU** | **aarch64 or x86_64.** 32-bit ARM might work. MIPS will not. | OpenWrt's `node` package is only built for some CPUs, and the database module (`sqlite3`) is a compiled binary that has to exist for that CPU and for OpenWrt's C library (musl). Both are most likely on 64-bit. |
-| **Memory** | 512 MB or more (256 MB at the very least) | The server uses about 250 MB once running. |
+| **CPU** | **aarch64 or x86_64.** 32-bit ARM might work. **MIPS will not** (Node.js has no MIPS build at all, so older and cheaper routers - the GL.iNet AR300M, for one - are out). | OpenWrt's `node` package is only built for some CPUs, and the database module (`sqlite3`) is a compiled binary that has to exist for that CPU and for OpenWrt's C library (musl). Both are most likely on 64-bit. |
+| **Memory** | **512 MB or more** | The server alone uses about 250 MB once running, on top of the router's own software. A router with 256 MB cannot do it (a Cudy with 233 MB usable was refused). |
 | **Storage** | **About 400 MB free** on ext4, f2fs or btrfs | The software is ~100 MB; npm needs room to work; readings accumulate. **Most routers' own flash is far too small**, so this means a USB stick or SSD, set up as extroot or just mounted, and `--dir` pointing at it. Not FAT, exFAT or NTFS: the install needs symlinks and Unix permissions. The image may also lack the USB storage driver - see [Preparing the router](#preparing-the-router). |
 | **Node.js** | **20.17 or later**, and npm | From OpenWrt's feed if it has one - **OpenWrt 25.12 has none for aarch64**, in which case it is unpacked by hand from a musl build ([how](#if-the-feed-has-no-node)). The preflight and the installer accept either. |
 | **mosquitto** | A build with **websockets** | The browser dashboard connects over websockets. If the router's mosquitto has none, the dashboard cannot work. |
