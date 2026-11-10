@@ -25,6 +25,11 @@
 # runs frugal-iot-init (so an older database gets this release's migrations) and
 # frugal-iot-rebuild-dynsec, starts both again and runs the diagnostic.
 #
+# Once it starts changing things it runs as the systemd unit frugal-iot-restore, not in the terminal,
+# so a dropped ssh connection cannot stop it halfway with the broker and server down; the terminal
+# only follows its journal. While it works, /var/backups/frugal-iot/restore-in-progress says so -
+# if that is still there afterwards, the restore did not finish, and the diagnostic says how to.
+#
 # data/ is not in a snapshot. Copy it back from wherever it is mirrored.
 
 set -euo pipefail
@@ -33,6 +38,11 @@ autoload -Uz is-at-least
 SCRIPT="${0:A}"
 # Where "latest" looks, and where the snapshot of what was here before goes (in pre-restore/)
 BACKUP_DIR=${FRUGAL_IOT_BACKUPS:-/var/backups/frugal-iot}
+# Present only while a restore is changing things - see "Detach" and "Do it" below
+LOCK="$BACKUP_DIR/restore-in-progress"
+UNIT=frugal-iot-restore
+# Set by this script when it starts itself as $UNIT
+DETACHED=${FRUGAL_IOT_RESTORE_DETACHED:-0}
 
 usage() {
   sed -n '5,10p' "$SCRIPT" | sed 's/^# //' >&2
@@ -203,8 +213,13 @@ if [[ $MODE == all ]]; then
   done
 fi
 
-# An organization configured here that the snapshot does not have is left, and said so: its logger
-# would keep starting, for an organization the restored database knows nothing about
+# An organization configured here that the snapshot does not have is moved out of config.d: the
+# restored database and broker know nothing of it, so its logger fails to log in, and the diagnostic
+# reports it as broken. Leaving it, and saying so, made the way back from a restore look broken -
+# every organization the restore had brought in was still there. Out of config.d, not renamed in
+# it: the config reader loads EVERY file there whatever its extension, so dev.yaml.pre-restore
+# would become an organization called "dev.yaml.pre-restore". The pre-restore snapshot has them too.
+ORGS_ASIDE="$INSTALL_DIR/organizations.pre-restore"
 EXTRA_ORGS=()
 for f in "$INSTALL_DIR"/config.d/organizations/*.yaml(N); do
   [[ -e "$WORK/install/config.d/organizations/${f:t}" ]] || EXTRA_ORGS+=("${f:t:r}")
@@ -223,7 +238,24 @@ if [[ -n "$HERE_VERSION" && -n "$SNAP_VERSION" && "$SNAP_VERSION" != "not instal
   BLOCKERS+=("the snapshot is from frugal-iot-server $SNAP_VERSION and this is $HERE_VERSION - its database may have changes this version does not know. Upgrade here first")
 fi
 
+# ---- One at a time ----
+# Run again while the first is still going, two restores would be stopping and starting the same
+# services and writing the same files
+if (( ! DETACHED )) && have systemctl && [[ "$(systemctl is-active $UNIT 2>/dev/null)" == (active|activating) ]]; then
+  die "a restore is already running - follow it with: sudo journalctl -f -t $UNIT"
+fi
+UNFINISHED=""
+[[ -e "$LOCK" ]] && UNFINISHED=$(cat "$LOCK" 2>/dev/null || sudo -n cat "$LOCK" 2>/dev/null) || true
+
 # ---- Say what it would do ----
+# Shown once, by the run in the terminal - the detached run has passed these same checks already
+(( DETACHED )) && exec 3>&1 1>/dev/null
+if [[ -n "$UNFINISHED" ]] && (( ! DETACHED )); then
+  echo "NOTE: an earlier restore did not finish:"
+  print -r -- "$UNFINISHED" | sed 's/^/  /'
+  echo "  Running a restore now finishes the job either way."
+  echo
+fi
 echo "Snapshot:      $SNAPSHOT"
 echo "  taken:       $SNAP_CREATED on $SNAP_HOSTNAME, frugal-iot-server $SNAP_VERSION, from $SNAP_INSTALL"
 echo "Restoring to:  $INSTALL_DIR on $(hostname 2>/dev/null) (runs as $SERVICE_USER), frugal-iot-server ${HERE_VERSION:-unknown}"
@@ -252,10 +284,11 @@ if (( ${#SKIPS} )); then
   echo "Would leave alone:"
   for s in $SKIPS; do echo "  $s"; done
 fi
-(( ${#EXTRA_ORGS} )) && { echo; echo "Organizations configured here and not in the snapshot, left as they are: ${EXTRA_ORGS}"; }
+(( ${#EXTRA_ORGS} )) && { echo; echo "Organizations configured here and not in the snapshot, would be moved to ${ORGS_ASIDE}/: ${EXTRA_ORGS}"; }
 echo
 echo "Not in a snapshot: data/ - copy it back from its mirror, e.g.  rsync -a <mirror>/data/ ${INSTALL_DIR}/data/"
 
+(( DETACHED )) && exec 1>&3 3>&-
 if (( ${#BLOCKERS} )); then
   echo
   for b in $BLOCKERS; do echo "CANNOT: $b"; done
@@ -266,6 +299,32 @@ if [[ $MODE == check ]]; then
   echo
   echo "Nothing changed. To do it:  npx --no frugal-iot-restore $SNAPARG state   (or all - see the top of this script)"
   exit 0
+fi
+
+# ---- Detach ----
+# From here on the broker and the server are stopped and files replaced, and a run that dies halfway
+# leaves the machine without either - which is exactly what a dropped ssh connection did. So it
+# runs as a transient systemd unit: it carries on whatever happens to this terminal, which only
+# follows its journal. --wait still reports its exit status here when the terminal does survive.
+if (( ! DETACHED )) && have systemd-run && [[ -d /run/systemd/system ]]; then
+  ARGS=("$SNAPSHOT" "$MODE"); (( FORCE )) && ARGS+=(force)
+  echo
+  echo "Running as the systemd unit $UNIT, so a dropped connection cannot stop it halfway."
+  echo "If this terminal goes away it carries on - follow it with: sudo journalctl -f -t $UNIT"
+  echo
+  SINCE=$(date '+%Y-%m-%d %H:%M:%S')
+  # By the identifier the unit's output is given below: only what the script and the commands it runs
+  # print. By unit it also showed systemd's lines about the unit and every sudo log line, since sudo
+  # run inside the unit logs as part of it.
+  journalctl -f -q -o cat --since "$SINCE" -t $UNIT &
+  FOLLOW=$!
+  RC=0
+  systemd-run --unit=$UNIT --collect --quiet --wait -p SyslogIdentifier=$UNIT \
+    --setenv=FRUGAL_IOT_RESTORE_DETACHED=1 --setenv=FRUGAL_IOT_BACKUPS="$BACKUP_DIR" \
+    --working-directory="$INSTALL_DIR" -- /usr/bin/env zsh "$SCRIPT" "${ARGS[@]}" || RC=$?
+  sleep 1    # the journal is a moment behind
+  kill $FOLLOW 2>/dev/null || true
+  exit $RC
 fi
 
 # ---- Do it ----
@@ -281,6 +340,27 @@ run_as() {
 }
 unit_exists() { have systemctl && systemctl cat "$1" >/dev/null 2>&1; }
 
+# If this stops before the end - an error, or killed - do not leave the machine without its broker
+# and server: start them again, and leave $LOCK for the diagnostic and the next restore to find. The
+# server only if the broker came up, as when step 4 finds it will not start.
+recover() {
+  [[ -e "$LOCK" ]] || return 0
+  echo >&2
+  echo "The restore did not finish. Starting the broker and the server again." >&2
+  if unit_exists mosquitto; then systemctl start mosquitto 2>/dev/null || true; fi
+  if ! unit_exists mosquitto || [[ "$(systemctl is-active mosquitto 2>/dev/null)" == active ]]; then
+    if unit_exists frugaliot; then systemctl start frugaliot 2>/dev/null || true; fi
+  else
+    echo "The broker will not start, so the server has been left stopped: sudo journalctl -u mosquitto -n 30" >&2
+  fi
+  echo "To finish it (safe to run again):  npx --no frugal-iot-restore $SNAPSHOT $MODE force" >&2
+  [[ -n "${PRE_RESTORE:-}" ]] && echo "Or to go back:  npx --no frugal-iot-restore $PRE_RESTORE all force" >&2
+  return 0
+}
+trap 'recover; rm -rf "$WORK"' EXIT
+# zsh runs the EXIT trap on exit, not when a signal kills it - so turn the signals into an exit
+trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
+
 echo "1. A snapshot of what is here now, in case this is the wrong thing to have done"
 PRE_RESTORE="$BACKUP_DIR/pre-restore"
 if zsh "${SCRIPT:h}/backup.zsh" "$PRE_RESTORE"; then
@@ -291,6 +371,13 @@ else
   warn "carrying on without it, because of \"force\""
   PRE_RESTORE=""
 fi
+
+# Before anything is stopped: from here until the end, a run that stops leaves this behind
+print -r -- "started	$(date '+%Y-%m-%dT%H:%M:%S%z')
+snapshot	$SNAPSHOT
+mode	$MODE
+pre_restore	${PRE_RESTORE:-none}" > "$LOCK"
+chown "$SERVICE_USER" "$LOCK" 2>/dev/null || true    # so the diagnostic can read it
 
 echo "2. Stopping the server and the broker"
 unit_exists frugaliot && systemctl stop frugaliot
@@ -303,6 +390,14 @@ for f in $ASIDE; do
   mv -- "$f" "$f.pre-restore"
   echo "  moved aside $f"
 done
+if (( ${#EXTRA_ORGS} )); then
+  mkdir -p "$ORGS_ASIDE"
+  for o in $EXTRA_ORGS; do
+    mv -f -- "$INSTALL_DIR/config.d/organizations/$o.yaml" "$ORGS_ASIDE/"
+    echo "  moved aside config.d/organizations/$o.yaml, to ${ORGS_ASIDE}/"
+  done
+  chown -R "$SERVICE_USER:$SERVICE_GROUP" "$ORGS_ASIDE" 2>/dev/null || true
+fi
 for i in {1..${#P_DST}}; do
   dst=$P_DST[$i]; own=${P_OWNMODE[$i]% *}; mode=${P_OWNMODE[$i]##* }
   mkdir -p "${dst:h}"
@@ -332,7 +427,7 @@ if unit_exists mosquitto; then
   done
   if [[ "$(systemctl is-active mosquitto 2>/dev/null)" != active ]]; then
     echo "The broker did not start. The server has been left stopped." >&2
-    echo "See why:      journalctl -u mosquitto -n 30 --no-pager   (and its own log, named in its configuration)" >&2
+    echo "See why:      sudo journalctl -u mosquitto -n 30 --no-pager   (and its own log, named in its configuration)" >&2
     [[ -n "$PRE_RESTORE" ]] && echo "Put it back:  npx --no frugal-iot-restore $PRE_RESTORE all force" >&2
     exit 1
   fi
@@ -352,6 +447,9 @@ fi
 
 echo "7. Starting the server"
 unit_exists frugaliot && systemctl start frugaliot
+# Everything is back and running: what follows only checks, and the diagnostic it runs would
+# otherwise report this very restore as unfinished
+rm -f -- "$LOCK"
 
 echo "8. Checking"
 if [[ -n "$BROKER_SETTING" ]]; then
@@ -371,5 +469,5 @@ else
   echo "Nothing was kept of what was here before."
 fi
 echo "data/ is not in a snapshot - copy it back from its mirror if this machine lost it."
-(( ${#EXTRA_ORGS} )) && echo "Still configured here and not in the snapshot: ${EXTRA_ORGS} - remove config.d/organizations/<org>.yaml if it should not be."
+(( ${#EXTRA_ORGS} )) && echo "Not in the snapshot, so moved to ${ORGS_ASIDE}/: ${EXTRA_ORGS} - delete them once you are sure."
 exit 0

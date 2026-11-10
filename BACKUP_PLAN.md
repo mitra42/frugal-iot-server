@@ -122,7 +122,12 @@ puts everything back where it came from, and moves aside broker configuration th
 Both take a pre-restore snapshot first, stop server and broker, run `frugal-iot-init` (migrations
 for an older db) and `rebuild-dynsec`, restart, then `rebuild-dynsec check` and the diagnostic.
 Refuses without `force` if the machine already has logins, and refuses a snapshot from a newer
-release than is installed.
+release than is installed. Organizations here but not in the snapshot are moved to `organizations.pre-restore/` -
+outside `config.d/`, because the config reader loads every file in it whatever its extension.
+From the first change on it runs as the transient unit `frugal-iot-restore` (`systemd-run --wait`),
+so a dropped ssh session cannot stop it with the services down; `restore-in-progress` in the backup
+directory marks a run in progress, a trap restarts broker and server if it stops early, and the
+diagnostic reports a leftover marker with the command that finishes the job.
 
 The dynsec JSON goes back with `secrets.yaml` because it holds the admin account whose password is
 in `secrets.yaml`: restoring the secrets alone onto another broker locks the server out of it.

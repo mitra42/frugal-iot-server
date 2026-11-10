@@ -256,7 +256,7 @@ EOF
   systemctl list-timers frugal-iot-backup.timer --no-pager || true
   echo
   echo "Take the first one now, rather than waiting for tonight:"
-  echo "  sudo systemctl start frugal-iot-backup && journalctl -u frugal-iot-backup -n 20 --no-pager"
+  echo "  sudo systemctl start frugal-iot-backup && sudo journalctl -u frugal-iot-backup -n 20 --no-pager"
   exit 0
 fi
 

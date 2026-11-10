@@ -47,6 +47,17 @@ exec 3>&1
 section() { print -r -- ""; print -r -- "===== $* ====="; }
 item()    { print -r -- "  $*"; }
 have()    { command -v "$1" >/dev/null 2>&1; }
+# A unit's journal. A service running as another account logs to the system journal, which an
+# ordinary user outside adm/systemd-journal cannot read - journalctl then says "-- No entries --",
+# exactly as if the service had logged nothing. So sudo -n first, and say so when it was refused.
+journal() {
+  if (( EUID != 0 )) && have sudo && sudo -n true 2>/dev/null; then
+    sudo -n journalctl "$@" 2>&1
+  else
+    journalctl -q "$@" 2>&1
+    (( EUID == 0 )) || print -r -- "(possibly incomplete: not root, and sudo wants a password - run with sudo to see all of it)"
+  fi
+}
 # Ownership and mode of a file, spelled for either Linux or BSD/macOS stat
 fileinfo() {
   local f=$1
@@ -257,7 +268,7 @@ if have systemctl; then
   item "active:      $(systemctl is-active mosquitto 2>&1)"
   [[ "$(systemctl is-active mosquitto 2>/dev/null)" != "active" ]] && problem "Mosquitto is not running - see its own log, quoted above under 'Mosquitto service'"
   print -r -- "  --- last 12 journal lines (systemd's view: usually only an exit code) ---"
-  journalctl -u mosquitto -n 12 --no-pager 2>&1 | sed 's/^/      /'
+  journal -u mosquitto -n 12 --no-pager | sed 's/^/      /'
 else
   item "systemctl not available on this machine"
 fi
@@ -302,7 +313,7 @@ if have systemctl; then
     item "enabled:     $(systemctl is-enabled frugaliot 2>&1)"
     item "active:      $(systemctl is-active frugaliot 2>&1)"
     print -r -- "  --- last 20 journal lines ---"
-    journalctl -u frugaliot -n 20 --no-pager 2>&1 | sed 's/^/      /'
+    journal -u frugaliot -n 20 --no-pager | sed 's/^/      /'
   else
     item "no frugaliot service installed yet (step 8 not reached)"
   fi
@@ -532,16 +543,22 @@ else
   # Whether it is actually up, rather than what the configuration hoped for. With "notifications"
   # left on, the bridge publishes a retained 1 or 0 here each time it connects or drops.
   if have mosquitto_sub; then
-    # Reading $SYS needs a broker login, so borrow the first organization that has one
-    STATEORG=""; STATEPW=""
+    # Reading $SYS needs a broker login, so borrow an organization's - the first the broker ACCEPTS.
+    # Taking the first that merely had a password made a refused login look like a dead bridge:
+    # nothing came back either way, and an organization left in config.d by a restore was enough.
+    STATEORG=""; STATEOUT=""
     for f in config.d/organizations/*.yaml(N); do
       STATEPW=$(sed -n 's/^mqtt_password:[[:space:]]*//p' "$f" 2>/dev/null | head -1 | tr -d '"'"'"'')
-      if [[ -n "$STATEPW" ]]; then STATEORG=${f:t:r}; break; fi
+      [[ -n "$STATEPW" ]] || continue
+      STATEOUT=$(mosquitto_sub -h localhost -u "${f:t:r}" -P "$STATEPW" -v -t '$SYS/broker/connection/+/state' -W 2 2>&1)
+      [[ "$STATEOUT" == *"not authorised"* || "$STATEOUT" == *"Connection Refused"* ]] && continue
+      STATEORG=${f:t:r}
+      break
     done
     if [[ -z "$STATEORG" ]]; then
-      item "live state: no organization credentials here to read it with"
+      item "live state: no organization here that the broker accepts, so it cannot be read - see 'Broker authentication' above"
     else
-      STATEOUT=$(mosquitto_sub -h localhost -u "$STATEORG" -P "$STATEPW" -v -t '$SYS/broker/connection/+/state' -W 2 2>&1 | grep -E '/state ')
+      STATEOUT=$(print -r -- "$STATEOUT" | grep -E '/state ')
       if [[ -z "$STATEOUT" ]]; then
         item "live state: the broker reported nothing - the bridge has never connected since it started"
         problem "A bridge is configured but has not reported its state - check 'address' is reachable and see the mosquitto log above"
@@ -611,15 +628,30 @@ if [[ -n "$NEWEST_BACKUP" ]]; then
     BACKUP_HOURS=$(( (EPOCHSECONDS - BACKUP_SECS) / 3600 ))
     item "newest:      ${BACKUP_DIR}/${NEWEST_BACKUP} (${BACKUP_HOURS} hours old)"
     [[ "$BACKUP_TIMER" == enabled ]] && (( BACKUP_HOURS > 48 )) &&
-      problem "The newest backup is ${BACKUP_HOURS} hours old although the nightly timer is enabled - see: journalctl -u frugal-iot-backup"
+      problem "The newest backup is ${BACKUP_HOURS} hours old although the nightly timer is enabled - see: sudo journalctl -u frugal-iot-backup"
   else
     item "newest:      ${BACKUP_DIR}/${NEWEST_BACKUP}"
   fi
 elif [[ "$BACKUP_TIMER" == enabled ]]; then
   item "newest:      none in ${BACKUP_DIR} (or not readable as $(id -un))"
-  problem "The backup timer is enabled but there is no snapshot in ${BACKUP_DIR} - see: journalctl -u frugal-iot-backup"
+  problem "The backup timer is enabled but there is no snapshot in ${BACKUP_DIR} - see: sudo journalctl -u frugal-iot-backup"
 else
   item "newest:      none"
+fi
+# frugal-iot-restore leaves this while it works and removes it once the broker and server are back.
+# Still there with no restore running, it stopped halfway - see restore.zsh's recover().
+RESTORE_LOCK="$BACKUP_DIR/restore-in-progress"
+if [[ -e "$RESTORE_LOCK" ]] || { have sudo && sudo -n test -e "$RESTORE_LOCK" 2>/dev/null; }; then
+  RESTORE_INFO=$(cat "$RESTORE_LOCK" 2>/dev/null || sudo -n cat "$RESTORE_LOCK" 2>/dev/null) || true
+  if have systemctl && [[ "$(systemctl is-active frugal-iot-restore 2>/dev/null)" == (active|activating) ]]; then
+    item "restore:     running now - follow it with: sudo journalctl -f -t frugal-iot-restore"
+  else
+    RESTORE_SNAP=$(print -r -- "$RESTORE_INFO" | awk -F'\t' '$1 == "snapshot" {print $2}')
+    RESTORE_MODE=$(print -r -- "$RESTORE_INFO" | awk -F'\t' '$1 == "mode" {print $2}')
+    item "restore:     one did not finish:"
+    print -r -- "$RESTORE_INFO" | sed 's/^/      /'
+    problem "A restore did not finish, so this machine may have a mix of old and restored files. Finish it (safe to run again): npx --no frugal-iot-restore ${RESTORE_SNAP:-<snapshot>} ${RESTORE_MODE:-state} force"
+  fi
 fi
 
 section "Wear on the SD card"
