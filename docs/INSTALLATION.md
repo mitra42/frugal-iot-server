@@ -1276,10 +1276,23 @@ If the machine already has logins of its own, add `force` as the last word - it 
 than replacing them silently.
 
 Before changing anything it takes a snapshot of what is there into
-`/var/backups/frugal-iot/pre-restore/`, so a restore can be undone with
-`npx --no frugal-iot-restore <that snapshot> all force`. It stops the server and the broker while it
-works - every node disconnects for a few seconds - and finishes by checking the broker's accounts
-against the database and running the diagnostic.
+`/var/backups/frugal-iot/pre-restore/`, so a restore can be undone with the command it prints at the
+end. It stops the server and the broker while it works - every node disconnects for a few seconds -
+and finishes by checking the broker's accounts against the database and running the diagnostic.
+An organization configured on this machine that is not in the snapshot is moved out of `config.d/`
+to `organizations.pre-restore/`, since the restored database and broker know nothing of it.
+
+Once it starts changing things it runs as the systemd unit `frugal-iot-restore`, and the terminal
+only shows its output - so if your connection drops, it carries on to the end. To see how it is
+getting on from a new connection:
+
+```
+sudo journalctl -f -t frugal-iot-restore
+```
+
+If it stops partway all the same, it starts the broker and the server again, and leaves
+`/var/backups/frugal-iot/restore-in-progress` behind. The diagnostic reports that file, with the
+command that finishes the restore; running it again is always safe.
 
 `data/` is not in a snapshot: copy it back from wherever it is mirrored.
 

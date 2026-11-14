@@ -286,7 +286,8 @@ check_installed() {
   fi
   case "$how" in
     subset)
-      lines=$(comm -23 <(norm_text exact < "$from" | sort -u) <(print -r -- "$here" | norm_text exact | sort -u) |
+      # awk, not comm: OpenWrt's BusyBox is built without comm. Lines of the release's file that are not in here.
+      lines=$(awk 'NR==FNR {have[$0]=1; next} !($0 in have)' <(print -r -- "$here" | norm_text exact) <(norm_text exact < "$from" | sort -u) |
         sed 's/^/release only: /') || true
       ;;
     *)

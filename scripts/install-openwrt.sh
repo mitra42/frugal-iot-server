@@ -562,6 +562,14 @@ else
   in_dir "npx --no frugal-iot-setpassword '${ORG_ID}' '${LOGIN_PW}'" >/dev/null
   ok "web login password for ${ORG_ID} set, different from the broker password"
 fi
+# Whatever happened on an earlier run, make the broker's password for this organization the one in its
+# configuration. addorganization only warns when it cannot set it, and a re-run skips that step, so a
+# first run that went wrong left an account the broker did not know - and the test below was refused.
+if [ -n "$BROKER_PW" ] && command -v mosquitto_passwd >/dev/null 2>&1; then
+  [ -e "$PWFILE" ] || { : > "$PWFILE"; }
+  mosquitto_passwd -b "$PWFILE" "$ORG_ID" "$BROKER_PW" || die "could not set the broker password for ${ORG_ID} in ${PWFILE}"
+  fix_broker_files   # run as root, mosquitto_passwd leaves the file root-owned, which the broker cannot read
+fi
 /etc/init.d/mosquitto restart   # so it re-reads the password file
 sleep 3
 
