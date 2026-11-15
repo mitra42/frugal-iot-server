@@ -245,10 +245,15 @@ if [ "$INSTALL" = 1 ] && [ -n "$PM" ]; then
     WANT="$WANT $p"
   done
   WANT="${WANT# } $MQ_ALL $MQC"
-  info "will install: ${WANT}"
+  MISSING=""
+  for p in $WANT; do pkg_installed "$p" || MISSING="$MISSING $p"; done
+  WANT="${MISSING# }"
+  if [ -z "$WANT" ]; then info "everything needed is already installed"
+  else info "will install: ${WANT}"; fi
   info "free space on the router's own flash: $(free_mb /) MB. Node alone is tens of MB."
   go=1
-  if [ "$ASSUME_YES" != 1 ]; then
+  if [ -z "$WANT" ]; then go=0
+  elif [ "$ASSUME_YES" != 1 ]; then
     printf '        Install these now? [y/N] '; read -r reply || reply=n
     case "$reply" in y|Y|yes) ;; *) go=0 ;; esac
   fi

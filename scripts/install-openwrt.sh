@@ -634,7 +634,10 @@ else
 fi
 rm -f "$TMP_INIT"
 /etc/init.d/frugaliot enable
-/etc/init.d/frugaliot restart
+# stop then start, not restart: on a first install procd has nothing to delete and prints "Command failed:
+# ubus call service delete ... (Not found)", which is harmless but looks like a failure
+/etc/init.d/frugaliot stop >/dev/null 2>&1 || true
+/etc/init.d/frugaliot start
 
 step "Checking the server answers"
 PORT=$(sed -n 's/^port:[[:space:]]*//p' "${INSTALL_DIR}/config.d/server.yaml" 2>/dev/null | head -1 || true)
