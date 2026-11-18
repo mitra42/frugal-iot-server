@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { syncLoggers, syncUser } from '../../lib/dynsec-server.js';
+import { syncLoggers, syncUser, syncProject } from '../../lib/dynsec-server.js';
 
 const SECRETS = {
   user_secret: 'a-user-secret',
@@ -104,5 +104,20 @@ describe('a server whose broker is managed elsewhere', () => {
     const { err, cred } = await forUser({ broker_managed_elsewhere: true });
     expect(err).toBeTruthy();
     expect(cred).toBeFalsy();
+  });
+});
+
+describe('registering a project', () => {
+  const forProject = (secrets) => new Promise((res) =>
+    syncProject(config(secrets), { org: 'myfarm', project: 'lotus' }, (err) => res(err)));
+
+  it('does not try on a server that cannot create anything on the broker', async () => {
+    const { dynsec_admin_user, dynsec_admin_password, ...rest } = SECRETS;
+    expect(await forProject(rest)).toBeFalsy();
+    expect(await forProject({ user_secret: SECRETS.user_secret, broker_managed_elsewhere: true })).toBeFalsy();
+  });
+
+  it('reports a broker it cannot reach, for add_project to log and carry on', async () => {
+    expect(await forProject(SECRETS)).toBeTruthy();
   });
 });

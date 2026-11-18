@@ -48,9 +48,11 @@ if ! command -v sqlite3 >/dev/null; then
 fi
 
 # ---- Escaping helper ----
-# Escape a value for embedding in a single-quoted SQL string literal
+# Escape a value for embedding in a single-quoted SQL string literal. Not "${1//\'/...}": inside
+# double quotes \' is a backslash and a quote, so that doubled nothing and O'Neil broke the statement.
 sql_escape() {
-  print -r -- "${1//\'/\'\'}"
+  local s=${1//\'/\'\'}
+  print -r -- "$s"
 }
 
 ACCOUNT_SQL=$(sql_escape "$ACCOUNT")

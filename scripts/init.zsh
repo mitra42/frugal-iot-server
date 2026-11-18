@@ -384,5 +384,5 @@ fi
 echo
 echo "Ready. Next:"
 echo "  npx --no frugal-iot-setpassword superuser <password>            # so you can log in as the administrator"
-echo "  npx --no frugal-iot-addorganization <org-id> <name> <email> <phone> <broker-password>"
+echo "  npx --no frugal-iot-addorganization <org-id> <name> <email> <phone> <login-password>"
 echo "  npx --no frugal-iot-server                                      # start it"

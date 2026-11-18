@@ -29,7 +29,7 @@ Run the preflight script (below) and it checks every line of this table for you.
 | **Storage** | **About 400 MB free** on ext4, f2fs or btrfs | The software is ~100 MB; npm needs room to work; readings accumulate. **Most routers' own flash is far too small**, so this means a USB stick or SSD, set up as extroot or just mounted, and `--dir` pointing at it. Not FAT, exFAT or NTFS: the install needs symlinks and Unix permissions. The image may also lack the USB storage driver - see [Preparing the router](#preparing-the-router). |
 | **Node.js** | **20.17 or later**, and npm | From OpenWrt's feed if it has one - **OpenWrt 25.12 has none for aarch64**, in which case it is unpacked by hand from a musl build ([how](#if-the-feed-has-no-node)). The preflight and the installer accept either. |
 | **mosquitto** | A build with **websockets** | The browser dashboard connects over websockets. If the router's mosquitto has none, the dashboard cannot work. |
-| | Ideally the **dynamic security plugin** | It gives every node and every user its own broker password. Without it the server falls back to one shared password per organization: it works, but it is the older and weaker scheme. |
+| | The **dynamic security plugin**, and `mosquitto_ctrl` | Every broker account - each node's, each user's, the logger's - is created through it. There is no shared organization password to fall back to, so the installer stops without it. |
 | **Network** | Internet access while installing | opkg and npm download from their own servers. |
 | **Free ports** | 1883 (nodes), 9012 (dashboard websocket), 8080 (dashboard) | Nothing on OpenWrt uses these by default; LuCI is on 80/443. |
 
@@ -160,7 +160,7 @@ The installer is the Pi one, redone, so these are the places it can be wrong:
   with the error. A fix exists (compile it on another machine, or use a build environment) but it
   is a different project.
 * **The mosquitto package.** Which parts OpenWrt builds in - websockets, the dynamic security plugin,
-  `mosquitto_ctrl`, `mosquitto_passwd` - is the main thing nobody here knows. The preflight tries each
+  `mosquitto_ctrl` - is the main thing nobody here knows. The preflight tries each
   one, and the installer lists every mosquitto package the feed offers into the log.
 * **No WiFi fallback network.** On the Pi, a setup network is raised if its WiFi is lost. A router is
   the access point, so this is skipped.

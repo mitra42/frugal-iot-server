@@ -306,7 +306,7 @@ CONF
     [ -f "$cand" ] && { SO=$cand; break; }
   done
   if [ -z "$SO" ]; then
-    warn "no mosquitto_dynamic_security.so found. The server would run on the older shared-password scheme: every node and browser uses the organization's password. Works, but less secure"
+    fail "no mosquitto_dynamic_security.so found. Every broker account is created through it, so the installer refuses to go on without it"
   else
     cat > "$TMP/dyn.conf" <<CONF
 allow_anonymous true
@@ -317,15 +317,14 @@ CONF
     mosquitto -c "$TMP/dyn.conf" > "$TMP/dyn.log" 2>&1 &
     MQPID=$!; sleep 2
     if kill -0 "$MQPID" 2>/dev/null; then pass "dynamic security plugin loads (${SO})"
-    else warn "dynamic security plugin found at ${SO} but did not load: $(tail -1 "$TMP/dyn.log")"; fi
+    else fail "dynamic security plugin found at ${SO} but did not load: $(tail -1 "$TMP/dyn.log")"; fi
     kill "$MQPID" 2>/dev/null; MQPID=""
   fi
-  for t in mosquitto_ctrl mosquitto_passwd mosquitto_pub mosquitto_sub; do
+  for t in mosquitto_ctrl mosquitto_pub mosquitto_sub; do
     command -v "$t" >/dev/null 2>&1 && info "have ${t}" || {
       case "$t" in
-        mosquitto_passwd) fail "no mosquitto_passwd: the installer needs it" ;;
-        mosquitto_ctrl)   [ -n "$SO" ] && warn "no mosquitto_ctrl: the dynamic security plugin cannot be set up without it" ;;
-        *) warn "no ${t}" ;;
+        mosquitto_ctrl) fail "no mosquitto_ctrl: the installer needs it to set up the dynamic security plugin" ;;
+        *) fail "no ${t}: the installer's broker test needs it" ;;
       esac; }
   done
 fi

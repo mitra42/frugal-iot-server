@@ -31,7 +31,6 @@
     "frugal-iot-backup": "scripts/backup.zsh",
     "frugal-iot-setpassword": "scripts/setpassword.zsh",
     "frugal-iot-diagnostic": "scripts/diagnostic.zsh",
-    "frugal-iot-clearretained": "scripts/clearretained.js",
     "frugal-iot-addbridge-prod": "scripts/addbridge-prod.zsh",
     "frugal-iot-addbridge-pi": "scripts/addbridge-pi.zsh",
     "frugal-iot-rebuild-dynsec": "scripts/rebuild-dynsec.js",

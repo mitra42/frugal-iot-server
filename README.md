@@ -37,16 +37,23 @@ On a database that existed before this account was introduced, that command repo
 account already has the superuser's privileges. Log in as that one instead.
 
 Then add an organization - this writes its yaml file into `config.d/organizations`, creates a
-login account of the same name with its permissions, and sets its password on the MQTT broker:
+login account of the same name with that password and its permissions, and builds the
+organization's roles and groups on the MQTT broker:
 ```
-npx --no frugal-iot-addorganization <org-id> <org-name> <email> <phone> <broker-password>
+npx --no frugal-iot-addorganization <org-id> <org-name> <email> <phone> <login-password>
 ```
+There is no organization broker password: nodes are issued their own credential when they enrol,
+browsers derive one from the login, and the server's logger has its own.
 
-That password is the one used by the nodes and the broker. It will also work for login, so it is
-recommended to give the login its own:
+To make an existing login its administrator instead of creating one, give that login in place of
+the email, phone and password. To create the organization with no administrator but the superuser -
+so the server side can be done before you go onsite - leave all of them out:
 ```
-npx --no frugal-iot-setpassword <org-id> <login-password>
+npx --no frugal-iot-addorganization <org-id> <org-name> <existing-login>
+npx --no frugal-iot-addorganization <org-id> <org-name>
 ```
+Its administrator then registers on the web page, and the superuser gives them ADMIN, READ, WRITE
+and OTAUPDATE on the dashboard's People card.
 
 Now start it:
 ```

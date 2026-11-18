@@ -77,13 +77,8 @@ describe('which credential it publishes as', () => {
     expect(cred.username).toBe(names.orgAdminClient('myfarm'));
     expect(cred.password).toBe(deriveOrgAdminPassword('a-test-secret', 'myfarm'));
   });
-  it("the organization's shared account when there is not", () => {
-    // A broker with no dynamic security plugin, which is the state a server upgrades from.
-    const cred = adminCredentialFor({ organizations: config.organizations }, 'myfarm');
-    expect(cred).toEqual({ username: 'myfarm', password: 'shared' });
-  });
-  it('nothing at all when neither is available', () => {
-    expect(adminCredentialFor({ organizations: {} }, 'myfarm')).toBe(null);
+  it("nothing without a user_secret - not the organization's retired shared account (S8)", () => {
+    expect(adminCredentialFor({ organizations: config.organizations }, 'myfarm')).toBe(null);
   });
   it('a password that does not collide with the logger\'s', () => {
     // Both are HMACs of the same secret over a string containing the organization name, so the

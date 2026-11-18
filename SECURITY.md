@@ -24,7 +24,6 @@ should exist; the database is the source of truth and the broker is rebuilt from
 | Bridged Pi | not a broker account | Random token, at pairing | `config.d/secrets.yaml` on the Pi | Read one organization's logins and permissions from production |
 | Grafana, or anything reading history | not a broker account | Random token, made by any user who can READ the organization | `frugal-iot.db`, `grafana_tokens` — only a SHA-256 of it | Read what its maker may READ in one organization, over `/grafana/<org>/`; nothing else |
 | A forwarder (OpenSearch, Google Sheets) | not a broker account | Whatever the destination takes | `frugal-iot.db`, `forwarders` — in the clear | Send one organization's logged readings where its ADMIN pointed it |
-| *Organization (legacy)* | `<org>` | Set by hand | `config.d/organizations/<org>.yaml` | Read/write its whole organization — **retires at S8** |
 
 Derived credentials are computed from `user_secret` when needed, so they can be reissued without
 being stored and a rebuild reproduces them exactly. A node's is random and stored instead: a node
@@ -176,8 +175,10 @@ Readings are timestamped on arrival, not by the node.
 
 ### Broker access control
 
-Two mechanisms, both active. Accounts created by the server use the **dynamic security plugin**;
-anything left in the password file falls back to `/etc/mosquitto/aclfile`, which is deny-by-default.
+Two mechanisms, both active. Accounts created by the server use the **dynamic security plugin**; the
+plugin is required, and the installers stop without it. The password file now holds only bridges
+authorized with `frugal-iot-addbridge-prod`, which fall back to `/etc/mosquitto/aclfile`,
+deny-by-default. The organization's shared account that used to be there was retired by S8.
 
 | Role | Rule |
 | --- | --- |
@@ -296,7 +297,7 @@ to be inside their root. OTA requires HTTPS, so production runs behind a reverse
 | Server secrets | `config.d/secrets.yaml` — never served, generated if absent, never committed |
 | Organizations | `config.d/organizations/<org>.yaml` — served to logged-in browsers, except `mqtt_password`, `logger_password` and `forwarders` (with the older `gsheets` and `firebase`), which are credentials |
 | Broker accounts, groups, roles | `/var/lib/mosquitto/dynamic-security.json` |
-| Legacy broker passwords | `/var/lib/mosquitto/passwords`, with `/etc/mosquitto/aclfile` |
+| Bridges authorized from the command line | `/var/lib/mosquitto/passwords`, with `/etc/mosquitto/aclfile` |
 | Bridge credentials | `/etc/mosquitto/conf.d/`, mode 600 root |
 | A node's own credential | Its LittleFS: `/mqtt/username`, `/mqtt/password` |
 | Readings | `data/<org>/<project>/<node>/` |
@@ -306,10 +307,13 @@ to be inside their root. OTA requires HTTPS, so production runs behind a reverse
 
 ## 3. Next steps
 
-**S8 — retire the shared organization credential.** Only once every node has re-enrolled. Remove
-`<org>` from the broker's password file and `mqtt_password` from
-`config.d/organizations/*.yaml`; stop `addorganization` creating one. Until this is done, a
-credential extracted from any node's flash can still publish anything in that organization.
+**S8 — retire the shared organization credential. Done.** `addorganization` creates no `<org>` broker
+account and writes no `mqtt_password`; nothing in the server, the installers or the diagnostic logs
+in with one; the installers require the dynamic security plugin rather than falling back to it. Any
+node still using it had been offline for months, or it would have taken an OTA update that enrols.
+On an existing server the account is removed by hand - docs/INSTALLATION.md, "And one to clear away";
+`frugal-iot-diagnostic` names any that are left. `mqtt_password` is still withheld from browsers, for
+an organization file that predates this.
 
 **S10 — OpenSearch for organizations.** Built, **not yet tried on a Linux server** (Homebrew's OpenSearch
 has no security plugin). OpenSearch holds every organization's readings in `frugaliot-<org>-<month>`

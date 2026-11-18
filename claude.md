@@ -77,7 +77,7 @@ frugal-iot-server/
 ### 3. **MQTT Integration**
 - Connects to MQTT brokers via WebSocket (WSS) for real-time data collection
 - Spawns logger that listens to MQTT topics and logs data to disk
-- Supports per-organization MQTT credentials
+- Every actor has its own broker account - see "Broker accounts" below
 - Topic structure follows pattern: `{org}/{project}/{device-id}/{module}/{field}`
 
 ### 4. **Over-The-Air (OTA) Updates**
@@ -144,7 +144,7 @@ The server implements three levels of authorization:
 
 ### Organization Structure
 Organizations are defined in `config.d/organizations/{org}.yaml` and include:
-- MQTT credentials
+- Its display name
 - List of projects
 
 ### Sessions and Authentication
@@ -447,20 +447,29 @@ The server uses SQLite for user management and permissions:
 ### Adding a New Organization
 
 ```
-npx --no frugal-iot-addorganization <org-id> "<name>" <email> <phone> "<broker-password>"
-sudo systemctl reload mosquitto     # re-reads the password file, drops nothing
+npx --no frugal-iot-addorganization <org-id> "<name>" <email> <phone> "<login-password>"
 sudo systemctl restart frugaliot    # organizations are only read at startup
 ```
 
 Run from the server's own directory. The script writes `config.d/organizations/{org}.yaml`, creates
-the OTA directory, creates a login user, adds its `permissions` rows, and sets the organization's
-password in the broker's password file — that last step is the one most easily forgotten when doing
-this by hand, and without it the server's own logger cannot connect as the new organization.
+the OTA directory, creates a login named after the organization with that password, adds the
+`permissions` rows, and runs `frugal-iot-rebuild-dynsec`. That last step is the one easiest to miss:
+nothing else creates an organization's roles and groups on the broker - not the server at startup -
+and without them the server cannot create its logger account, so nothing in it is recorded.
 
-The same string becomes both the login password and the broker password. They are entirely
-different things: the broker password is handed to every logged-in browser (see **Credentials**
-under MQTT below) so it is not a secret, while the login password is. Change the login one
-afterwards with `npx --no frugal-iot-setpassword <org-id> "<real password>"`.
+Two shorter forms create no login: `<org-id> "<name>" <existing-login>` makes an existing login its
+administrator, and `<org-id> "<name>"` leaves only the superuser, so the server side can be done
+before going onsite; the administrator registers there and the superuser grants them permissions on
+the dashboard's People card, with no restart. The forms are told apart by argument count alone,
+since the scripts take positional arguments (see Shell scripts above).
+
+There is **no organization broker password** any more (S8). Each organization once had a broker
+account named after it, shared by its nodes, browsers and logger, with the password in its yaml as
+`mqtt_password`. Every one of those has its own account now. `lib/config-for-user.js` still withholds
+`mqtt_password`, for an organization file that predates this, and the diagnostic reports an
+`<org>` account left in a broker's password file. The scripts that used to log in as `<org>` use the
+plugin's admin account for `$SYS` (the bridge state) and `scripts/broker-credential.js` for the
+organization's own logger and admin accounts.
 
 ### Adding a New Device
 - Device connects to MQTT broker
@@ -546,9 +555,10 @@ Four reasons behind that table, each of which cost something to find out:
   drift into it, and a browser's failed attempt looked like a success, because an MQTT 3.1.1 broker
   PUBACKs a QoS 1 publish before deciding whether to allow it.
 * **User accounts are prefixed `user/`.** `addorganization.zsh` creates a login named after the
-  organization, and the organization's own broker account has that same name - so an unprefixed
-  dynsec client called `myfarm` would take over that name, and because a dynsec answer is final for
-  a client it knows, the shared password every node uses would stop working.
+  organization, and until S8 the organization's own broker account had that same name - so an
+  unprefixed dynsec client called `myfarm` would have taken it over, and because a dynsec answer is
+  final for a client it knows, the shared password every node used would have stopped working. Kept
+  since: a broker upgraded from then may still have that account until it is removed by hand.
 
 Secrets live in `config.d/secrets.yaml` (never served: `lib/config-for-user.js` withholds the
 section). `lib/secrets.js` generates anything missing **and writes it back**, so an installation
@@ -703,8 +713,8 @@ readable by the `mosquitto` user or the broker refuses to start, with an error t
 about ownership (`Unable to load server key file ... Permission denied`).
 
 The same trap makes `mosquitto_passwd` dangerous: run as root it rewrites the password file owned
-by root, and the broker can then no longer read it. Run it as the file's owner — `addorganization.zsh`
-and `addbridge-prod.zsh` both work out who that is.
+by root, and the broker can then no longer read it. Run it as the file's owner —
+`addbridge-prod.zsh` works out who that is.
 
 ### Reload versus restart
 
@@ -766,15 +776,15 @@ Two things measured on 2.0.21 that are not obvious:
   or backfill scheme has to deal with that.
 * Nodes publish nearly everything **retained, at QoS 1** — readings, and their min/max/colour/wiring
   too. A topic published by mistake therefore outlives the mistake, and fixing the node does not
-  remove it; `frugal-iot-clearretained` publishes the empty message that does.
+  remove it; the dashboard's Retained messages card publishes the empty message that does.
 
 ### Credentials
 
-`/config.json` serves the whole configuration — `mqtt_password` included — to any logged-in browser
-(`unsafeCopyConfigFor` in frugal-iot-server.js). An organization's broker password is therefore
-**not a secret**, and nothing secret can live anywhere under `config.d/`. That is why a bridge's
-password goes in `/etc/mosquitto/conf.d/` instead, and why each Pi gets its own broker account
-rather than sharing the organization's.
+`/config.json` serves the configuration to any logged-in browser, minus what
+`lib/config-for-user.js` withholds - `secrets` (`config.d/secrets.yaml`) and, per organization,
+`mqtt_password`, `logger_password` and `forwarders`. Anything secret must be in one of those, or
+outside `config.d/` altogether. A bridge's password goes in `/etc/mosquitto/conf.d/`, and each Pi
+gets its own broker account.
 
 ## Troubleshooting
 

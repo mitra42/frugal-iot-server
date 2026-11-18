@@ -129,7 +129,7 @@ if [[ -d node_modules/sqlite3 ]]; then
 fi
 if [[ -f config.d/mqtt.yaml ]]; then item "broker configured as: $(grep -h '^broker:' config.d/mqtt.yaml 2>/dev/null)"; fi
 if [[ -d config.d/organizations ]]; then
-  # Names only - these files contain the broker password.
+  # Names only - one from before S8 may still hold the organization's retired broker password.
   # (N) makes a non-matching glob expand to nothing rather than erroring - and the list has to be
   # tested before use, because "ls" with no arguments would list the current directory instead.
   ORGS=(config.d/organizations/*.yaml(N:t:r))
@@ -246,8 +246,17 @@ if [[ -n "$CONFIGURED_PWFILE" ]]; then
     # Account names only, never the hashes
     # Read through the helper: the file is mosquitto:mosquitto 600, so a plain cut as the service
     # user returns nothing, which looks exactly like a file with no accounts in it
-    item "  accounts in it:    $(broker_conf_cat "$CONFIGURED_PWFILE" | cut -d: -f1 | tr '\n' ' ')"
+    PWACCOUNTS=$(broker_conf_cat "$CONFIGURED_PWFILE" | cut -d: -f1) || true
+    item "  accounts in it:    $(print -r -- "$PWACCOUNTS" | tr '\n' ' ')"
     [[ ! -s "$CONFIGURED_PWFILE" ]] && item "  (the file is empty - no accounts yet)"
+    # An organization's shared account, retired by S8. Nothing uses it now, but it can still read and
+    # publish anything in that organization, so one left behind is a credential nobody is watching.
+    for f in config.d/organizations/*.yaml(N); do
+      if print -r -- "$PWACCOUNTS" | grep -qx "${f:t:r}"; then
+        item "  ${f:t:r}: the organization's shared account, retired by S8"
+        problem "The password file still has the shared account '${f:t:r}', which can publish anything in that organization. Remove it: sudo mosquitto_passwd -D $CONFIGURED_PWFILE ${f:t:r} && sudo systemctl reload mosquitto"
+      fi
+    done
   fi
 else
   item "no password_file line found in any mosquitto configuration"
@@ -400,13 +409,14 @@ fi
 broker_setting plugin; DYNPLUGIN="$BROKER_SETTING"
 broker_setting plugin_opt_config_file; DYNSTATE="$BROKER_SETTING"
 if [[ -z "$DYNPLUGIN" ]]; then
-  item "dynamic security: not configured - running on shared organization passwords (the fallback)"
-  item "  per-user and per-node broker accounts are unavailable until the plugin is enabled"
-  if [[ -n "$(print -rl -- /usr/lib/*/mosquitto_dynamic_security.so /usr/lib/mosquitto_dynamic_security.so(N) 2>/dev/null)" ]]; then
+  item "dynamic security: NOT CONFIGURED - no node, browser or logger has an account it can use"
+  problem "mosquitto's dynamic security plugin is not configured. Every broker account is created through it, so without it nothing can connect and nothing is recorded."
+  if [[ -n "$(print -rl -- /usr/lib/*/mosquitto_dynamic_security.so(N) /usr/lib/mosquitto_dynamic_security.so(N) 2>/dev/null)" ]]; then
     item "  the plugin IS installed on this machine, so re-running the install script would enable it"
     problem "mosquitto's dynamic security plugin is installed but not configured - re-run install-pi.sh"
   else
     item "  the plugin is not installed on this machine either (mosquitto package does not ship it here)"
+    problem "This machine's mosquitto has no dynamic security plugin - install a mosquitto that ships mosquitto_dynamic_security.so"
   fi
 else
   item "dynamic security: $DYNPLUGIN"
@@ -494,27 +504,24 @@ if have mosquitto_sub; then
     item "wrong password: ACCEPTED - the broker is not requiring credentials"
     problem "A wrong password was not refused - check password_file is set in the mosquitto config"
   fi
-  # Then each configured organization should be able to connect with its own credentials.
-  # The password is read from the config and used, never printed.
-  #
-  # This is the SHARED organization account, which every node and dashboard used to use. Each of
-  # them now has its own (see SECURITY.md), and this account is removed by S8 - after which "no
-  # mqtt_password" below is the right answer rather than a fault.
+  # Then each organization's logger should be able to log in: it is what records everything, and it
+  # is the account an organization depends on now that the shared organization password is retired
+  # (S8). The password is derived from user_secret, used, and never printed.
   for f in config.d/organizations/*.yaml(N); do
     ORG=${f:t:r}
-    ORG_PW=$(sed -n 's/^mqtt_password:[[:space:]]*//p' "$f" 2>/dev/null | head -1 | tr -d '"'"'"'')
-    if [[ -z "$ORG_PW" ]]; then
-      item "organization $ORG: no mqtt_password in $f"
+    LOGGERCRED=("${(@f)$(node "${0:A:h}/broker-credential.js" logger "$ORG" 2>&1)}") || true
+    if [[ ${#LOGGERCRED} -ne 2 ]]; then
+      item "organization $ORG: cannot work out its logger's credential - ${LOGGERCRED[1]}"
       continue
     fi
-    ORGOUT=$(mosquitto_sub -h localhost -u "$ORG" -P "$ORG_PW" -t '#' -W 2 2>&1)
+    ORGOUT=$(mosquitto_sub -h localhost -u "${LOGGERCRED[1]}" -P "${LOGGERCRED[2]}" -t "${ORG}/#" -W 2 2>&1) || true
     if [[ "$ORGOUT" == *"not authorised"* ]]; then
-      item "organization $ORG: REFUSED by the broker"
-      problem "Organization '$ORG' cannot log in to the broker - its password in $f does not match the broker's password file (step 6)"
+      item "organization $ORG: its logger ${LOGGERCRED[1]} is REFUSED by the broker"
+      problem "The logger account for '$ORG' cannot log in, so nothing in it is recorded. Run: npx --no frugal-iot-rebuild-dynsec"
     elif [[ "$ORGOUT" == *"Connection refused"* ]]; then
       item "organization $ORG: broker not answering"
     else
-      item "organization $ORG: authenticates, and saw $(print -r -- "$ORGOUT" | grep -c . ) message(s) in a 2 second sample"
+      item "organization $ORG: its logger authenticates, and saw $(print -r -- "$ORGOUT" | grep -c . ) message(s) in a 2 second sample"
     fi
   done
 else
@@ -543,20 +550,16 @@ else
   # Whether it is actually up, rather than what the configuration hoped for. With "notifications"
   # left on, the bridge publishes a retained 1 or 0 here each time it connects or drops.
   if have mosquitto_sub; then
-    # Reading $SYS needs a broker login, so borrow an organization's - the first the broker ACCEPTS.
-    # Taking the first that merely had a password made a refused login look like a dead bridge:
-    # nothing came back either way, and an organization left in config.d by a restore was enough.
-    STATEORG=""; STATEOUT=""
-    for f in config.d/organizations/*.yaml(N); do
-      STATEPW=$(sed -n 's/^mqtt_password:[[:space:]]*//p' "$f" 2>/dev/null | head -1 | tr -d '"'"'"'')
-      [[ -n "$STATEPW" ]] || continue
-      STATEOUT=$(mosquitto_sub -h localhost -u "${f:t:r}" -P "$STATEPW" -v -t '$SYS/broker/connection/+/state' -W 2 2>&1)
-      [[ "$STATEOUT" == *"not authorised"* || "$STATEOUT" == *"Connection Refused"* ]] && continue
-      STATEORG=${f:t:r}
-      break
-    done
-    if [[ -z "$STATEORG" ]]; then
-      item "live state: no organization here that the broker accepts, so it cannot be read - see 'Broker authentication' above"
+    # Reading $SYS needs a broker login. The plugin's admin account can read all of $SYS (its role,
+    # from dynsec init), and it is the one account every installation has - an organization's shared
+    # account, which this used to borrow, was retired by S8.
+    STATEOUT=""
+    [[ -n "${DYNUSER:-}" && -n "${DYNPW:-}" ]] && \
+      STATEOUT=$(mosquitto_sub -h localhost -u "$DYNUSER" -P "$DYNPW" -v -t '$SYS/broker/connection/+/state' -W 2 2>&1) || true
+    if [[ -z "${DYNUSER:-}" || -z "${DYNPW:-}" ]]; then
+      item "live state: cannot be read without the dynamic security admin credential - see 'Broker access control' above"
+    elif [[ "$STATEOUT" == *"not authorised"* || "$STATEOUT" == *"Connection Refused"* ]]; then
+      item "live state: the broker refused the admin credential, so it cannot be read - see 'Broker access control' above"
     else
       STATEOUT=$(print -r -- "$STATEOUT" | grep -E '/state ')
       if [[ -z "$STATEOUT" ]]; then

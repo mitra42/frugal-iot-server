@@ -7,9 +7,8 @@
 # This end of it is one broker account and one access-control rule. The Pi end is a configuration
 # file, written by the companion script - "frugal-iot-addbridge-pi", run on the Pi.
 #
-# Each Pi gets its own account rather than sharing the organization's, for two reasons: the
-# organization's broker password is handed to every browser that logs in, so it is not a secret;
-# and a per-Pi account can be confined to one site's topics and revoked without disturbing anyone.
+# Each Pi gets its own account, so it can be confined to one site's topics and revoked without
+# disturbing anyone.
 #
 # Run from the server's own directory, the one holding frugal-iot.db.
 #
@@ -63,7 +62,7 @@ CONFIG_FILE="config.d/organizations/${ORG_ID}.yaml"
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "Error: no ${CONFIG_FILE} - organization '${ORG_ID}' is not configured on this server." >&2
   echo "Its readings would arrive at the broker and nothing would record them. Add it first:" >&2
-  echo "  npx --no frugal-iot-addorganization ${ORG_ID} \"<name>\" <email> <phone> \"<password>\"" >&2
+  echo "  npx --no frugal-iot-addorganization ${ORG_ID} \"<name>\" <email> <phone> \"<login-password>\"" >&2
   exit 1
 fi
 
@@ -147,8 +146,7 @@ if account_exists "$ACCOUNT"; then
 fi
 
 if [[ -z "$PASSWORD" ]]; then
-  # Unlike the organization's broker password, this one is never given to a browser - it lives only
-  # in a root-owned file on the Pi - so it can and should be a real one.
+  # It lives only in a root-owned file on the Pi, so it can and should be a real one.
   # The subshell turns pipefail off: head closes the pipe after 24 characters, tr is killed by
   # SIGPIPE, and with pipefail on that failure would end this script before it printed anything.
   # install-pi.sh's randpw does the same for the same reason.
@@ -158,7 +156,7 @@ else
   GENERATED=false
 fi
 
-# Run mosquitto_passwd as whoever owns the password file, the same way addorganization.zsh does.
+# Run mosquitto_passwd as whoever owns the password file.
 # Running it as root instead rewrites the file owned by root, and mosquitto drops to the mosquitto
 # user *before* reading it - so the broker then cannot read its own password file and refuses to
 # start, with an error that says nothing about ownership. mosquitto_passwd also writes a temporary
@@ -273,7 +271,7 @@ sudo systemctl reload mosquitto || {
 # same person.
 #
 # Done in node rather than sqlite3, because the sqlite3 command-line tool is not installed
-# everywhere the server runs - the same reason scripts/clearretained.js talks MQTT through a library.
+# everywhere the server runs.
 REPLICA_TOKEN=$(node -e '
 const { randomBytes } = require("crypto");
 const sqlite3 = require("sqlite3");

@@ -15,12 +15,16 @@ const cbTest = (fn) => () => new Promise((resolve, reject) => {
 });
 import { applyUser, applyRolesAndGroups, checkRolesAndGroups } from '../../lib/dynsec-sync.js';
 
-function fakeDynsec({ client = null, roles = [], groups = [], failWith = null } = {}) {
+// roleAcls is what getRole answers for each role, as {rolename: [acl, ...]}
+function fakeDynsec({ client = null, roles = [], groups = [], roleAcls = {}, failWith = null } = {}) {
   const sent = [];
   const run = (commands, cb) => {
     sent.push(...commands);
     const bad = failWith && commands.find((c) => c.command === failWith.command);
-    cb(bad ? new Error(`${failWith.command}: ${failWith.message}`) : null, []);
+    const responses = commands.map((c) => (c.command === 'getRole'
+      ? { command: c.command, data: { role: { rolename: c.rolename, acls: roleAcls[c.rolename] || [] } } }
+      : { command: c.command }));
+    cb(bad ? new Error(`${failWith.command}: ${failWith.message}`) : null, responses);
   };
   return {
     sent,
@@ -128,6 +132,17 @@ describe('applyRolesAndGroups', () => {
     applyRolesAndGroups(d, scopes, [], PROJECTS, [], (err) => { expect(err).toBeTruthy(); done(); });
   }));
 
+  it('given just a new project, adds the rule that lets its nodes announce - what syncProject does', cbTest((done) => {
+    const d = fakeDynsec();
+    applyRolesAndGroups(d, [], [], [{ org: 'kopernik', project: 'developers' }], [], (err) => {
+      expect(err).toBeFalsy();
+      expect(d.sent).toContainEqual(expect.objectContaining({
+        command: 'addRoleACL', rolename: 'kopernik-discover', acltype: 'publishClientSend', topic: 'kopernik/developers',
+      }));
+      done();
+    });
+  }));
+
   it('points the anonymous group at the public role', cbTest((done) => {
     const d = fakeDynsec();
     applyRolesAndGroups(d, scopes, [], PROJECTS, [], () => {
@@ -144,6 +159,27 @@ describe('checkRolesAndGroups', () => {
       expect(err).toBeFalsy();
       expect(differences.some((x) => x.includes('dev-read'))).toBe(true);
       expect(d.sent.filter((c) => /^create|^add|^remove|^set/.test(c.command))).toEqual([]);
+      done();
+    });
+  }));
+
+  it('reports a role that exists but is missing a rule', cbTest((done) => {
+    // The case that said "matches" on production: <org>-discover existed, created empty with the
+    // organization, and the project registered afterwards never got its rule
+    const d = fakeDynsec({ roles: ['dev-discover'], roleAcls: { 'dev-discover': [] } });
+    checkRolesAndGroups(d, [{ org: 'dev', project: '' }], [], PROJECTS, [], (err, differences) => {
+      expect(err).toBeFalsy();
+      expect(differences).toContain('rule missing: dev-discover allow publishClientSend dev/lotus');
+      done();
+    });
+  }));
+
+  it('does not report a rule that is there', cbTest((done) => {
+    const d = fakeDynsec({ roles: ['dev-discover'], roleAcls: {
+      'dev-discover': [{ acltype: 'publishClientSend', topic: 'dev/lotus', priority: 0, allow: true }],
+    } });
+    checkRolesAndGroups(d, [{ org: 'dev', project: '' }], [], PROJECTS, [], (err, differences) => {
+      expect(differences.filter((x) => x.includes('dev-discover'))).toEqual([]);
       done();
     });
   }));

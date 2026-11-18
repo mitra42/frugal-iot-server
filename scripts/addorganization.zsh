@@ -1,12 +1,24 @@
 #!/usr/bin/env zsh
 #
-# Add a new organization to Frugal IoT: config file, user account, permissions, and mqtt credentials.
+# Add a new organization to Frugal IoT: config file, OTA directory, permissions, optionally its
+# administrator's login, and its roles and groups on the broker.
 # Run from the server's own directory, the one holding frugal-iot.db (all paths below are relative
 # to there) - prepare it first with "npx --no frugal-iot-init".
 #
+# There is no organization password. Every actor on the broker has its own account (SECURITY.md), and
+# the shared "<org>" account that nodes and browsers once used was retired by S8.
+#
+# Three forms, differing in who can administer the organization besides the superuser:
+#   - a new login named after the organization (five arguments)
+#   - an existing login (three)
+#   - nobody yet (two) - so the server side can be set up before going onsite, and the administrator
+#     given permissions on the dashboard's People card once they have registered
+#
 # Usage:
-#   npx --no frugal-iot-addorganization <org-id> <org-name> <email> <phone> <password>
-#   scripts/addorganization.zsh <org-id> <org-name> <email> <phone> <password>
+#   npx --no frugal-iot-addorganization <org-id> <org-name> <email> <phone> <login-password>
+#   npx --no frugal-iot-addorganization <org-id> <org-name> <existing-login>
+#   npx --no frugal-iot-addorganization <org-id> <org-name>
+#   scripts/addorganization.zsh ... (the same)
 # Example:
 #   npx --no frugal-iot-addorganization abc "Clever People" foo@abc.org +61123456 "secret!123"
 
@@ -15,20 +27,22 @@ set -euo pipefail
 SCRIPT_NAME=$0
 
 usage() {
-  echo "Usage: ${SCRIPT_NAME} <org-id> <org-name> <email> <phone> <password>" >&2
+  echo "Usage: ${SCRIPT_NAME} <org-id> <org-name> <email> <phone> <login-password>   # new login named <org-id>" >&2
+  echo "   or: ${SCRIPT_NAME} <org-id> <org-name> <existing-login>                   # that login administers it" >&2
+  echo "   or: ${SCRIPT_NAME} <org-id> <org-name>                                    # only the superuser, for now" >&2
   echo "Example: ${SCRIPT_NAME} abc \"Clever People\" foo@abc.org +61123456 \"secret!123\"" >&2
   exit 1
 }
 
-if [[ $# -ne 5 ]]; then
-  usage
-fi
-
-ORG_ID=$1
-ORG_NAME=$2
-EMAIL=$3
-PHONE=$4
-PASSWORD=$5
+ORG_ID=${1-}
+ORG_NAME=${2-}
+EXISTING_LOGIN=""
+case $# in
+  5) EMAIL=$3; PHONE=$4; PASSWORD=$5 ;;
+  3) EXISTING_LOGIN=$3 ;;
+  2) ;;
+  *) usage ;;
+esac
 
 # Run from a server's own directory - the one holding its database and configuration. That is where
 # npm install was run, or the top level of a git clone. The database being there is what identifies it.
@@ -47,14 +61,21 @@ if [[ -e "$CONFIG_FILE" ]]; then
   exit 1
 fi
 
-if [[ ! "$EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
-  echo "Error: '${EMAIL}' does not look like an email address" >&2
-  exit 1
-fi
+if [[ $# -eq 5 ]]; then
+  if [[ ! "$EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+    echo "Error: '${EMAIL}' does not look like an email address" >&2
+    exit 1
+  fi
 
-if [[ ! "$PHONE" =~ ^[+][0-9]+$ ]]; then
-  echo "Error: phone must start with + followed by digits only, got '${PHONE}'" >&2
-  exit 1
+  if [[ ! "$PHONE" =~ ^[+][0-9]+$ ]]; then
+    echo "Error: phone must start with + followed by digits only, got '${PHONE}'" >&2
+    exit 1
+  fi
+
+  if [[ -z "$PASSWORD" ]]; then
+    echo "Error: login password must not be empty" >&2
+    exit 1
+  fi
 fi
 
 if [[ ! -f "$DB" ]]; then
@@ -68,93 +89,6 @@ if ! command -v sqlite3 >/dev/null; then
   exit 1
 fi
 
-mkdir -p "${CONFIG_FILE:h}" "ota"
-
-MOSQUITTO_PASSWD_MISSING=0
-if ! command -v mosquitto_passwd >/dev/null; then
-  MOSQUITTO_PASSWD_MISSING=1
-fi
-
-# Ask the broker's own configuration where its password file is, rather than guessing - that way
-# this works whatever layout a machine uses, including installations older than this script.
-# sudo may prompt: a Pi's bridge file is root-only, and the password file needs sudo below anyway.
-BROKER_SUDO=(sudo)
-source "${0:A:h}/broker-config.zsh"
-broker_conf_read
-broker_setting password_file; MOSQUITTO_PASSWD_FILE="$BROKER_SETTING"
-if (( ${#BROKER_CONF_UNREADABLE} )); then
-  echo "Warning: could not read ${(j:, :)BROKER_CONF_UNREADABLE} - if the password file is named there," >&2
-  echo "         the one used below may be the wrong one." >&2
-fi
-USED_LOCAL_MOSQUITTO_FILE=0
-if [[ -n "$MOSQUITTO_PASSWD_FILE" ]]; then
-  MOSQUITTO_PASSWD_FROM_CONFIG=1
-else
-  MOSQUITTO_PASSWD_FROM_CONFIG=0
-  # No mosquitto configuration here - fall back to the usual locations, and then to the copy under
-  # extras/ so that a machine without mosquitto installed still gets something useful.
-  for f in /var/lib/mosquitto/passwords /etc/mosquitto/mosquitto_passwords; do
-    if [[ -e "$f" ]]; then
-      MOSQUITTO_PASSWD_FILE="$f"
-      break
-    fi
-  done
-  if [[ -z "$MOSQUITTO_PASSWD_FILE" ]]; then
-    if [[ -e "extras/mosquitto_passwords" ]]; then
-      MOSQUITTO_PASSWD_FILE="extras/mosquitto_passwords"
-      USED_LOCAL_MOSQUITTO_FILE=1
-    else
-      MOSQUITTO_PASSWD_FILE="/var/lib/mosquitto/passwords"
-    fi
-  fi
-fi
-
-# Run mosquitto_passwd as whoever owns that file. Mosquitto warns unless the file belongs to the user
-# opening it, and mosquitto_passwd writes a temporary backup beside it, so it needs the directory too
-# - neither of which we get by running as ourselves against a file owned by mosquitto or by root.
-# On Raspberry Pi OS the first user has passwordless sudo, so this is invisible.
-#
-# The owner is not always able to do it either: a file at /etc/mosquitto/mosquitto_passwords is
-# owned by mosquitto inside a directory owned by root, and the backup then cannot be written -
-# "Error creating backup password file". So check the chosen account can write the directory, and
-# fall back to root, putting the ownership back afterwards so mosquitto can still read the file.
-# stat's spelling differs between Linux (-c) and BSD/macOS (-f)
-MOSQUITTO_PASSWD_DIR="${MOSQUITTO_PASSWD_FILE:h}"
-MOSQUITTO_PASSWD_OWNER=$(stat -c '%U' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null \
-  || stat -f '%Su' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null || true)
-MOSQUITTO_PASSWD_GROUP=$(stat -c '%G' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null \
-  || stat -f '%Sg' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null || true)
-MOSQUITTO_PASSWD_MODE=$(stat -c '%a' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null \
-  || stat -f '%Lp' "$MOSQUITTO_PASSWD_FILE" 2>/dev/null || true)
-MOSQUITTO_RESTORE_OWNER=0
-MOSQUITTO_PASSWD_CMD=(mosquitto_passwd)
-if [[ ! -w "$MOSQUITTO_PASSWD_DIR" || ( -e "$MOSQUITTO_PASSWD_FILE" && ! -w "$MOSQUITTO_PASSWD_FILE" ) ]]; then
-  if command -v sudo >/dev/null; then
-    if [[ -n "$MOSQUITTO_PASSWD_OWNER" && "$MOSQUITTO_PASSWD_OWNER" != "$(id -un)" && "$MOSQUITTO_PASSWD_OWNER" != "root" ]] \
-       && sudo -u "$MOSQUITTO_PASSWD_OWNER" test -w "$MOSQUITTO_PASSWD_DIR" 2>/dev/null; then
-      MOSQUITTO_PASSWD_CMD=(sudo -u "$MOSQUITTO_PASSWD_OWNER" mosquitto_passwd)
-    else
-      MOSQUITTO_PASSWD_CMD=(sudo mosquitto_passwd)
-      [[ -n "$MOSQUITTO_PASSWD_OWNER" && "$MOSQUITTO_PASSWD_OWNER" != "root" ]] && MOSQUITTO_RESTORE_OWNER=1
-    fi
-  fi
-fi
-# Run as root there is no sudo to go through (OpenWrt has none, and runs everything as root), and
-# mosquitto_passwd then rewrites the file as root - which the broker, running as its own account,
-# cannot read. So when root is doing it and somebody else owns the file, hand it back afterwards.
-if (( EUID == 0 )) && [[ -n "$MOSQUITTO_PASSWD_OWNER" && "$MOSQUITTO_PASSWD_OWNER" != "root" ]]; then
-  MOSQUITTO_RESTORE_OWNER=1
-fi
-# Called after any successful mosquitto_passwd run below
-restore_passwd_owner() {
-  (( MOSQUITTO_RESTORE_OWNER )) || return 0
-  local SUDO=(sudo)
-  (( EUID == 0 )) && SUDO=()
-  "${SUDO[@]}" chown "${MOSQUITTO_PASSWD_OWNER}:${MOSQUITTO_PASSWD_GROUP}" "$MOSQUITTO_PASSWD_FILE"
-  [[ -n "$MOSQUITTO_PASSWD_MODE" ]] && "${SUDO[@]}" chmod "$MOSQUITTO_PASSWD_MODE" "$MOSQUITTO_PASSWD_FILE"
-  return 0
-}
-
 # ---- Escaping helpers ----
 # Escape a value for embedding in a double-quoted YAML string
 yaml_escape() {
@@ -163,17 +97,37 @@ yaml_escape() {
   s=${s//\"/\\\"}
   print -r -- "$s"
 }
-# Escape a value for embedding in a single-quoted SQL string literal
+# Escape a value for embedding in a single-quoted SQL string literal. Not "${1//\'/...}": inside
+# double quotes \' is a backslash and a quote, so that doubled nothing and O'Neil broke the statement.
 sql_escape() {
-  print -r -- "${1//\'/\'\'}"
+  local s=${1//\'/\'\'}
+  print -r -- "$s"
 }
+
+# Check the login now rather than when creating or granting it further down: by then the configuration
+# file exists, and a re-run with the right login would refuse because the organization is "already registered".
+if [[ $# -eq 5 ]]; then
+  if [[ -n "$(sqlite3 "$DB" "SELECT id FROM users WHERE username = '${ORG_ID}';")" ]]; then
+    echo "Error: a login '${ORG_ID}' already exists - to make it this organization's administrator use:" >&2
+    echo "  ${SCRIPT_NAME} ${ORG_ID} \"<org-name>\" ${ORG_ID}" >&2
+    exit 1
+  fi
+elif [[ $# -eq 3 ]]; then
+  EXISTING_LOGIN_SQL=$(sql_escape "$EXISTING_LOGIN")
+  EXISTING_ID=$(sqlite3 "$DB" "SELECT id FROM users WHERE username = '${EXISTING_LOGIN_SQL}';")
+  if [[ -z "$EXISTING_ID" || "$EXISTING_ID" == "0" ]]; then
+    echo "Error: no login '${EXISTING_LOGIN}' in ${DB}. Existing logins:" >&2
+    sqlite3 "$DB" "SELECT '  ' || username FROM users WHERE id > 0 ORDER BY id;" >&2
+    exit 1
+  fi
+fi
+
+mkdir -p "${CONFIG_FILE:h}" "ota"
 
 # ---- 1. Write config.d/organizations/<org>.yaml ----
 ORG_NAME_YAML=$(yaml_escape "$ORG_NAME")
-PASSWORD_YAML=$(yaml_escape "$PASSWORD")
 cat > "$CONFIG_FILE" <<EOF
 # Configuration for FrugalIoT server for organization=${ORG_ID}
-mqtt_password: "${PASSWORD_YAML}"
 name: "${ORG_NAME_YAML}"
 projects: {}
 EOF
@@ -184,8 +138,29 @@ OTA_DIR="ota/${ORG_ID}"
 mkdir -p "$OTA_DIR"
 echo "Ensured ${OTA_DIR} exists"
 
-# ---- 3. Generate salt + hashed password the same way frugal-iot-server.js's /register does ----
-lines=("${(f)$(ADDORG_PASSWORD="$PASSWORD" node <<'NODE_EOF'
+# ---- 3. Insert the permissions every organization has ----
+# id 0 is "everyone" and id 1 is this server's superuser - both seeded by frugal-iot-createdb.sql.
+# OR IGNORE because permissions has a UNIQUE(id, capability, org) constraint, so a repeat of any of
+# these rows would otherwise abort the whole statement part-way through, leaving the organization with
+# only some of its permissions.
+#
+# WRITE is deliberately NOT given to id 0 "everyone": that row would hand write access to every account
+# on the server, including a self-registered one, which is what can_WRITE exists to prevent.
+sqlite3 "$DB" "
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (0, 'READ', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'ADMIN', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'READ', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'WRITE', '${ORG_ID}');
+"
+echo "Added permissions for organization ${ORG_ID}"
+
+# ---- 4. Its administrator, if there is one yet ----
+# In the five-argument form the login is created, named after the organization; in the three-argument
+# form it already exists.
+ADMIN_ID=""
+if [[ $# -eq 5 ]]; then
+  # Generate salt + hashed password the same way frugal-iot-server.js's /register does
+  lines=("${(f)$(ADDORG_PASSWORD="$PASSWORD" node <<'NODE_EOF'
 const crypto = require('crypto');
 const password = process.env.ADDORG_PASSWORD;
 crypto.randomBytes(16, (err, salt) => {
@@ -198,87 +173,57 @@ crypto.randomBytes(16, (err, salt) => {
 });
 NODE_EOF
 )}")
-SALT_HEX=${lines[1]}
-HASH_HEX=${lines[2]}
-if [[ -z "$SALT_HEX" || -z "$HASH_HEX" ]]; then
-  echo "Error: failed to generate salt/hashed password" >&2
-  exit 1
-fi
+  SALT_HEX=${lines[1]}
+  HASH_HEX=${lines[2]}
+  if [[ -z "$SALT_HEX" || -z "$HASH_HEX" ]]; then
+    echo "Error: failed to generate salt/hashed password" >&2
+    exit 1
+  fi
 
-# ---- 4. Insert into users table (username = org id; organization/name = org name) ----
-ORG_NAME_SQL=$(sql_escape "$ORG_NAME")
-EMAIL_SQL=$(sql_escape "$EMAIL")
-NEW_ID=$(sqlite3 "$DB" "
+  # Insert into users table (username = org id; organization/name = org name)
+  ORG_NAME_SQL=$(sql_escape "$ORG_NAME")
+  EMAIL_SQL=$(sql_escape "$EMAIL")
+  ADMIN_ID=$(sqlite3 "$DB" "
 INSERT INTO users (username, hashed_password, salt, organization, name, email, phone)
 VALUES ('${ORG_ID}', X'${HASH_HEX}', X'${SALT_HEX}', '${ORG_NAME_SQL}', '${ORG_NAME_SQL}', '${EMAIL_SQL}', '${PHONE}');
 SELECT last_insert_rowid();
 ")
-if [[ ! "$NEW_ID" =~ ^[0-9]+$ ]]; then
-  echo "Error: failed to create user for organization ${ORG_ID}" >&2
-  exit 1
-fi
-echo "Created user '${ORG_ID}' (id=${NEW_ID})"
-
-# ---- 5. Insert permissions ----
-# id 0 is "everyone" and id 1 is this server's superuser - both seeded by frugal-iot-createdb.sql.
-# OR IGNORE because permissions has a UNIQUE(id, capability, org) constraint, so a repeat of any of
-# these rows (e.g. on a database where id 1 is also the org's own account) would otherwise abort
-# the whole statement part-way through, leaving the organization with only some of its permissions.
-#
-# WRITE is deliberately NOT given to id 0 "everyone": that row would hand write access to every account
-# on the server, including a self-registered one, which is what can_WRITE exists to prevent.
-sqlite3 "$DB" "
-INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'ADMIN', '${ORG_ID}');
-INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'READ', '${ORG_ID}');
-INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'WRITE', '${ORG_ID}');
-INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (0, 'READ', '${ORG_ID}');
-INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'ADMIN', '${ORG_ID}');
-INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'READ', '${ORG_ID}');
-INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (1, 'WRITE', '${ORG_ID}');
-INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${NEW_ID}, 'OTAUPDATE', '${ORG_ID}');
-"
-echo "Added permissions for organization ${ORG_ID}"
-
-# ---- 6. Set the MQTT broker password for this organization ----
-MOSQUITTO_PASSWD_FAILED=0
-MOSQUITTO_PASSWD_ERROR=""
-if [[ "$MOSQUITTO_PASSWD_MISSING" -eq 1 ]]; then
-  echo "Warning: mosquitto_passwd command not found - skipped setting MQTT broker password" >&2
-elif [[ "$MOSQUITTO_PASSWD_FROM_CONFIG" -eq 1 && ! -e "$MOSQUITTO_PASSWD_FILE" ]]; then
-  # Nothing to add an account to - and mosquitto will not be running either, for the same reason.
-  echo "Warning: mosquitto is configured to use ${MOSQUITTO_PASSWD_FILE}, but that file does not exist," >&2
-  echo "so the MQTT broker password was NOT set. Create it, then add this organization to it:" >&2
-  echo "  sudo install -o mosquitto -g mosquitto -m 600 /dev/null \"${MOSQUITTO_PASSWD_FILE}\"" >&2
-  echo "  sudo -u mosquitto mosquitto_passwd -b \"${MOSQUITTO_PASSWD_FILE}\" \"${ORG_ID}\" \"${PASSWORD}\"" >&2
-  MOSQUITTO_PASSWD_FAILED=1
-else
-  # Capture stderr without letting `set -e` abort the whole script on failure - the org's config file
-  # and DB rows are already written by this point, so a failure here should be reported, not fatal.
-  MOSQUITTO_PASSWD_ERROR=$("${MOSQUITTO_PASSWD_CMD[@]}" -b "$MOSQUITTO_PASSWD_FILE" "${ORG_ID}" "${PASSWORD}" 2>&1 >/dev/null) || MOSQUITTO_PASSWD_FAILED=1
-  if [[ "$MOSQUITTO_PASSWD_FAILED" -eq 1 ]]; then
-    echo "Warning: mosquitto_passwd failed to set the MQTT broker password:" >&2
-    echo "  ${MOSQUITTO_PASSWD_ERROR}" >&2
-    echo "Everything else was done, so set just the broker password by hand:" >&2
-    echo "  sudo mosquitto_passwd -b \"${MOSQUITTO_PASSWD_FILE}\" \"${ORG_ID}\" \"${PASSWORD}\"" >&2
-    echo "If it complains about creating a backup file, the directory holding that file is not" >&2
-    echo "writable by you - which is why the command above uses sudo." >&2
-  else
-    restore_passwd_owner
-    echo "Set mosquitto password for ${ORG_ID} in ${MOSQUITTO_PASSWD_FILE}"
+  if [[ ! "$ADMIN_ID" =~ ^[0-9]+$ ]]; then
+    echo "Error: failed to create user for organization ${ORG_ID}" >&2
+    exit 1
   fi
+  echo "Created user '${ORG_ID}' (id=${ADMIN_ID})"
+elif [[ $# -eq 3 ]]; then
+  ADMIN_ID=$EXISTING_ID
 fi
+
+if [[ -n "$ADMIN_ID" ]]; then
+  sqlite3 "$DB" "
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${ADMIN_ID}, 'ADMIN', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${ADMIN_ID}, 'READ', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${ADMIN_ID}, 'WRITE', '${ORG_ID}');
+INSERT OR IGNORE INTO permissions (id, capability, org) VALUES (${ADMIN_ID}, 'OTAUPDATE', '${ORG_ID}');
+"
+  echo "Made user id ${ADMIN_ID} an administrator of organization ${ORG_ID}"
+fi
+
+# ---- 5. The organization's roles and groups on the broker ----
+# Nothing else creates them - not the server at startup - and without them the server cannot create
+# this organization's logger account, so nothing published in it would be recorded. Rebuilding from
+# the database is idempotent, so doing all of it rather than just this organization costs nothing.
+REBUILT=1
+echo "Creating the broker's roles and groups for ${ORG_ID} ..."
+node "${0:A:h}/rebuild-dynsec.js" || REBUILT=0
 
 echo
-echo "Organization '${ORG_ID}' added successfully. Now run:"
-echo "  service mosquitto restart"
-echo "  service frugaliot restart"
-if [[ "$MOSQUITTO_PASSWD_MISSING" -eq 1 ]]; then
-  echo "NOTE: mosquitto_passwd was not found, so the MQTT broker password was NOT set - run it manually:"
-  echo "  mosquitto_passwd -b /etc/mosquitto/mosquitto_passwords ${ORG_ID} <password>"
-elif [[ "$MOSQUITTO_PASSWD_FAILED" -eq 1 ]]; then
-  echo "NOTE: mosquitto_passwd failed (see warning above), so the MQTT broker password was NOT set."
-  echo "  If it was a permissions problem, run it manually with sudo:"
-  echo "  sudo mosquitto_passwd -b \"${MOSQUITTO_PASSWD_FILE}\" ${ORG_ID} <password>"
-elif [[ "$USED_LOCAL_MOSQUITTO_FILE" -eq 1 ]]; then
-  echo "NOTE: /etc/mosquitto/mosquitto_passwords was not found, so the local extras/mosquitto_passwords was updated instead."
+echo "Organization '${ORG_ID}' added. The server reads organizations only at startup, so now run:"
+echo "  sudo systemctl restart frugaliot      (on OpenWrt: /etc/init.d/frugaliot restart)"
+if (( ! REBUILT )); then
+  echo "But first make the broker match the database - that failed above, and until it is done nothing"
+  echo "in ${ORG_ID} is recorded. Once the broker is reachable:"
+  echo "  npx --no frugal-iot-rebuild-dynsec"
+fi
+if [[ $# -eq 2 ]]; then
+  echo "Only the superuser can administer it so far. Once its administrator has registered, log in as"
+  echo "superuser and give them ADMIN, READ, WRITE and OTAUPDATE on ${ORG_ID} in the dashboard's People card."
 fi

@@ -41,7 +41,7 @@ set -eu
 # ---------------------------------------------------------------- settings and arguments
 
 ORG_ID=""; ORG_NAME=""; ORG_EMAIL=""; ORG_PHONE=""
-BROKER_PW=""; SUPER_PW=""; LOGIN_PW=""; BROKER_HOST=""
+SUPER_PW=""; LOGIN_PW=""; BROKER_HOST=""
 INSTALL_DIR="/opt/frugal-iot"; RUN_USER="root"
 ASSUME_YES=0; DRY_RUN=0; FORCE=0
 LOG="${FRUGAL_INSTALL_LOG:-none}"
@@ -58,9 +58,6 @@ Usage: sh install-openwrt.sh [options]
   --phone <number>     contact phone, "+" and digits only
   --superuser-password password for this server's administrator login (generated if not given)
   --login-password     web login password for the organization's own account (generated if not given)
-  --broker-password    the organization's shared broker credential. Generated, and not needed: nodes
-                       are issued their own when they enrol. Set it only to match nodes flashed
-                       before enrolment existed.
   --broker-host <host> what browsers and nodes should call this router. Default: its LAN address.
   --dir <path>         where to install. Default: ${INSTALL_DIR}. Needs ~400 MB free on ext4/f2fs/btrfs,
                        so on most routers this is a USB or SSD drive: --dir /mnt/sda1/frugal-iot
@@ -84,7 +81,9 @@ while [ $# -gt 0 ]; do
     --phone)               need_arg "$@"; ORG_PHONE=$2; shift 2 ;;
     --superuser-password)  need_arg "$@"; SUPER_PW=$2; shift 2 ;;
     --login-password)      need_arg "$@"; LOGIN_PW=$2; shift 2 ;;
-    --broker-password)     need_arg "$@"; BROKER_PW=$2; shift 2 ;;
+    # Gone with the organization's shared broker account (S8). Accepted and ignored, so a command
+    # line written for an earlier release still runs.
+    --broker-password)     need_arg "$@"; echo "Note: --broker-password is no longer used - every node, browser and logger has its own broker account" >&2; shift 2 ;;
     --broker-host)         need_arg "$@"; BROKER_HOST=$2; shift 2 ;;
     --dir)                 need_arg "$@"; INSTALL_DIR=$2; shift 2 ;;
     --user)                need_arg "$@"; RUN_USER=$2; shift 2 ;;
@@ -245,14 +244,13 @@ ask ORG_NAME  "Organization display name (e.g. My Farm)"
 ask ORG_EMAIL "Contact email"
 ask ORG_PHONE "Contact phone ('+' and digits only)"
 echo "$ORG_PHONE" | grep -qE '^[+]?[0-9]+$' || die "phone must be '+' and digits only: '${ORG_PHONE}'"
-for v in "ORG_NAME:$ORG_NAME" "ORG_EMAIL:$ORG_EMAIL" "SUPER_PW:$SUPER_PW" "LOGIN_PW:$LOGIN_PW" "BROKER_PW:$BROKER_PW"; do
+for v in "ORG_NAME:$ORG_NAME" "ORG_EMAIL:$ORG_EMAIL" "SUPER_PW:$SUPER_PW" "LOGIN_PW:$LOGIN_PW"; do
   no_quote "${v%%:*}" "${v#*:}"
 done
 
 GENERATED=""
 [ -n "$SUPER_PW" ] || { SUPER_PW=$(randpw); GENERATED="$GENERATED SUPER_PW"; }
 [ -n "$LOGIN_PW" ] || { LOGIN_PW=$(randpw); GENERATED="$GENERATED LOGIN_PW"; }
-[ -n "$BROKER_PW" ] || BROKER_PW=$(randpw)
 
 # A router has a fixed LAN address, which beats a ".local" name: that needs umdns installed, and
 # Android cannot resolve it at all.
@@ -322,8 +320,9 @@ esac
 NODE_VERSION=$(node -v)
 info "node ${NODE_VERSION}, npm $(npm -v)"
 node_version_ok "$NODE_VERSION" || die "node ${NODE_VERSION} is older than the 20.17 the server needs"
-command -v mosquitto_passwd >/dev/null 2>&1 || die "no mosquitto_passwd command after installing mosquitto - the organization's broker account cannot be created"
+command -v mosquitto_ctrl >/dev/null 2>&1 || die "no mosquitto_ctrl after installing ${MQ_CLIENT} - the dynamic security plugin cannot be set up without it"
 command -v mosquitto_pub >/dev/null 2>&1 || die "no mosquitto_pub - the broker test cannot run"
+command -v mosquitto_sub >/dev/null 2>&1 || die "no mosquitto_sub - the broker test cannot run"
 ok "packages installed"
 
 # ---------------------------------------------------------------- the account that runs it
@@ -455,19 +454,16 @@ for cand in /usr/lib/mosquitto/mosquitto_dynamic_security.so /usr/lib/mosquitto_
 done
 DYNSEC_JSON="${MQ_STATE}/dynamic-security.json"
 SECRETS="${INSTALL_DIR}/config.d/secrets.yaml"
+# Required: every broker account - node, browser, logger - is created through it, and since S8 there
+# is no shared organization password for anything to fall back to.
 if [ -z "$DYNSEC_SO" ]; then
-  warn "no mosquitto dynamic security plugin on this router. The broker will run on the organization's"
-  warn "  shared password instead: every node and browser uses the same credential. It works, but it"
-  warn "  is the older and weaker scheme. Tell whoever sent you this - it matters."
+  die "no mosquitto dynamic security plugin on this router (mosquitto_dynamic_security.so). Every broker account is created through it, so without it nothing could connect."
 elif ! command -v mosquitto_ctrl >/dev/null 2>&1; then
-  warn "the plugin is there (${DYNSEC_SO}) but there is no mosquitto_ctrl to initialise it - carrying on without it"
-  DYNSEC_SO=""
+  die "the dynamic security plugin is there (${DYNSEC_SO}) but there is no mosquitto_ctrl to initialise it - install mosquitto-client-ssl"
 elif [ -f "$DYNSEC_JSON" ]; then
   if grep -q '^dynsec_admin_password:' "$SECRETS" 2>/dev/null; then skip "dynamic security already initialised"
   else
-    warn "${DYNSEC_JSON} exists but ${SECRETS} has no dynsec_admin_password - a previous run stopped between the two."
-    warn "  Remove ${DYNSEC_JSON} and run this again."
-    DYNSEC_SO=""
+    die "${DYNSEC_JSON} exists but ${SECRETS} has no dynsec_admin_password - a previous run stopped between the two. Remove ${DYNSEC_JSON} and run this again."
   fi
 else
   DYNSEC_PW=$(randpw)
@@ -483,21 +479,15 @@ else
     chmod 600 "$SECRETS"; [ "$RUN_USER" = root ] || chown "$RUN_USER" "$SECRETS"
     ok "dynamic security initialised; admin credential saved to config.d/secrets.yaml"
   else
-    warn "mosquitto_ctrl dynsec init failed - continuing without it"
-    rm -f "$DYNSEC_JSON"; DYNSEC_SO=""
+    rm -f "$DYNSEC_JSON"
+    die "mosquitto_ctrl dynsec init failed, and the broker cannot work without dynamic security"
   fi
 fi
 
 # The shipped configuration, with the plugin path and the state directory filled in
 TMP_CONF=$(mktemp)
-if [ -n "$DYNSEC_SO" ]; then
-  sed -e "s|^plugin PLUGIN_PATH_SET_BY_INSTALLER|plugin ${DYNSEC_SO}|" \
-      -e "s|/var/lib/mosquitto/|${MQ_STATE}/|g" "$SRC_CONF" > "$TMP_CONF"
-else
-  sed -e "s|^plugin PLUGIN_PATH_SET_BY_INSTALLER|#plugin (not installed)|" \
-      -e "s|^plugin_opt_config_file|#plugin_opt_config_file|" \
-      -e "s|/var/lib/mosquitto/|${MQ_STATE}/|g" "$SRC_CONF" > "$TMP_CONF"
-fi
+sed -e "s|^plugin PLUGIN_PATH_SET_BY_INSTALLER|plugin ${DYNSEC_SO}|" \
+    -e "s|/var/lib/mosquitto/|${MQ_STATE}/|g" "$SRC_CONF" > "$TMP_CONF"
 if cmp -s "$TMP_CONF" /etc/mosquitto/conf.d/frugal-iot.conf 2>/dev/null; then
   skip "/etc/mosquitto/conf.d/frugal-iot.conf already current"
 else
@@ -552,42 +542,32 @@ step "Creating the organization"
 if [ -f "${INSTALL_DIR}/config.d/organizations/${ORG_ID}.yaml" ]; then
   skip "organization ${ORG_ID} already exists"
   LOGIN_PW="(unchanged - set by an earlier run)"
-  BROKER_PW=$(sed -n 's/^mqtt_password:[[:space:]]*//p' "${INSTALL_DIR}/config.d/organizations/${ORG_ID}.yaml" | head -1 | tr -d "\"'" || true)
-  info "using the broker password already in its configuration"
 else
-  in_dir "npx --no frugal-iot-addorganization '${ORG_ID}' '${ORG_NAME}' '${ORG_EMAIL}' '${ORG_PHONE}' '${BROKER_PW}'"
-  fix_broker_files
+  # Writes the organization's yaml, creates a login account of the same name with that password,
+  # grants it admin, makes its OTA directory, and builds its roles and groups on the broker
+  in_dir "npx --no frugal-iot-addorganization '${ORG_ID}' '${ORG_NAME}' '${ORG_EMAIL}' '${ORG_PHONE}' '${LOGIN_PW}'"
   ok "organization ${ORG_ID} created"
-  # addorganization set the web login password to the broker password; they are for different things
-  in_dir "npx --no frugal-iot-setpassword '${ORG_ID}' '${LOGIN_PW}'" >/dev/null
-  ok "web login password for ${ORG_ID} set, different from the broker password"
 fi
-# Whatever happened on an earlier run, make the broker's password for this organization the one in its
-# configuration. addorganization only warns when it cannot set it, and a re-run skips that step, so a
-# first run that went wrong left an account the broker did not know - and the test below was refused.
-if [ -n "$BROKER_PW" ] && command -v mosquitto_passwd >/dev/null 2>&1; then
-  [ -e "$PWFILE" ] || { : > "$PWFILE"; }
-  mosquitto_passwd -b "$PWFILE" "$ORG_ID" "$BROKER_PW" || die "could not set the broker password for ${ORG_ID} in ${PWFILE}"
-  fix_broker_files   # run as root, mosquitto_passwd leaves the file root-owned, which the broker cannot read
-fi
-/etc/init.d/mosquitto restart   # so it re-reads the password file
-sleep 3
 
 step "Creating the broker's roles and groups"
-if [ -n "$DYNSEC_SO" ]; then
-  in_dir "npx --no frugal-iot-rebuild-dynsec"
-  ok "roles and groups built from the database"
-else
-  skip "no dynamic security plugin, so there are no groups to build"
-fi
+# addorganization runs this for a new organization; it is run again here for a re-run, where the
+# organization already existed. Idempotent, and how a release that adds a rule delivers it.
+in_dir "npx --no frugal-iot-rebuild-dynsec"
+ok "roles and groups built from the database"
 
 step "Testing the broker end to end"
+# The organization's logger account (which reads it) should receive what its admin account (which may
+# publish anywhere in it) sends. Both are derived from user_secret, and the rebuild just created them.
 TEST_TOPIC="${ORG_ID}/installtest/hello"
+CRED=$(in_dir "node node_modules/frugal-iot-server/scripts/broker-credential.js logger '${ORG_ID}'") || die "could not work out the logger's broker credential"
+L_USER=$(echo "$CRED" | sed -n 1p); L_PW=$(echo "$CRED" | sed -n 2p)
+CRED=$(in_dir "node node_modules/frugal-iot-server/scripts/broker-credential.js orgadmin '${ORG_ID}'") || die "could not work out the admin broker credential"
+A_USER=$(echo "$CRED" | sed -n 1p); A_PW=$(echo "$CRED" | sed -n 2p)
 SUB_OUT=$(mktemp)
-mosquitto_sub -h localhost -u "$ORG_ID" -P "$BROKER_PW" -t "$TEST_TOPIC" -C 1 -W 10 > "$SUB_OUT" 2>&1 &
+mosquitto_sub -h localhost -u "$L_USER" -P "$L_PW" -t "$TEST_TOPIC" -C 1 -W 10 > "$SUB_OUT" 2>&1 &
 SUB_PID=$!
 sleep 2
-mosquitto_pub -h localhost -u "$ORG_ID" -P "$BROKER_PW" -t "$TEST_TOPIC" -m '42' || true
+mosquitto_pub -h localhost -u "$A_USER" -P "$A_PW" -t "$TEST_TOPIC" -m '42' || true
 wait "$SUB_PID" 2>/dev/null || true
 if grep -qx '42' "$SUB_OUT"; then
   ok "published and received on ${TEST_TOPIC}"

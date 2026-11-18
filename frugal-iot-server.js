@@ -112,7 +112,7 @@ import { createForwardersRouter, enabledConfigs } from './lib/forwarders.js';
 import { createAccessRouter } from './lib/opensearch-access.js';
 import { buildConfigFor, hasPermissions } from './lib/config-for-user.js';
 import { ensureSecrets, addEnrolmentSecret, removeEnrolmentSecret } from './lib/secrets.js';
-import { syncUser, syncUserById, syncLoggers, syncNode, dropNode, syncBridge } from './lib/dynsec-server.js';
+import { syncUser, syncUserById, syncLoggers, syncNode, dropNode, syncBridge, syncProject } from './lib/dynsec-server.js';
 import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode, formerProjects,
          makeAttemptLog, setGrant, clearGrant, readGrants } from './lib/enrol.js';
 import { deleteRetained, clearRetainedUnder } from './lib/retained.js';
@@ -495,7 +495,9 @@ export function add_project(org, id, name, cb) {
         if (orgClient) {
           orgClient.watchProject(id, config.organizations[org].projects[id]);
         }
-        cb(null);
+        // Let its nodes announce on it, or they enrol and report but never appear. Best effort:
+        // the project exists either way, and syncProject says what to run if this fails.
+        syncProject(config, { org, project: id }, () => cb(null));
       },
     ], cb);
   }
@@ -913,8 +915,9 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
     console.error(err);
   } else {
     /* global */ config = configobj;
-    // Summarize rather than dumping the whole config: it is mostly the sensor schema, and it holds
-    // each organization's mqtt_password, which should not be going to the console and the journal.
+    // Summarize rather than dumping the whole config: it is mostly the sensor schema, and an
+    // organization file from before S8 may still hold an mqtt_password, which should not be going
+    // to the console and the journal.
     console.log("Broker", config.mqtt.broker, "- organizations:", Object.keys(config.organizations).join(", ") || "(none)");
     console.log(mailInit(config.email));
     // Could genericize config defaults
@@ -2047,8 +2050,8 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         // forge a reading.
         //
         // Not fatal if the broker cannot be reached: syncLoggers reports it and hands back the
-        // derived credentials anyway, and the logger falls back to the organization's shared
-        // password, which works until S8 retires it.
+        // derived credentials anyway, and the logger connects once the broker and the account are
+        // there.
         syncLoggers(config, Object.keys(config.organizations || {}), (err, creds) => {
           Object.entries(creds || {}).forEach(([org, cred]) => {
             const o = config.organizations[org];

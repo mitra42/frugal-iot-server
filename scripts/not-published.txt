@@ -9,7 +9,7 @@
 # path segment and "**" across segments.
 
 # --- Never publish: this installation's own secrets ---
-# Organization configs hold mqtt_password, and the broker password file holds its hashes. Both are
+# Organization configs from before S8 hold mqtt_password, and the broker password file holds hashes. Both are
 # in git, which is its own problem, but they must certainly not go to npm as well.
 config.d/organizations/*.yaml
 extras/mosquitto_passwords

@@ -167,12 +167,22 @@ fi
 # this is the real answer rather than the absence of an error.
 STATE=""
 if command -v mosquitto_sub >/dev/null; then
-  ORG_PW=$(sed -n 's/^mqtt_password:[[:space:]]*//p' "config.d/organizations/${ORG_ID}.yaml" | head -1 | tr -d '"'"'"'') || true
+  # As the dynamic security plugin's admin account, which can read all of $SYS - the organization's
+  # shared account this used to log in as was retired by S8. Through sudo if need be: secrets.yaml
+  # is 600 and belongs to whoever the server runs as.
+  secret_value() {
+    local v
+    v=$(sed -n "s/^$1:[[:space:]]*//p" config.d/secrets.yaml 2>/dev/null | tr -d "\"'" | head -1) || true
+    [[ -n "$v" ]] || v=$(sudo sed -n "s/^$1:[[:space:]]*//p" config.d/secrets.yaml 2>/dev/null | tr -d "\"'" | head -1) || true
+    print -r -- "$v"
+  }
+  DYNUSER=$(secret_value dynsec_admin_user)
+  DYNPW=$(secret_value dynsec_admin_password)
   for attempt in 1 2 3 4 5; do
     # "|| true" because mosquitto_sub always exits non-zero when -W times out, and under "set -e"
     # that ends this script here - silently, after the restart, without ever printing the verdict
     # below. Likewise "if" rather than "&& break", whose false case is a non-zero last command.
-    STATE=$(mosquitto_sub -h localhost -u "$ORG_ID" -P "$ORG_PW" \
+    STATE=$(mosquitto_sub -h localhost -u "$DYNUSER" -P "$DYNPW" \
       -t "\$SYS/broker/connection/${ACCOUNT}/state" -W 3 2>/dev/null | tail -1) || true
     if [[ "$STATE" == "1" ]]; then break; fi
     sleep 3

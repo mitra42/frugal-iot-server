@@ -36,7 +36,7 @@ set -Eeuo pipefail
 # ---------------------------------------------------------------- settings and arguments
 
 ORG_ID=""; ORG_NAME=""; ORG_EMAIL=""; ORG_PHONE=""
-BROKER_PW=""; SUPER_PW=""; LOGIN_PW=""; BROKER_HOST=""; AP_PW=""; SETUP_AP=1
+SUPER_PW=""; LOGIN_PW=""; BROKER_HOST=""; AP_PW=""; SETUP_AP=1
 INSTALL_DIR=""; RUN_USER=""; ASSUME_YES=0; DRY_RUN=0; RANDOM_PASSWORDS=0
 
 usage() {
@@ -48,10 +48,6 @@ Usage: bash install-pi.sh [options]
   --name "<name>"      organization display name
   --email <address>    contact address for the organization
   --phone <number>     contact phone, "+" and digits only
-  --broker-password    the organization's shared broker credential. Generated, and not needed on a
-                       Pi installed by this script: nodes are issued their own when they enrol and
-                       browsers derive their own at login. Set it only to match nodes flashed
-                       before enrolment existed.
   --superuser-password password for this server's administrator login.
   --login-password     web login password for the organization's own account, which is a different
                        thing from the broker credential above and should not be the same string.
@@ -83,7 +79,9 @@ while (( $# )); do
     --name)                ORG_NAME="${2:-}"; shift 2 ;;
     --email)               ORG_EMAIL="${2:-}"; shift 2 ;;
     --phone)               ORG_PHONE="${2:-}"; shift 2 ;;
-    --broker-password)     BROKER_PW="${2:-}"; shift 2 ;;
+    # Gone with the organization's shared broker account (S8). Accepted and ignored, so a command
+    # line written for an earlier release still runs.
+    --broker-password)     echo "Note: --broker-password is no longer used - every node, browser and logger has its own broker account" >&2; shift 2 ;;
     --superuser-password)  SUPER_PW="${2:-}"; shift 2 ;;
     --login-password)      LOGIN_PW="${2:-}"; shift 2 ;;
     --broker-host)         BROKER_HOST="${2:-}"; shift 2 ;;
@@ -479,15 +477,6 @@ if [[ -f "${INSTALL_DIR}/config.d/organizations/${ORG_ID}.yaml" ]]; then
 else
   ask_password LOGIN_PW  "the ${ORG_ID} web login"
 fi
-# Not asked for. addorganization.zsh requires one, and lib/retained.js falls back to it on a broker
-# with no dynamic security - but this installer always sets dynamic security up, so on this Pi every
-# node is issued its own credential when it enrols and every browser derives its own when it logs
-# in, and nothing reads this. Generated rather than asked, so there is one less thing to choose.
-# --broker-password still sets it, for an organization whose nodes predate enrolment.
-if [[ -z "$BROKER_PW" ]]; then
-  BROKER_PW="$(randpw)"
-  GENERATED+=(BROKER_PW)
-fi
 [[ -n "$BROKER_HOST" ]] || BROKER_HOST="$(hostname).local"
 
 # The setup network: whether it can be had here, and whether a previous run already gave it a
@@ -796,20 +785,24 @@ if [[ -f "${INSTALL_DIR}/config.d/secrets.yaml" ]]; then
 fi
 
 DYNSEC_JSON=/var/lib/mosquitto/dynamic-security.json
+# Required: every broker account - node, browser, logger - is created through it, and since S8 there
+# is no shared organization password for anything to fall back to.
 if [[ -z "$DYNSEC_SO" ]]; then
-  warn "mosquitto's dynamic security plugin was not found - per-user broker accounts will not work."
-  warn "  Looked in /usr/lib. The broker will still run on the organization passwords."
+  echo "mosquitto's dynamic security plugin was not found (looked in /usr/lib)." >&2
+  echo "Every broker account is created through it, so without it nothing could connect." >&2
+  exit 1
 elif [[ -f "$DYNSEC_JSON" ]]; then
   if as_user_sh "grep -q '^dynsec_admin_password:' '${INSTALL_DIR}/config.d/secrets.yaml'" 2>/dev/null; then
     skip "dynamic security already initialised at ${DYNSEC_JSON}"
   else
     # Re-running cannot mend this: mosquitto_ctrl will not re-initialise over an existing state
     # file, and the password it chose the first time was never written down anywhere.
-    warn "${DYNSEC_JSON} exists but config.d/secrets.yaml has no dynsec_admin_password."
-    warn "  A previous run must have stopped between the two. The password it used is not"
-    warn "  recoverable, so start that part again:"
-    warn "    sudo rm ${DYNSEC_JSON}"
-    warn "  then run this script again. Nothing else is affected - no accounts exist yet."
+    echo "${DYNSEC_JSON} exists but config.d/secrets.yaml has no dynsec_admin_password." >&2
+    echo "A previous run must have stopped between the two. The password it used is not" >&2
+    echo "recoverable, so start that part again:" >&2
+    echo "  sudo rm ${DYNSEC_JSON}" >&2
+    echo "then run this script again. Nothing else is affected - no accounts exist yet." >&2
+    exit 1
   fi
 else
   # dynsec init asks for the admin password twice on stdin. The password is generated here and kept
@@ -829,20 +822,16 @@ else
     # Through a pipe, not on the command line: an argument to sudo would put the password in "ps"
     ok "dynamic security initialised; admin credential saved to config.d/secrets.yaml"
   else
-    warn "mosquitto_ctrl dynsec init failed - continuing without it"
     sudo_ rm -f "$DYNSEC_JSON"
-    DYNSEC_SO=""
+    echo "mosquitto_ctrl dynsec init failed, and the broker cannot work without dynamic security." >&2
+    exit 1
   fi
 fi
 
 # The shipped configuration carries a placeholder for the plugin path, because it differs per
-# distribution. Substitute it here - or comment the plugin out entirely if there is no plugin.
+# distribution. Substitute it here.
 TMP_CONF="$(mktemp)"
-if [[ -n "$DYNSEC_SO" ]]; then
-  sed "s|^plugin PLUGIN_PATH_SET_BY_INSTALLER|plugin ${DYNSEC_SO}|" "$SRC_CONF" > "$TMP_CONF"
-else
-  sed -e "s|^plugin PLUGIN_PATH_SET_BY_INSTALLER|#plugin (not installed)|"       -e "s|^plugin_opt_config_file|#plugin_opt_config_file|" "$SRC_CONF" > "$TMP_CONF"
-fi
+sed "s|^plugin PLUGIN_PATH_SET_BY_INSTALLER|plugin ${DYNSEC_SO}|" "$SRC_CONF" > "$TMP_CONF"
 if [[ "$(read_maybe_root /etc/mosquitto/conf.d/frugal-iot.conf)" == "$(cat "$TMP_CONF")" ]]; then
   skip "/etc/mosquitto/conf.d/frugal-iot.conf already current"
 else
@@ -902,42 +891,39 @@ step "Creating the organization"
 if [[ -f "${INSTALL_DIR}/config.d/organizations/${ORG_ID}.yaml" ]]; then
   skip "organization ${ORG_ID} already exists"
   LOGIN_PW="$KEPT_PW"
-  BROKER_PW="$(sed -n 's/^mqtt_password:[[:space:]]*//p' "${INSTALL_DIR}/config.d/organizations/${ORG_ID}.yaml" | head -1 | tr -d "\"'" || true)"
-  info "using the broker password already in its configuration"
 else
-  # Writes the organization's yaml, creates a login account of the same name, grants it admin, makes
-  # its OTA directory, and adds it to the broker's password file
-  as_user_sh "cd '${INSTALL_DIR}' && npx --no frugal-iot-addorganization '${ORG_ID}' '${ORG_NAME}' '${ORG_EMAIL}' '${ORG_PHONE}' '${BROKER_PW}'"
+  # Writes the organization's yaml, creates a login account of the same name with that password,
+  # grants it admin, makes its OTA directory, and builds its roles and groups on the broker
+  as_user_sh "cd '${INSTALL_DIR}' && npx --no frugal-iot-addorganization '${ORG_ID}' '${ORG_NAME}' '${ORG_EMAIL}' '${ORG_PHONE}' '${LOGIN_PW}'"
   ok "organization ${ORG_ID} created"
-  # addorganization set the web login password to the broker password as a side effect. They are for
-  # entirely different things, so give the login its own.
-  as_user_sh "cd '${INSTALL_DIR}' && npx --no frugal-iot-setpassword '${ORG_ID}' '${LOGIN_PW}'" >/dev/null
-  ok "web login password for ${ORG_ID} set, different from the broker password"
 fi
-sudo_ systemctl restart mosquitto   # so it re-reads the password file
-sleep 2
 
 step "Creating the broker's roles and groups"
 # dynsec init creates only the admin account. The roles and groups every other account is put into
 # are built from lib/dynsec-plan.js by this one command, and nothing else creates them - not the
-# server at startup, not addorganization. Without it the first login fails with
-# "addGroupClient: Group not found" and the dashboard says there is no broker credential.
-# Idempotent by design: it is also how a release that adds a rule delivers it.
-if [[ -n "$DYNSEC_SO" ]]; then
-  as_user_sh "cd '${INSTALL_DIR}' && npx --no frugal-iot-rebuild-dynsec"
-  ok "roles and groups built from the database"
-else
-  skip "no dynamic security plugin, so there are no groups to build"
-fi
+# server at startup. Without it the first login fails with "addGroupClient: Group not found" and the
+# dashboard says there is no broker credential. addorganization runs it for a new organization; it is
+# run again here for a re-run, where the organization already existed. Idempotent by design: it is
+# also how a release that adds a rule delivers it.
+as_user_sh "cd '${INSTALL_DIR}' && npx --no frugal-iot-rebuild-dynsec"
+ok "roles and groups built from the database"
 
 step "Testing the broker end to end"
-# Proves the account, the password file and the port 1883 listener the nodes use all work together.
+# Proves the plugin's accounts and the port 1883 listener the nodes use all work together: the
+# organization's logger account (which reads it) receives what its admin account (which may publish
+# anywhere in it) sends. Both are derived from user_secret, and rebuild-dynsec has just created them.
 TEST_TOPIC="${ORG_ID}/installtest/hello"
 SUB_OUT="$(mktemp)"
-mosquitto_sub -h localhost -u "$ORG_ID" -P "$BROKER_PW" -t "$TEST_TOPIC" -C 1 -W 10 > "$SUB_OUT" 2>&1 &
+mapfile -t LOGGER_CRED < <(as_user_sh "cd '${INSTALL_DIR}' && node node_modules/frugal-iot-server/scripts/broker-credential.js logger '${ORG_ID}'")
+mapfile -t ADMIN_CRED < <(as_user_sh "cd '${INSTALL_DIR}' && node node_modules/frugal-iot-server/scripts/broker-credential.js orgadmin '${ORG_ID}'")
+if [[ ${#LOGGER_CRED[@]} -ne 2 || ${#ADMIN_CRED[@]} -ne 2 ]]; then
+  echo "Could not work out the broker credentials to test with (see above)." >&2
+  exit 1
+fi
+mosquitto_sub -h localhost -u "${LOGGER_CRED[0]}" -P "${LOGGER_CRED[1]}" -t "$TEST_TOPIC" -C 1 -W 10 > "$SUB_OUT" 2>&1 &
 SUB_PID=$!
 sleep 2
-mosquitto_pub -h localhost -u "$ORG_ID" -P "$BROKER_PW" -t "$TEST_TOPIC" -m '42'
+mosquitto_pub -h localhost -u "${ADMIN_CRED[0]}" -P "${ADMIN_CRED[1]}" -t "$TEST_TOPIC" -m '42'
 wait "$SUB_PID" 2>/dev/null || true
 if grep -qx '42' "$SUB_OUT"; then
   ok "published and received on ${TEST_TOPIC}"

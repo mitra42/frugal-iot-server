@@ -19,7 +19,7 @@ Sorted by the two questions that decide what to do with it: can it be rebuilt, a
 | `frugal-iot.db` | **No** | **Yes** - see below | State snapshot |
 | `config.d/secrets.yaml` | **No** - a new `user_secret` changes every derived broker password | **Yes** | State snapshot |
 | `data/` | **No** | No (today) | Data mirror |
-| `config.d/organizations/` | From the repo | No (`mqtt_password` is being retired) | State snapshot, because it is tiny - and production has `litefarm` and `myfarm`, which the repo does not |
+| `config.d/organizations/` | From the repo | No (`mqtt_password` was retired by S8) | State snapshot, because it is tiny - and production has `litefarm` and `myfarm`, which the repo does not |
 | Broker: `aclfile`, `conf.d/*`, Pi bridge conf, systemd unit | Partly, by re-running the installer and `addbridge-*` - but production was assembled by hand | Pi bridge conf: yes | State snapshot |
 | Broker: password file | Shrinking as nodes move to dynsec; until then, no | **Yes** | State snapshot |
 | Broker: `dynamic-security.json` | **Yes** - `frugal-iot-rebuild-dynsec` from db + secrets | | Not needed; included as a cross-check only |

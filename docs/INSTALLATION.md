@@ -204,8 +204,9 @@ to rather than starting over. That matters most on a Pi Zero W, where compiling 
 about 40 minutes and is not repeated once it has succeeded. It is also how to pick up a fix: re-run
 it after upgrading the package and it will put right anything the newer version installs differently.
 
-Two things it will tell you it cannot mend by itself, rather than looping:
+Three things it will tell you it cannot mend by itself, rather than looping:
 
+* a mosquitto with no dynamic security plugin, which every broker account is created through;
 * a `sqlite3` that still will not load after being rebuilt;
 * a `/var/lib/mosquitto/dynamic-security.json` that exists while `config.d/secrets.yaml` has no
   `dynsec_admin_password` - a previous run stopped between creating the one and recording the other,
@@ -226,10 +227,10 @@ does not give the network a password nobody knows. Press Enter instead to give t
 of its own, or pass `--ap-password`. WiFi needs 8 to 63 characters, so a shorter login password
 cannot be reused. `--no-setup-ap` leaves the setup network out.
 
-The organization's *broker* credential is no longer among them: it is generated and never shown,
-because nothing on the Pi needs you to know it. Nodes are issued their own credential when they
-enrol, and browsers derive their own when they log in. `--broker-password` still sets it, for an
-organization whose nodes were flashed before enrolment existed.
+There is no organization *broker* password among them, because there is no such thing any more:
+nodes are issued their own credential when they enrol, browsers derive their own when they log in,
+and the server's logger has its own. `--broker-password` is accepted from an older command line and
+ignored.
 
 **It tells you whether a reboot is needed**, rather than leaving you to wonder — it notices a kernel
 or boot-firmware package in the upgrade, the images in `/boot` changing underneath it, and
@@ -461,12 +462,20 @@ sudo apt install -y mosquitto mosquitto-clients
 
 Mosquitto out of the box only listens on the Pi itself, and speaks only plain MQTT. Frugal IoT
 needs two listeners: plain MQTT on port 1883 for the sensor nodes, and MQTT-over-WebSockets on
-port 9012 for the browser. The repo ships that configuration, so from the `frugal-iot-server`
-directory you cloned in the previous step, just copy it in:
+port 9012 for the browser. The package ships that configuration. It names the broker's **dynamic
+security plugin**, whose path differs between distributions, so fill that in as you copy it — from
+your install directory:
 
 ```
-sudo cp extras/mosquitto.conf /etc/mosquitto/conf.d/frugal-iot.conf
+cd ~/frugal-iot
+PLUGIN=$(ls /usr/lib/*/mosquitto_dynamic_security.so | head -1); echo "$PLUGIN"
+sed "s|^plugin PLUGIN_PATH_SET_BY_INSTALLER|plugin ${PLUGIN}|" node_modules/frugal-iot-server/extras/mosquitto.conf \
+  | sudo tee /etc/mosquitto/conf.d/frugal-iot.conf >/dev/null
 ```
+
+If `echo` printed nothing, this mosquitto has no dynamic security plugin, and Frugal IoT cannot work
+without it: every account on the broker — each node's, each browser's, the logger's — is created
+through it.
 
 (Everything in `/etc/mosquitto/conf.d/` is read in addition to the packaged
 `/etc/mosquitto/mosquitto.conf`, which keeps its own settings for logging and persistence.)
@@ -486,11 +495,24 @@ it refused to start, still goes to `/var/log/mosquitto/mosquitto.log`. If you ar
 that keeps dropping off the network, comment out `connection_messages false` and restart the broker.
 
 That configuration names a password file, and Mosquitto will not start if the file is missing, so
-create an empty one. The accounts inside it get created for you in the next step:
+create an empty one. On a Pi it stays empty — every account lives in the plugin:
 
 ```
 sudo install -o mosquitto -g mosquitto -m 600 /dev/null /var/lib/mosquitto/passwords
 ```
+
+The plugin keeps its accounts in a state file, which also has to exist before the broker will
+start. This creates it, holding the one administrative account the server uses to create all the
+others, and records that account's password in `config.d/secrets.yaml`:
+
+```
+npx --no frugal-iot-dynsec-init
+sudo install -o mosquitto -g mosquitto -m 600 dynamic-security.json /var/lib/mosquitto/dynamic-security.json
+rm dynamic-security.json
+```
+
+It goes on to tell you to add the two `plugin` lines to the configuration — the file you copied
+above already has them.
 
 That makes an empty file belonging to the `mosquitto` user, readable by nobody else — one command
 instead of a `touch`, a `chown` and a `chmod`.
@@ -498,9 +520,7 @@ instead of a `touch`, a `chown` and a `chmod`.
 > The ownership matters, and is easy to get wrong. Mosquitto warns unless the password file belongs
 > to whoever opened it, and the broker runs as the `mosquitto` user — so the file belongs to
 > `mosquitto`, and it lives under `/var/lib/mosquitto` (which that user owns) rather than
-> `/etc/mosquitto` (which root owns). `mosquitto_passwd` also writes a temporary backup file
-> alongside it, so it needs to write to that directory too, not just to the file. Step 6 runs it as
-> the right user for you.
+> `/etc/mosquitto` (which root owns). The plugin's state file is the same, for the same reason.
 
 Start the broker and have it start at every boot:
 
@@ -529,8 +549,8 @@ mosquitto_sub -h localhost -u nobody -P wrong -t '#'
 ```
 
 `Connection Refused: not authorised` is the **success** case here — the broker answered and
-requires an account. There are no accounts yet; step 6 creates the first one, and there is a
-fuller test at the end of it.
+requires an account. There are no accounts yet but the plugin's own; step 6 creates the first ones,
+and there is a fuller test at the end of it.
 
 > If Mosquitto did not start, `npx --no frugal-iot-diagnostic` will tell you why in one step — most often
 > that the password file its configuration names does not exist. Note that `systemctl status` and
@@ -555,60 +575,58 @@ other account.
 Frugal IoT groups devices as **organization → project → device**. Create yours:
 
 ```
-npx --no frugal-iot-addorganization myfarm "My Farm" you@example.com +61123456789 "<broker-password>"
+npx --no frugal-iot-addorganization myfarm "My Farm" you@example.com +61123456789 "<your-login-password>"
 ```
 
-The arguments are: organization id, display name, your email, your phone (`+` and digits only),
-and a password. That one command writes `config.d/organizations/myfarm.yaml`, creates a login account
-named after the organization (`myfarm`), grants it admin, read and write rights, creates its OTA
-directory, **and adds the organization's account to the broker's password file** — which is why the
-broker had to be installed first.
+The arguments are: organization id, display name, your email, your phone (`+` and digits only), and
+the password you will log in with. That one command writes `config.d/organizations/myfarm.yaml`,
+creates a login account named after the organization (`myfarm`) with that password, grants it admin,
+read, write and OTA rights, creates its OTA directory, **and builds the organization's roles and
+groups on the broker** — which is why the broker had to be set up first.
 
 * **Organization id `myfarm`** — must be 1–10 lower-case letters or digits. It becomes the first part
   of every MQTT topic, so it must match what your sensor nodes are configured to publish to.
-* **The password** goes into `config.d/organizations/myfarm.yaml` as `mqtt_password` and into the
-  broker's password file, so it is a *machine* credential: the server's logger, your sensor nodes,
-  and any browser showing this organization's dashboard all authenticate to the broker with it.
-  Treat it as shared, not personal.
+* **There is no organization broker password.** Nodes are issued their own credential when they
+  enrol, browsers derive one from your login, and the server's logger has its own.
 
-Tell Mosquitto to re-read the password file, so the new account works:
+Two shorter forms create no login. `myfarm "My Farm" <existing-login>` makes a login that already
+exists the organization's administrator. `myfarm "My Farm"` leaves only `superuser` able to
+administer it — useful for setting a server up before you are onsite: the organization's
+administrator registers on the web page there, and `superuser` gives them ADMIN, READ, WRITE and
+OTAUPDATE on the dashboard's People card.
 
-```
-sudo systemctl restart mosquitto
-```
-
-**Give your login its own password.** That command set the `myfarm` *web login* password to the same
-string as the broker password. They serve completely different purposes, so change the login one
-now to something only you know — the broker credential is unaffected, and nothing needs to be kept
-in step:
+**Now the full broker test.** The organization has two broker accounts of the server's own: its
+logger, which reads everything in it, and an admin account, which may publish anywhere in it. Their
+passwords are derived from `config.d/secrets.yaml`, and these print them — a username, then a
+password:
 
 ```
-npx --no frugal-iot-setpassword myfarm "<your-own-login-password>"
+node node_modules/frugal-iot-server/scripts/broker-credential.js logger myfarm
+node node_modules/frugal-iot-server/scripts/broker-credential.js orgadmin myfarm
 ```
 
-**Now the full broker test.** In your SSH session subscribe as the organization, using the broker
-password you chose above:
+In your SSH session subscribe as the logger:
 
 ```
-mosquitto_sub -h localhost -u myfarm -P '<broker-password>' -t '#' -v
+mosquitto_sub -h localhost -u myfarm-logger -P '<the logger password>' -t 'myfarm/#' -v
 ```
 
 It should sit there silently — no error, no exit. Open a **second** SSH session to the Pi and
-publish something:
+publish something as the admin account:
 
 ```
-mosquitto_pub -h localhost -u myfarm -P '<broker-password>' -t 'myfarm/test/hello' -m '42'
+mosquitto_pub -h localhost -u myfarm-admin -P '<the admin password>' -t 'myfarm/test/hello' -m '42'
 ```
 
-`myfarm/test/hello 42` appearing in the first window proves the account, the password file and the
-port 1883 listener your sensor nodes use are all working. The WebSocket listener on 9012 gets
-exercised by the browser in step 7. Leave the subscriber running if you like — it is a useful
-window onto what your nodes are doing. (`Ctrl-C` stops it.)
+`myfarm/test/hello 42` appearing in the first window proves the plugin's accounts and the port 1883
+listener your sensor nodes use are all working. The WebSocket listener on 9012 gets exercised by the
+browser in step 7. Leave the subscriber running if you like — it is a useful window onto what your
+nodes are doing. (`Ctrl-C` stops it.)
 
-If you get `Connection Refused: not authorised`, the password does not match the one in
-`config.d/organizations/myfarm.yaml`, or Mosquitto has not re-read the file since it changed.
-`npx --no frugal-iot-diagnostic` checks this for every organization you have, and reports which ones the
-broker actually accepts.
+If you get `Connection Refused: not authorised`, the broker does not have the organization's
+accounts yet — `addorganization` will have said so if it could not reach the broker. Make it match
+the database with `npx --no frugal-iot-rebuild-dynsec`. `npx --no frugal-iot-diagnostic` checks the
+logger of every organization you have, and reports which ones the broker actually accepts.
 
 ### 7. Start the server by hand and check it
 
@@ -669,11 +687,10 @@ http://frugaliot.local:8080
 > `frugaliot.local`, nor reach the broker at that name, so the page and the live data both fail.
 
 You land on the Frugal IoT home page. Click **Dashboard**, and log in as username `myfarm` with the
-login password you set with `frugal-iot-setpassword` — not the broker password. (`superuser` and its
-password work too.)
+login password you gave `frugal-iot-addorganization`. (`superuser` and its password work too.)
 
 Once you are through to the dashboard and have selected your organization, its MQTT status should
-show **connected**. That is the browser authenticating to the broker as your organization, over the
+show **connected**. That is the browser authenticating to the broker as you, over the
 WebSocket listener on port 9012, from a different machine — the last untested piece of the chain.
 If it does not connect, check that the `broker:` URL in `config.d/mqtt.yaml` is one this browser can
 actually resolve: a phone that cannot look up `.local` names needs the Pi's IP address there instead.
@@ -810,7 +827,7 @@ old one there until every node flashed with it has enrolled. Deleting it first s
 You can watch nodes arriving without involving the UI, using the subscriber from step 6:
 
 ```
-mosquitto_sub -h localhost -u myfarm -P '<broker-password>' -t '#' -v
+mosquitto_sub -h localhost -u myfarm-logger -P '<the logger password>' -t 'myfarm/#' -v
 ```
 
 Every reading from every node should scroll past. Seeing anything here also proves the broker's
@@ -1426,21 +1443,13 @@ field, rename a module, flash a node with the wrong id, and that topic sits on t
 appearing on every dashboard. Fixing the node does not remove it, and neither does restarting the
 broker: the only way is to publish an empty message to that exact topic.
 
-```
-cd ~/frugal-iot
-npx --no frugal-iot-clearretained 'myfarm/lotus/+/sht/temperture/#'
-```
-
-Quote the pattern or the shell will expand it. That lists what is retained and changes nothing;
-add the word `delete` at the end of the same command to remove it.
-
-> `delete` is a bare word rather than a `--delete` flag on purpose. npm parses the command line of
-> an `npx` invocation itself and swallows any `--flag` it does not recognise, so `--delete` would
-> never reach the script and it would quietly list instead of deleting.
+An organization's ADMIN does that on the dashboard's **Retained messages** card, which lists what the
+broker is holding and deletes what you choose. The server publishes the empty messages itself, as
+the organization's admin account, because a browser's own credential may only publish `set/` topics.
 
 > Look before deleting. A node's `min`, `max`, `color` and `wired` settings are retained messages
 > too, and they are how the dashboard knows how to draw it — delete those and the node has to be
-> restarted before it looks right again. A pattern of just `#` is refused outright.
+> restarted before it looks right again.
 
 On a Pi that is bridged to a production server (step 11), deleting here deletes there too: the
 bridge forwards the empty message like any other.
@@ -1577,6 +1586,36 @@ sqlite3 frugal-iot.db "SELECT id, org FROM permissions WHERE capability = 'WRITE
 Do **not** grant WRITE to id `0`. That row means "every logged-in account", including anyone who has
 just registered themselves, and handing them write access is exactly what the WRITE check exists to
 prevent. (Read is a different matter — see the `(0, 'READ', ...)` rows, which are there on purpose.)
+
+### And one to clear away: the organization's shared broker account
+
+Each organization used to have one broker account, named after it, whose password was in its
+`config.d/organizations/<org>.yaml` as `mqtt_password` and in the broker's password file. Nodes,
+browsers and the logger all logged in with it. Every one of them has its own account now, so nothing
+uses it - but it can still read and publish anything in that organization, so remove it rather than
+leave a credential nobody is watching. `npx --no frugal-iot-diagnostic` names any that are left.
+
+First make sure the organizations' own accounts are there, so the logger has something to use:
+
+```
+npx --no frugal-iot-rebuild-dynsec
+sudo systemctl restart frugaliot
+```
+
+Then, for each organization:
+
+```
+sudo -u mosquitto mosquitto_passwd -D /var/lib/mosquitto/passwords <org>
+```
+
+The password file is wherever `password_file` in the broker's configuration points. Run this as
+whoever owns it, as above, not as root: `mosquitto_passwd` rewrites the file, and rewritten by root it
+belongs to root, which the broker - reading it after dropping to `mosquitto` - then cannot. Delete the
+`mqtt_password:` line from `config.d/organizations/<org>.yaml`. Finish with
+`sudo systemctl reload mosquitto`, which re-reads the password file without dropping anyone.
+
+A node flashed before enrolment existed still logs in with that account, and stops reporting once it
+is gone. It needs reflashing with firmware that enrols.
 
 ---
 
