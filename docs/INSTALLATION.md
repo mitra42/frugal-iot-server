@@ -784,7 +784,7 @@ nothing changes until that WiFi goes away.
 A node is flashed with an **enrolment secret**,
 presents that once, and is issued a broker credential of its own which it stores. The secret grants only one thing — "create a node in this organization" — so it is not the thing to guard, and a node that is stolen cannot be used to read anyone else's data.
 
-**First, get the enrolment secret.** On the dashboard on the Pi: **gear icon → Nodes → Enrolment secret**. It prints the line ready to paste. 
+**First, get the enrolment secret.** On the dashboard on the Pi: **gear icon → Nodes → Enrolment secret**. It prints the lines ready to paste. 
 (It is also in `config.d/secrets.yaml` as `enrolment_myfarm`.)
 
 **Second, check the project exists.** A node states which project it is in, and enrolling into one the server does not know is refused. The organization you made in step 6 starts with none, so create one on the dashboard before flashing.
@@ -794,7 +794,7 @@ Then, on your workstation, in the PlatformIO project's `platformio-secrets-local
 ```ini
 [common]
 
-build_flags_local =
+build_flags_secrets =
     '-D SYSTEM_FRUGAL_ORG="myfarm"'
     '-D SYSTEM_FRUGAL_PROJECT="lotus"'
     '-D SYSTEM_MQTT_HOST="frugaliot.local"'

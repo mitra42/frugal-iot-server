@@ -115,31 +115,9 @@ To upgrade later: `npm update frugal-iot-server` then `npx --no frugal-iot-init`
 
 #### Developing the server, client or logger
 
-Work from git clones rather than the npm package:
-```
-git clone https://github.com/mitra42/frugal-iot-server.git
-cd frugal-iot-server
-npm install
-scripts/init.zsh   # creates the database and directories; leaves the repo's config files alone
-```
-The commands above have in-repo equivalents - `scripts/addorganization.zsh` and
-`scripts/setpassword.zsh` - and the server is `node frugal-iot-server.js`. All of them work on
-the directory you run them in, which for a clone is the top of the repo.
+See [Developing on the server, logger and client](https://github.com/mitra42/frugal-iot/wiki/Development-%E2%80%90-getting-setup#developing-on-the-server-logger-and-client) on the wiki.
 
-To work on the client or the logger from sibling checkouts as well, link them in. This needs no
-edit to any file, so there is nothing to remember to change back:
-```
-cd ../frugal-iot-client && npm link
-cd ../frugal-iot-logger && npm link
-cd ../frugal-iot-server && npm link frugal-iot-client frugal-iot-logger
-```
-The server then loads both from your checkouts. `ls -l node_modules/frugal-iot-*` shows whether the
-links are in place - a later `npm install` or `npm update` can replace them with the published
-packages, which looks like your changes having no effect.
-
-There are commented-out alternatives in `config.d/server.yaml` (for `htmldir`) and in
-`frugal-iot-server.js` (for the `MqttLogger` import) that do the same job by editing instead. They
-work, but they are easy to publish by accident, so prefer the links.
+#### Before publishing
 
 Before publishing, run:
 ```
