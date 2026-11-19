@@ -12,8 +12,8 @@
     "cookie-parser": "^1.4.7",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
-    "frugal-iot-client": "^2.0.13",
-    "frugal-iot-logger": "^2.0.13",
+    "frugal-iot-client": "^2.0.14",
+    "frugal-iot-logger": "^2.0.14",
     "hash-wasm": "^4.12.0",
     "js-yaml": "^4.2.0",
     "morgan": "^1.11.0",
@@ -96,7 +96,7 @@
     "check-files": "node scripts/check-published-files.js"
   },
   "type": "module",
-  "version": "2.0.13",
+  "version": "2.0.14",
   "overrides": {
     "uuid": "^11.1.1"
   }
