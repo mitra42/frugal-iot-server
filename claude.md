@@ -109,7 +109,7 @@ frugal-iot-server/
 - `GET /private/*` - Private files
 - `POST /ota_update` - Upload OTA binary (admin only)
 
-#### MCP (a user's own Claude - issue #44, docs/MCP.md)
+#### MCP (a user's own AI assistant - issue #44; for users: https://github.com/mitra42/frugal-iot/wiki/Using-AI-with-Frugal-IoT)
 - `POST /mcp` - MCP Streamable HTTP, stateless, read-only tools (`list_scope`, `describe_node`,
   `get_series`, `summarize_field`, `graph_link`) in `lib/mcp.js`. The protocol is our own, `lib/mcp-protocol.js`
   (initialize, ping, tools/list, tools/call; JSON only, no session) - not `@modelcontextprotocol/sdk`,

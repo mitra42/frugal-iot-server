@@ -27,18 +27,18 @@ publicdir: ./public
 datadir: ./data
 otadir: ./ota
 
-# Looking after the readings in datadir, once a day. Readings are one file per topic per day and
-# nothing used to remove them, so a server left running would eventually fill its disk and stop.
-# A line for every question Claude asks this server through /mcp (docs/MCP.md): who, which tool,
-# with what, how long it took, how much was read, and why it was refused if it was. It is how the
-# tools get improved, and it shows what people are looking at - so it is never served, only read on
-# this machine (npx --no frugal-iot-mcp-log), and deleted after keepdays. Not under datadir, which is
-# served at /data.
+# A line for every question an AI assistant asks this server through /mcp (see the wiki page
+# "Using AI with Frugal IoT"): who, which tool, with what, how long it took, how much was read, and
+# why it was refused if it was. It is how the tools get improved, and it shows what people are
+# looking at - so it is never served, only read on this machine (npx --no frugal-iot-mcp-log), and
+# deleted after keepdays. Not under datadir, which is served at /data.
 mcplog:
   dir: ./logs/mcp
   keepdays: 90
   # enabled: false      # record nothing
 
+# Looking after the readings in datadir, once a day. Readings are one file per topic per day and
+# nothing used to remove them, so a server left running would eventually fill its disk and stop.
 housekeeping:
   # Compress days older than this. A day's file never changes once the day is over, and they
   # compress to about a third. Nothing else needs to know - the server answers a request for a

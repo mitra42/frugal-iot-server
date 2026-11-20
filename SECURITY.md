@@ -203,7 +203,7 @@ anything that commands a device.
 
 ### Claude, through MCP
 
-`POST /mcp` (`lib/mcp.js`, docs/MCP.md) answers a user's own Claude, as that user.
+`POST /mcp` (`lib/mcp.js`; for users, the wiki's [Using AI with Frugal IoT](https://github.com/mitra42/frugal-iot/wiki/Using-AI-with-Frugal-IoT)) answers a user's own AI assistant, as that user.
 
 * **Scope.** Read-only tools. A project is readable only with both `MCP` and `READ` on it (`mayUseMCP`), from the user's rows or from everyone's. A login with `MCP` nowhere gets a 403.
 * **Credentials.** A token of purpose `mcp` (`api_tokens`, a SHA-256 only), or, while `MCP_ACCEPTS_SESSION` is true, a dashboard session. Both are the same user, so accepting the session widens nothing.

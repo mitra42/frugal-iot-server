@@ -70,7 +70,6 @@
     "docs/GRAFANA.md",
     "docs/INSTALL-OPENSEARCH.md",
     "docs/INSTALLATION.md",
-    "docs/MCP.md",
     "docs/OPENWRT.md"
   ],
   "devDependencies": {
