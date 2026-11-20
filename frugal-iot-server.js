@@ -118,6 +118,7 @@ import { enrol, ENROL, enrolmentSecretsFor, makeRateLimiter, forgetNode, formerP
 import { deleteRetained, clearRetainedUnder } from './lib/retained.js';
 import { replicaFor, bridgeForToken, noteBridgePull, startReplica } from './lib/replica.js';
 import { addMissingColumns } from './lib/schema-columns.js';
+import { createTokenRouter, migrateTokens } from './lib/tokens.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -596,7 +597,9 @@ function execSqlStart(cb) {
         } else {
           console.log("Exec-ed starting SQL");
           // A column added to an existing table, which CREATE TABLE IF NOT EXISTS cannot do
-          addMissingColumns(db, (err2) => (err2 ? cb(err2) : cb(null, db)));
+          // Then tables replaced by another, which needs the columns first
+          addMissingColumns(db, (err2) => (err2 ? cb(err2)
+            : migrateTokens(db, (err3) => (err3 ? cb(err3) : cb(null, db)))));
         }
       });
     }
@@ -1255,6 +1258,8 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         const grafana = createGrafanaRouters(db, config.server.datadir, loggerClient, { loggedInOrFail, can_READ });
         app.use('/grafana', grafana.data);
         app.use('/grafana_token', grafana.admin);
+        // Each user's own tokens not tied to an organization - for MCP, see lib/tokens.js
+        app.use('/tokens', createTokenRouter(db, { loggedInOrFail }));
 
         // Where each organization's readings are forwarded, edited from the admin tab - lib/forwarders.js
         app.use('/forwarders', createForwardersRouter(db, mqttLogger, () => config.organizations || {}, { loggedInOrFail, can_ADMIN }, { localOpenSearch: () => config.opensearch, backfill: backfillOpenSearch, dataDir: config.server.datadir }));

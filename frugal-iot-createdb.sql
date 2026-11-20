@@ -107,24 +107,30 @@ CREATE TABLE IF NOT EXISTS `forwarders` (
 );
 CREATE INDEX IF NOT EXISTS `forwarders_org` ON `forwarders` (`org`);
 
--- A credential for Grafana (or anything else that reads history over HTTP), see lib/grafana.js and
--- docs/GRAFANA.md. Read-only, and scoped to one organization: it can fetch that organization's readings
--- through /grafana/:org/ and nothing else.
+-- A token a program uses to act as a user - Grafana reading history, Claude through /mcp, a
+-- Farm-Platform calling the API. See lib/tokens.js, which is the only code that reads this table.
 --
 -- Only a SHA-256 of the token is kept, so a copy of this database does not hand out working
 -- credentials - the token itself is shown once, when it is issued. It is 32 random bytes, which is
--- why a plain hash is enough and no salt or slow hash is needed. One token per name, so one
--- Grafana can be revoked without disturbing another; issuing a name again replaces its token.
-CREATE TABLE IF NOT EXISTS `grafana_tokens` (
-  `org` TEXT NOT NULL,
+-- why a plain hash is enough and no salt or slow hash is needed. One token per name, so one can be
+-- revoked without disturbing another; issuing a name again replaces its token.
+--
+-- `org` is '' for a token not tied to one organization (MCP), not NULL, for the reason given for
+-- permissions.project above: NULLs are distinct in a UNIQUE constraint.
+--
+-- Grafana's tokens were in a table of their own, grafana_tokens, until this replaced it;
+-- migrateTokens in lib/tokens.js moves an old database's rows here.
+CREATE TABLE IF NOT EXISTS `api_tokens` (
+  `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+  `purpose` TEXT NOT NULL,           -- grafana, mcp, platform
+  `org` TEXT NOT NULL DEFAULT '',
+  `user_id` INTEGER NOT NULL,        -- whose permissions it acts with, as they are when it is used
   `name` TEXT NOT NULL,
-  `token_hash` TEXT NOT NULL,
+  `token_hash` TEXT NOT NULL UNIQUE,
   `created_at` INTEGER NOT NULL,
-  `last_used` INTEGER, -- Approximate - only rewritten if more than an hour old, to spare the SD card
-  `user_id` INTEGER, -- whose permissions the token acts with; NULL (from before this) is not honoured
-  UNIQUE(`org`, `name`)
+  `last_used` INTEGER,               -- Approximate - only rewritten if more than an hour old, to spare the SD card
+  UNIQUE(`purpose`, `org`, `user_id`, `name`)
 );
-CREATE INDEX IF NOT EXISTS `grafana_tokens_hash` ON `grafana_tokens` (`token_hash`);
 
 -- An admin's decision about one node, for the Enrolled column on the dashboard's Nodes card
 -- (SECURITY.md S12). Two states are worth storing:

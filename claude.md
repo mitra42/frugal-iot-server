@@ -110,7 +110,7 @@ frugal-iot-server/
 - `POST /ota_update` - Upload OTA binary (admin only)
 
 #### API Endpoints (Device-Platform to Farm-Platform)
-- `GET /data?device={id}&from={ts}&to={ts}` - Request historical data
+- `GET /data?device={id}&from={ts}&to={ts}[&bucket=1h&agg=mean,min,max,count&tz=…]` - Request historical data, raw or bucketed; several devices and `+` allowed (`lib/data-query.js`, shared with MCP)
 - `POST /users/register` - Register farm platform user
 - `POST /devices/register` - Register device to user
 - `POST /devices/command` - Send command to device
@@ -160,31 +160,13 @@ Organizations are defined in `config.d/organizations/{org}.yaml` and include:
 - Apply consistently throughout all JavaScript files
 
 ### Asynchronous Code
-- **Prefer callbacks over promises** for backward compatibility and consistency with existing codebase
-- Use the callback pattern: `function(param, callback)` where `callback(err, result)` follows Node.js conventions
-- Error-first callbacks: `callback(error)` on failure, `callback(null, result)` on success
-
-Example:
-```javascript
-function readData(filePath, callback) {
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      callback(err, null);
-    } else {
-      callback(null, data);
-    }
-  });
-}
-
-// Usage
-readData('/path/to/file', (err, result) => {
-  if (err) {
-    console.error('Error:', err);
-  } else {
-    console.log('Success:', result);
-  }
-});
-```
+- **`async`/`await` is fine, and preferred for new code** - it reads top to bottom. Existing
+  callback code does not need converting; convert it only when it is being rewritten anyway.
+- Where the two meet, keep the conversion at the edge: wrap a callback API in a Promise
+  (`new Promise((res, rej) => db.get(sql, args, (e, r) => (e ? rej(e) : res(r))))`), or expose an
+  error-first `callback(err, result)` from an async function for callers that are still callbacks.
+- Avoid bare `.then()` chains; use `await`.
+- In Express, an `async` handler must catch and pass errors on (`try { ... } catch (err) { next(err); }`).
 
 ### Shell scripts
 
@@ -495,7 +477,7 @@ The platform-to-platform API of API.md is not there: it is a router built by
 1. User-device relationship model not fully specified
 2. Notification configuration not yet defined
 3. MQTT transport details incomplete
-4. Multi-device data requests not supported
+4. Multi-device data: requesting it is supported (API.md 6.2), pushing is still one device per pack
 5. Authentication scheme deferred to future version
 6. Device discovery mechanism not defined
 7. Device status/diagnostics not yet standardized

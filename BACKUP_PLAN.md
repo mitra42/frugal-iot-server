@@ -28,7 +28,7 @@ Sorted by the two questions that decide what to do with it: can it be rebuilt, a
 | Broker plugin `.so`, `persistence_location` (retained messages), log | Part of mosquitto / running state; nodes republish | | No |
 
 What the db holds that is secret: user password hashes, **`nodes.password` in plaintext**, `bridges`
-tokens, `grafana_tokens`, `api_platforms.auth_token`, and possibly credentials inside
+tokens, `api_tokens` (hashes only), `api_platforms.auth_token`, and possibly credentials inside
 `forwarders.config`.
 
 So **the database plus `secrets.yaml` is everything**: with those two, rebuild-dynsec recreates every

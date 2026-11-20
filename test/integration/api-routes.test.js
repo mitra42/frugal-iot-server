@@ -8,6 +8,9 @@ import request from 'supertest';
 import express from 'express';
 import { createAPIRouter, createAPIErrorHandler } from '../../lib/api-routes.js';
 import { initializeSchema } from '../../lib/database.js';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 describe('API Routes - Phase 2', () => {
   let app;
@@ -267,3 +270,66 @@ describe('API Routes - Phase 2', () => {
   });
 });
 
+
+// GET /api/data against real files: several devices, "+", buckets, and READ checked per project
+describe('GET /api/data - reading history', () => {
+  const DAY = Date.parse('2026-09-24T00:00:00Z');
+  let app, dir, user;
+  const put = (topic, rows) => {
+    const d = join(dir, ...topic.split('/'));
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, '2026-09-24.csv'), rows.map(([t, v]) => `${t},"${v}"`).join('\n') + '\n');
+  };
+  const get = (query) => request(app).get('/api/data').query(query);
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'api-data-'));
+    put('dev/lotus/a/sht/temperature', [[DAY + 1000, 20], [DAY + 2000, 22]]);
+    put('dev/lotus/b/sht/temperature', [[DAY + 1000, 30]]);
+    put('dev/magi/c/sht/temperature', [[DAY + 1000, 40]]);
+    app = express();
+    app.use((req, res, next) => { req.isAuthenticated = () => !!user; req.user = user; next(); });
+    app.use('/api', createAPIRouter(null, dir, { flush: async () => {} }));
+    app.use(createAPIErrorHandler());
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  beforeEach(() => {
+    user = { id: 2, permissions: [{ capability: 'READ', org: 'dev', project: 'lotus' }] };
+  });
+
+  it('one node: the single-device SenML pack, named from the node, not from what was asked', async () => {
+    const r = await get({ device: 'dev/lotus/a/sht/temperature', from: String(DAY) });
+    expect(r.status).toBe(200);
+    expect(r.headers['content-type']).toMatch(/application\/senml\+json/);
+    expect(r.body).toEqual([{ bn: 'dev/lotus/a/', bt: (DAY + 1000) / 1000 }, { n: 'sht/temperature', v: 20 }, { n: 'sht/temperature', v: 22, t: 1 }]);
+  });
+  it('several devices, by "+", by commas or repeated, each with its own base record', async () => {
+    for (const device of ['dev/lotus/+/sht/temperature', 'dev/lotus/a/sht/temperature,dev/lotus/b/sht/temperature']) {
+      const r = await get({ device, from: String(DAY) });
+      expect(r.body.filter((x) => x.bn).map((x) => x.bn)).toEqual(['dev/lotus/a/', 'dev/lotus/b/']);
+    }
+    const repeated = await request(app).get(`/api/data?device=dev/lotus/a&device=dev/lotus/b&from=${DAY}`);
+    expect(repeated.body.filter((x) => x.bn)).toHaveLength(2);
+  });
+  it('READ is per project: "+" leaves out what may not be read, naming it is refused', async () => {
+    const all = await get({ device: 'dev/+/+/sht/temperature', from: String(DAY) });
+    expect(all.body.filter((x) => x.bn).map((x) => x.bn)).toEqual(['dev/lotus/a/', 'dev/lotus/b/']);
+    const named = await get({ device: 'dev/magi/c', from: String(DAY) });
+    expect(named.status).toBe(403);
+    expect(named.body.error).toBe('not_allowed');
+  });
+  it('bucketed, with the aggregate in the name', async () => {
+    const r = await get({ device: 'dev/lotus/a/sht/temperature', from: String(DAY), to: String(DAY + 3600000 - 1), bucket: '1h', agg: 'mean,count' });
+    expect(r.body).toEqual([{ bn: 'dev/lotus/a/', bt: DAY / 1000 }, { n: 'sht/temperature/count', v: 2 }, { n: 'sht/temperature/mean', v: 21 }]);
+  });
+  it('too much is 422 too_much_data, saying what to change', async () => {
+    const r = await get({ device: 'dev/lotus/a/sht/temperature', from: String(DAY - 365 * 86400000), to: String(DAY), bucket: '1m' });
+    expect(r.status).toBe(422);
+    expect(r.body).toMatchObject({ error: 'too_much_data' });
+    expect(r.body.message).toMatch(/larger bucket/);
+  });
+  it('needs a login', async () => {
+    user = null;
+    expect((await get({ device: 'dev/lotus/a', from: String(DAY) })).status).toBe(401);
+  });
+});

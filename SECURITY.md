@@ -22,7 +22,8 @@ should exist; the database is the source of truth and the broker is rebuilt from
 | Server → organization | `<org>-admin` | Derived: `HMAC(user_secret, 'orgadmin:' ‖ org)` | Nowhere | Publish anywhere in that organization — only to clear retained messages |
 | Anonymous browser | none | — | — | Read whatever is marked public |
 | Bridged Pi | not a broker account | Random token, at pairing | `config.d/secrets.yaml` on the Pi | Read one organization's logins and permissions from production |
-| Grafana, or anything reading history | not a broker account | Random token, made by any user who can READ the organization | `frugal-iot.db`, `grafana_tokens` — only a SHA-256 of it | Read what its maker may READ in one organization, over `/grafana/<org>/`; nothing else |
+| Grafana, or anything reading history | not a broker account | Random token, made by any user who can READ the organization | `frugal-iot.db`, `api_tokens` (purpose `grafana`) — only a SHA-256 of it | Read what its maker may READ in one organization, over `/grafana/<org>/`; nothing else |
+| Claude, through MCP | not a broker account | Random token, made by its user, who needs MCP on an organization | `frugal-iot.db`, `api_tokens` (purpose `mcp`) — only a SHA-256 of it | Only on routes that accept it (none yet - `/mcp` is to come, issue #44): what its maker may READ in each organization where they also have MCP |
 | A forwarder (OpenSearch, Google Sheets) | not a broker account | Whatever the destination takes | `frugal-iot.db`, `forwarders` — in the clear | Send one organization's logged readings where its ADMIN pointed it |
 
 Derived credentials are computed from `user_secret` when needed, so they can be reissued without
@@ -206,7 +207,7 @@ anything that commands a device.
 
 * **Scope.** One organization, read-only. Tokens with wrong organization
 refused same as unknown to prevent fishing for orgs.
-* **A token acts as the user who made it.** `grafana_tokens.user_id` records who, and each request checks current permissions for READ on the org & projects. Topic lists filtered. 
+* **A token acts as the user who made it.** `api_tokens.user_id` records who, and each request checks current permissions for READ on the org & projects. Topic lists filtered. 
 * **Who may issue them.**  Tokens issued and revokable by anyone with READ perms on org on admin/Grafana card. Org admin can list & revoke everyone's.
 refused, as for forwarders. Max 10 tokens per user per org. The reply that carries a token is marked `no-store`.
 * **Revocation** is immediate, per token. Making a token with an existing name replaces it. There is no
@@ -290,7 +291,7 @@ to be inside their root. OTA requires HTTPS, so production runs behind a reverse
 | Node credentials | `frugal-iot.db`, `nodes` |
 | Node approvals and denials | `frugal-iot.db`, `node_grants` |
 | Bridge tokens (on production) | `frugal-iot.db`, `bridges` |
-| Grafana tokens | `frugal-iot.db`, `grafana_tokens` — a SHA-256 only |
+| Grafana and MCP tokens | `frugal-iot.db`, `api_tokens` — a SHA-256 only |
 | Forwarders (with their passwords and keys) | `frugal-iot.db`, `forwarders` |
 | Which production a Pi replicates from | `config.d/replica.yaml`, with the token in `secrets.yaml` |
 | Projects | `frugal-iot.db`, `projects` |

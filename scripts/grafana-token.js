@@ -18,6 +18,7 @@ import sqlite3 from 'sqlite3';
 import { initializeSchema } from '../lib/database.js';
 import { addMissingColumns } from '../lib/schema-columns.js';
 import { issueToken, listTokens, revokeToken } from '../lib/grafana.js';
+import { migrateTokens } from '../lib/tokens.js';
 
 const [action, org, ...rest] = process.argv.slice(2);
 const [username, name] = action === 'add' ? rest : [undefined, rest[0]];
@@ -38,6 +39,7 @@ const db = new sqlite3.Database('./frugal-iot.db', async (err) => {
   try {
     await initializeSchema(db); // adds the table to a database from before it existed; changes nothing else
     await new Promise((res, rej) => addMissingColumns(db, (e) => (e ? rej(e) : res())));
+    await new Promise((res, rej) => migrateTokens(db, (e) => (e ? rej(e) : res()))); // as the server does at startup
     if (action === 'add') {
       const user = await new Promise((res, rej) => db.get('SELECT id FROM users WHERE username = ?', [username], (e, r) => (e ? rej(e) : res(r))));
       if (!user) throw new Error(`No user "${username}"`);

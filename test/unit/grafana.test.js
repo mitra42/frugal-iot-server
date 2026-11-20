@@ -58,7 +58,7 @@ describe('tokens', () => {
     const token = await issue('dev', 'home');
     expect(token).toMatch(/^fiot_/);
     expect(await tokenOwner(db, token)).toEqual({ org: 'dev', name: 'home', userId: 1 });
-    const rows = await new Promise((r) => db.all('SELECT * FROM grafana_tokens', (e, x) => r(x)));
+    const rows = await new Promise((r) => db.all('SELECT * FROM api_tokens', (e, x) => r(x)));
     expect(JSON.stringify(rows)).not.toContain(token);
   });
   it('an unknown or empty token is nobody', async () => {
@@ -359,9 +359,10 @@ describe('a token acts as the user who made it', () => {
     await grant(1, 'READ', 'dev', 'lotus');
     expect((await get('/grafana/dev/topics', token)).body.map((t) => t.topic)).toEqual([T]);
   });
-  it('is not honoured when it has no user at all', async () => {
-    await exec("INSERT INTO grafana_tokens (org, name, token_hash, created_at) VALUES ('dev', 'old', ?, 1)", [hashToken('fiot_old')]);
-    expect((await get('/grafana/dev/health', 'fiot_old')).status).toBe(403);
+  it('is not honoured when it is a token for something else', async () => {
+    await grant(1, 'READ', 'dev');
+    await exec("INSERT INTO api_tokens (purpose, org, user_id, name, token_hash, created_at) VALUES ('mcp', '', 1, 'claude', ?, 1)", [hashToken('fiot_mcp')]);
+    expect((await get('/grafana/dev/health', 'fiot_mcp')).status).toBe(403);
   });
   it('is only for the organization it was made in, whatever else its user may READ', async () => {
     await grant(1, 'READ', 'winam');

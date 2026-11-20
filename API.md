@@ -222,7 +222,9 @@ that action.
 | `409 Conflict` | `already_exists` | The resource being created (user, device registration) already exists |
 | `422 Unprocessable Entity` | `invalid_value` | The request is well-formed but a field value fails validation (e.g. out of range, wrong type) |
 | `422 Unprocessable Entity` | `field_read_only` | The targeted field exists in the Device Schema but is not writable (it is a property, not an action) |
+| `422 Unprocessable Entity` | `too_much_data` | The request would read or return more than the Device-Platform serves at once. The `message` SHOULD say what to change (a larger bucket, a shorter time, fewer devices) |
 | `503 Service Unavailable` | `device_unavailable` | The target device is offline or unreachable |
+| `503 Service Unavailable` | `busy` | The Device-Platform is serving too many requests at once. It SHOULD send `Retry-After`, and the requester SHOULD retry after it |
 | `500 Internal Server Error` | `server_error` | An unexpected error occurred on the receiving platform |
 
 Platforms MUST NOT return a `200 OK` response for a failed action. Platforms
@@ -310,10 +312,13 @@ Device Schema.
 
 A single pack MAY contain records from multiple fields of the same device,
 representing a batch of measurements taken at the same or different times.
-A pack MUST NOT contain records from more than one device (i.e. more than
-one distinct `bn` value). This restriction may be revisited in a future
-version of this standard if requests are introduced that explicitly retrieve
-or push data across multiple devices in a single request.
+
+A pack MUST NOT contain records from more than one device, except in response
+to a request that names more than one (Section 6.2). Such a pack consists of
+one group per device, each beginning with its own dedicated base record
+(`bn` and `bt`, no value fields) followed by that device's records, which are
+resolved against that base record as RFC 8428 specifies. A request naming a
+single device always receives a single-device pack.
 
 **Unused RFC 8428 features**
 
@@ -444,32 +449,67 @@ shown without that prefix here for brevity.
 
 #### 6.2.1 Purpose
 
-Request historical or recent sensor data for a specific Device over a defined
-time period.
+Request historical or recent sensor data for one or more Devices over a
+defined time period - either every reading, or readings summarised into time
+buckets (for example hourly mean, minimum and maximum).
 
 #### 6.2.2 Request
 
 ```
-GET /data?device={device-id}&from={timestamp}&to={timestamp}
+GET /data?device={device-id}&from={timestamp}&to={timestamp}[&bucket={duration}&agg={aggregates}&tz={zone}]
 ```
 
 | Parameter | Required | Description |
 |---|---|---|
-| `device` | MUST | Fully qualified device identifier (e.g. `dev/lotus/esp1234/sht/temperature`) |
+| `device` | MUST | Device identifier: a device (`dev/lotus/esp1234`), one module of it (`dev/lotus/esp1234/sht`) or one field (`dev/lotus/esp1234/sht/temperature`). MAY be repeated, or hold several separated by commas. Any level after the organization MAY be `+`, matching every value of that level (e.g. `dev/lotus/+/sht/temperature`) |
 | `from` | MUST | Start of time period (ISO 8601 or Unix timestamp) |
 | `to` | SHOULD | End of time period (ISO 8601 or Unix timestamp). Defaults to now if omitted. |
+| `bucket` | MAY | Summarise into buckets of this length: a whole number followed by `m`, `h` or `d` (e.g. `15m`, `1h`, `1d`). Without it, every reading is returned |
+| `agg` | MAY | With `bucket`: which of `mean`, `min`, `max`, `count` to return, comma-separated. Defaults to all four |
+| `tz` | MAY | With `bucket`: an IANA time zone (e.g. `Asia/Kolkata`) whose clock buckets line up with - days start at local midnight, and hours on the local hour. Defaults to `UTC` |
+
+A device that the requester may not read is refused with `403 not_allowed`
+when named; where it is matched by `+`, it is left out of the response.
 
 #### 6.2.3 Response
 
 A SenML packet (Section 4) containing data conforming to the Device Schema
-(Section 5). The response MAY include data points outside the requested time
-period — it is the requester's responsibility to filter out any records that
-fall outside the requested range. Implementations SHOULD document their
-behaviour in this regard.
+(Section 5). Where the request matched more than one device, it is a
+multi-device pack as described in Section 4.2. The response MAY include data
+points outside the requested time period — it is the requester's
+responsibility to filter out any records that fall outside the requested range.
+Implementations SHOULD document their behaviour in this regard.
+
+When `bucket` is given, each record is one aggregate of one bucket: its name
+is the field followed by `/` and the aggregate (`sht/temperature/mean`), and
+its time is the start of the bucket. A bucket with no readings is omitted, so
+a gap in the data appears as missing buckets, and `count` shows how well each
+bucket is covered. For example, two hours of hourly means and counts:
+
+```json
+[
+  {"bn": "dev/lotus/esp1234/", "bt": 1758672000},
+  {"n": "sht/temperature/count", "v": 60},
+  {"n": "sht/temperature/mean", "v": 21.4},
+  {"n": "sht/temperature/count", "v": 58, "t": 3600},
+  {"n": "sht/temperature/mean", "v": 22.1, "t": 3600}
+]
+```
 
 If no data exists within the requested time period, the Device-Platform MUST
 return `200 OK` with an empty SenML pack (`[]`). This is not an error
 condition.
+
+A Device-Platform MAY refuse a request that would read or return too much
+with `422 too_much_data` (Section 3.5), and SHOULD say in the `message` what
+to change.
+
+*Frugal IoT:* returns only readings within the requested period, and only
+numeric ones. Limits are at most 50 `device` values, 200 fields once `+` is
+expanded, 6000 days of data files read, 100,000 readings unbucketed, and
+20,000 values bucketed; a request is refused before anything is read where
+the limit can be known in advance. At most four requests are served at once,
+two for any one user, and beyond that the answer is `503 busy`.
 
 #### 6.2.4 Error Cases
 
@@ -478,7 +518,9 @@ to this request:
 
 | HTTP Status | Error Code | Notes |
 |---|---|---|
-| `404 Not Found` | `device_not_found` | The Device-Platform does not recognise the specified device identifier |
+| `404 Not Found` | `device_not_found` | The Device-Platform does not recognise the specified device identifier (when named outright - a `+` that matches nothing is an empty response) |
+| `403 Forbidden` | `not_allowed` | A device was named that the requester may not read |
+| `422 Unprocessable Entity` | `too_much_data` | See Section 3.5 |
 
 ---
 
@@ -1071,10 +1113,9 @@ and session management are not yet specified.
 
 ### 11.4 Multi-Device Data Requests
 
-Section 4 restricts a single SenML pack to data from one device. A future
-version may introduce requests that allow a Farm-Platform to request or receive
-data from multiple devices in a single operation, at which point the
-single-device-per-pack restriction may be revisited (see Section 4.2).
+Requesting data (Section 6.2) may now name several devices, with a pack
+grouped by device in reply (Section 4.2). Pushing data (Section 7.2) is still
+one device per pack.
 
 ### 11.5 Authentication and Authorisation
 

@@ -8,7 +8,7 @@
  * fails the build.
  */
 import { describe, it, expect } from 'vitest';
-import { buildConfigFor, hasPermissions, orgFieldsNeverServed } from '../../lib/config-for-user.js';
+import { buildConfigFor, hasPermissions, mayUseMCP, orgFieldsNeverServed } from '../../lib/config-for-user.js';
 
 // A permission row is [capability, org] for organization-wide, or [capability, org, project].
 // Organization-wide rows carry project '' in the database, so that is what they get here.
@@ -187,6 +187,37 @@ describe('project filtering', () => {
   it('leaves an organization with no projects block alone', () => {
     const out = buildConfigFor(config(), user(['READ', 'dev']));
     expect(out.organizations.dev.projects).toBeUndefined();
+  });
+});
+
+describe('mayUseMCP', () => {
+  it('needs MCP and READ, each on its own being not enough', () => {
+    expect(mayUseMCP(user(['MCP', 'dev'], ['READ', 'dev']), 'dev')).toBe(true);
+    expect(mayUseMCP(user(['READ', 'dev']), 'dev')).toBe(false);
+    expect(mayUseMCP(user(['MCP', 'dev']), 'dev')).toBe(false);
+    expect(mayUseMCP(user(['ADMIN', 'dev'], ['READ', 'dev']), 'dev')).toBe(false);
+  });
+  it('is per organization', () => {
+    expect(mayUseMCP(user(['MCP', 'dev'], ['READ', 'dev'], ['READ', 'varta']), 'varta')).toBe(false);
+  });
+  it('counts what is granted to everyone, as the permission rows a login reads include it', () => {
+    const u = { id: 2, permissions: [{ id: 0, capability: 'MCP', org: 'dev', project: '' }, { id: 0, capability: 'READ', org: 'dev', project: '' }] };
+    expect(mayUseMCP(u, 'dev')).toBe(true);
+  });
+  it('for a project, wants both to cover that project', () => {
+    const u = user(['MCP', 'dev', 'lotus'], ['READ', 'dev']);
+    expect(mayUseMCP(u, 'dev', 'lotus')).toBe(true);
+    expect(mayUseMCP(u, 'dev', 'magi')).toBe(false);
+  });
+  it('with no project, wants both in the same place', () => {
+    expect(mayUseMCP(user(['MCP', 'dev', 'lotus'], ['READ', 'dev', 'magi']), 'dev')).toBe(false);
+    expect(mayUseMCP(user(['MCP', 'dev', 'lotus'], ['READ', 'dev', 'lotus']), 'dev')).toBe(true);
+    expect(mayUseMCP(user(['MCP', 'dev', 'lotus'], ['READ', 'dev']), 'dev')).toBe(true);
+    expect(mayUseMCP(user(['MCP', 'dev'], ['READ', 'dev', 'magi']), 'dev')).toBe(true);
+  });
+  it('a missing user may not', () => {
+    expect(mayUseMCP(undefined, 'dev')).toBe(false);
+    expect(mayUseMCP(undefined, 'dev', 'lotus')).toBe(false);
   });
 });
 
