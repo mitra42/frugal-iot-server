@@ -18,7 +18,7 @@ Claude can only see an organization or project where the user has **two** permis
 - **`MCP`** allows that organization's data to be sent to the user's Claude.
 - **`READ`** allows the user to see that data.
 
-Grant both on the dashboard's People card. Granting `MCP` never shows anyone anything they could not
+Grant both on the dashboard's Permissions card, behind a project's `⚙`. Granting `MCP` never shows anyone anything they could not
 already read.
 
 `READ` and `MCP` granted to everyone apply to every registered user. To stop a user using Claude,
@@ -26,7 +26,7 @@ remove their `MCP` permission. Their token keeps existing, but from then on it c
 
 ## What a user does
 
-1. On the dashboard, open the **Claude** card and make a token. Give it a name that says where it
+1. On the dashboard, click a project's `⚙`, open the **Claude** card and make a token. Give it a name that says where it
    will be used, such as `laptop`.
 2. Copy the token straight away. It is shown only once, and the server keeps only a hash of it.
 3. Connect Claude using one of the two methods below.
