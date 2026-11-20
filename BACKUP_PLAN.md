@@ -24,6 +24,7 @@ Sorted by the two questions that decide what to do with it: can it be rebuilt, a
 | Broker: password file | Shrinking as nodes move to dynsec; until then, no | **Yes** | State snapshot |
 | Broker: `dynamic-security.json` | **Yes** - `frugal-iot-rebuild-dynsec` from db + secrets | | Not needed; included as a cross-check only |
 | `ota/` | Yes - rebuilt every release anyway | No | No |
+| `logs/mcp/` (what Claude asked, issue #44) | Not needed - a diagnostic, deleted after 90 days anyway | Says what people looked at | No |
 | Broker TLS `certfile`/`keyfile` | Yes, re-issued - but production's were placed by hand, and restoring them spares every bridge an outage | `keyfile`: yes | State snapshot |
 | Broker plugin `.so`, `persistence_location` (retained messages), log | Part of mosquitto / running state; nodes republish | | No |
 

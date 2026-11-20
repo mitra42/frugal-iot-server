@@ -120,6 +120,8 @@ import { replicaFor, bridgeForToken, noteBridgePull, startReplica } from './lib/
 import { addMissingColumns } from './lib/schema-columns.js';
 import { createTokenRouter, migrateTokens } from './lib/tokens.js';
 import { createLoggerClient } from './lib/logger-client.js';
+import { createMcpRouter } from './lib/mcp.js';
+import { createMcpLog, startMcpLogPruning } from './lib/mcp-log.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
 
@@ -777,7 +779,8 @@ function shouldIBeLoggedIn(req, res, next) {
   // req.path, not req.url: the latter carries the query string, and the page is reached with one in
   // ordinary use - login.html passes "lang" back - so /dashboard/?lang=fr would match neither name
   // here and be served to whoever asked.
-  if ((['/','/index.html'].includes(req.path)) && !req.isAuthenticated()) {
+  // graph.html as well: a link to it (MCP's graph_link) is often the first page someone opens
+  if ((['/','/index.html','/graph.html'].includes(req.path)) && !req.isAuthenticated()) {
     console.log(`Not authenticated redirecting ${req.url} for login`);
     // Capture the full original URL as-is in "url" (so e.g. /data?... comes back with all its params
     // intact), encoded so its own query string can't corrupt this redirect's query string. Carry "lang"
@@ -1260,6 +1263,11 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.use('/grafana_token', grafana.admin);
         // Each user's own tokens not tied to an organization - for MCP, see lib/tokens.js
         app.use('/tokens', createTokenRouter(db, { loggedInOrFail }));
+        // A user's own Claude, asking about the readings they may see - lib/mcp.js, issue #44
+        // Every tool call, one line each, read only on this machine - lib/mcp-log.js
+        const mcpLog = createMcpLog(config.server.mcplog);
+        startMcpLogPruning(mcpLog);
+        app.use('/mcp', createMcpRouter({ db, dataDir: config.server.datadir, loggerClient, organizations: () => config.organizations || {}, log: mcpLog }));
 
         // Where each organization's readings are forwarded, edited from the admin tab - lib/forwarders.js
         app.use('/forwarders', createForwardersRouter(db, mqttLogger, () => config.organizations || {}, { loggedInOrFail, can_ADMIN }, { localOpenSearch: () => config.opensearch, backfill: backfillOpenSearch, dataDir: config.server.datadir }));

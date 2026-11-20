@@ -23,7 +23,7 @@ should exist; the database is the source of truth and the broker is rebuilt from
 | Anonymous browser | none | — | — | Read whatever is marked public |
 | Bridged Pi | not a broker account | Random token, at pairing | `config.d/secrets.yaml` on the Pi | Read one organization's logins and permissions from production |
 | Grafana, or anything reading history | not a broker account | Random token, made by any user who can READ the organization | `frugal-iot.db`, `api_tokens` (purpose `grafana`) — only a SHA-256 of it | Read what its maker may READ in one organization, over `/grafana/<org>/`; nothing else |
-| Claude, through MCP | not a broker account | Random token, made by its user, who needs MCP on an organization | `frugal-iot.db`, `api_tokens` (purpose `mcp`) — only a SHA-256 of it | Only on routes that accept it (none yet - `/mcp` is to come, issue #44): what its maker may READ in each organization where they also have MCP |
+| Claude, through MCP | not a broker account | Random token, made by its user, who needs MCP on an organization | `frugal-iot.db`, `api_tokens` (purpose `mcp`) — only a SHA-256 of it | Only on `/mcp` (`lib/mcp.js`, read-only tools): what its maker may READ in each project where they also have MCP. `/mcp` also accepts a dashboard session (`MCP_ACCEPTS_SESSION`), which is the same user |
 | A forwarder (OpenSearch, Google Sheets) | not a broker account | Whatever the destination takes | `frugal-iot.db`, `forwarders` — in the clear | Send one organization's logged readings where its ADMIN pointed it |
 
 Derived credentials are computed from `user_secret` when needed, so they can be reissued without
@@ -201,6 +201,20 @@ browser, which cannot publish readings at all.
 taken from the normalised path. The API of API.md is a separate router: `READ` for data, `WRITE` for
 anything that commands a device.
 
+### Claude, through MCP
+
+`POST /mcp` (`lib/mcp.js`, docs/MCP.md) answers a user's own Claude, as that user.
+
+* **Scope.** Read-only tools. A project is readable only with both `MCP` and `READ` on it (`mayUseMCP`), from the user's rows or from everyone's. A login with `MCP` nowhere gets a 403.
+* **Credentials.** A token of purpose `mcp` (`api_tokens`, a SHA-256 only), or, while `MCP_ACCEPTS_SESSION` is true, a dashboard session. Both are the same user, so accepting the session widens nothing.
+* **`graph_link`** returns a URL to `/dashboard/graph.html`. The page fetches readings with the session of whoever opens it, so the link carries no access of its own.
+* **Load.** Readings go through `lib/data-query.js`, which shares its limits and its concurrency guard with `GET /api/data`. There are 600 calls per user per hour, and 3000 in total.
+* **The call log** (`lib/mcp-log.js`) records each call: who made it, the tool, its arguments, and what it read and returned. That shows what people are looking at, so the log is kept out of anything served:
+  * It is outside `datadir`, which is served at `/data`.
+  * The files are private to the server's user.
+  * It is read only on the machine, with `npx --no frugal-iot-mcp-log`.
+  * Days are deleted after `keepdays`, which defaults to 90.
+
 ### Reading history from Grafana
 
 `GET /grafana/<org>/{health,topics,data}` serves an organization's readings to Grafana, authenticated by a bearer token. Shown once, stored as SHA-256.
@@ -302,6 +316,7 @@ to be inside their root. OTA requires HTTPS, so production runs behind a reverse
 | Bridge credentials | `/etc/mosquitto/conf.d/`, mode 600 root |
 | A node's own credential | Its LittleFS: `/mqtt/username`, `/mqtt/password` |
 | Readings | `data/<org>/<project>/<node>/` |
+| What Claude asked through `/mcp` | `logs/mcp/<day>.jsonl` (`mcplog.dir` in `server.yaml`), mode 600 in a 700 directory, never served, deleted after 90 days |
 | Sessions | Server memory |
 
 ---

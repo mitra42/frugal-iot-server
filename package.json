@@ -7,6 +7,7 @@
   "bugs": "https://github.com/mitra42/frugal-iot-server/issues",
   "dependencies": {
     "@gebsl/senml-js": "^1.1.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "array.prototype.tospliced": "^1.1.5",
     "async": "^3.2.6",
     "cookie-parser": "^1.4.7",
@@ -22,7 +23,8 @@
     "nodemailer": "^10.1.2",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
-    "sqlite3": "^6.0.1"
+    "sqlite3": "^6.0.1",
+    "zod": "^4.6.7"
   },
   "bin": {
     "frugal-iot-server": "frugal-iot-server.js",
@@ -38,6 +40,7 @@
     "frugal-iot-resetnode": "scripts/resetnode.js",
     "frugal-iot-restore": "scripts/restore.zsh",
     "frugal-iot-grafana-token": "scripts/grafana-token.js",
+    "frugal-iot-mcp-log": "scripts/mcp-log.js",
     "frugal-iot-backfill-opensearch": "scripts/backfill-opensearch.js"
   },
   "description": "Frugal IoT client and server",
@@ -69,6 +72,7 @@
     "docs/GRAFANA.md",
     "docs/INSTALL-OPENSEARCH.md",
     "docs/INSTALLATION.md",
+    "docs/MCP.md",
     "docs/OPENWRT.md"
   ],
   "devDependencies": {

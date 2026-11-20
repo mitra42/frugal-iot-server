@@ -109,6 +109,19 @@ frugal-iot-server/
 - `GET /private/*` - Private files
 - `POST /ota_update` - Upload OTA binary (admin only)
 
+#### MCP (a user's own Claude - issue #44, docs/MCP.md)
+- `POST /mcp` - MCP Streamable HTTP, stateless, read-only tools (`list_scope`, `describe_node`,
+  `get_series`, `summarize_field`, `graph_link`) in `lib/mcp.js`. Token of purpose `mcp` (`lib/tokens.js`) or a
+  dashboard session; needs `MCP` and `READ` on each project it reads (`mayUseMCP`). Readings come
+  through `lib/data-query.js`, so its limits and the read guard are shared with `GET /api/data`.
+  A node's configured min/max come from the logger's `getNodeState`, which needs a logger that keeps
+  six-level parameter topics in its current values.
+- Each tool call is recorded by `lib/mcp-log.js` in `logs/mcp/<day>.jsonl`, outside `datadir`, mode
+  600, pruned after 90 days. It is never served; `npx --no frugal-iot-mcp-log [days] [raw]` summarises
+  it. A refused call is logged with its reason, which is the list of what to improve.
+- `GET /dashboard/graph.html?device=…&from=…&bucket=…&tz=…` - the client's chart of `/api/data`,
+  which `graph_link` links to. It needs a login like `/dashboard/index.html`: see `shouldIBeLoggedIn`.
+
 #### API Endpoints (Device-Platform to Farm-Platform)
 - `GET /data?device={id}&from={ts}&to={ts}[&bucket=1h&agg=mean,min,max,count&tz=…]` - Request historical data, raw or bucketed; several devices and `+` allowed (`lib/data-query.js`, shared with MCP)
 - `POST /users/register` - Register farm platform user
