@@ -121,6 +121,7 @@ import { addMissingColumns } from './lib/schema-columns.js';
 import { createTokenRouter, migrateTokens } from './lib/tokens.js';
 import { createLoggerClient } from './lib/logger-client.js';
 import { createMcpRouter } from './lib/mcp.js';
+import { publicBase as publicBaseOf } from './lib/public-base.js';
 import { createMcpLog, startMcpLogPruning } from './lib/mcp-log.js';
 import { createPushManager } from './lib/farm-platform-push.js';
 import { APIError } from './lib/api-errors.js';
@@ -176,10 +177,9 @@ function langOf(url) {
 function redactUrl(url) {
   return String(url).replace(/([?&]code=)[^&]*/, '$1REDACTED');
 }
-// Where this server can be reached from outside, for the link in a reset email. Behind a proxy that
-// does not set X-Forwarded-Host there is nothing in the request to go on, hence the config override.
+// Where this server can be reached from outside, for any link it hands out - see lib/public-base.js
 function publicBase(req) {
-  return (config.email && config.email.baseurl) || `${req.protocol}://${req.get('host')}`;
+  return publicBaseOf(req, config);
 }
 
 const optionsHeaders = {
@@ -1253,7 +1253,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         app.use(express.json());
 
         // Mount API routes
-        const apiRouter = createAPIRouter(db, config.server.datadir, loggerClient, pushManager);
+        const apiRouter = createAPIRouter(db, config.server.datadir, loggerClient, pushManager, { publicBase });
         app.use('/api', apiRouter);
         console.log("Mounted API routes at /api");
 
@@ -1267,7 +1267,7 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
         // Every tool call, one line each, read only on this machine - lib/mcp-log.js
         const mcpLog = createMcpLog(config.server.mcplog);
         startMcpLogPruning(mcpLog);
-        app.use('/mcp', createMcpRouter({ db, dataDir: config.server.datadir, loggerClient, organizations: () => config.organizations || {}, log: mcpLog }));
+        app.use('/mcp', createMcpRouter({ db, dataDir: config.server.datadir, loggerClient, organizations: () => config.organizations || {}, log: mcpLog, publicBase }));
 
         // Where each organization's readings are forwarded, edited from the admin tab - lib/forwarders.js
         app.use('/forwarders', createForwardersRouter(db, mqttLogger, () => config.organizations || {}, { loggedInOrFail, can_ADMIN }, { localOpenSearch: () => config.opensearch, backfill: backfillOpenSearch, dataDir: config.server.datadir }));
@@ -1614,7 +1614,8 @@ mqttLogger.readYamlConfig('.', (err, configobj) => {
             res.status(200).json({
               org,
               secrets: enrolmentSecretsFor(config, org),
-              enrol_url: `${req.protocol}://${req.get('host')}/enrol`,
+              // Baked into a node's build, so it must be the address nodes reach, not the proxy's
+              enrol_url: `${publicBase(req)}/enrol`,
             });
           },
         );

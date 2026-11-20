@@ -18,6 +18,7 @@
 #
 # Any other provider is the same four settings with its own SMTP host.
 #
-# The reset email contains a link back to this server. Set baseurl if the server cannot work out
-# its own public address from the request - behind a proxy that does not set X-Forwarded-Host, say.
+# The reset email contains a link back to this server. Its address now comes from baseurl in
+# server.yaml, which covers every link the server hands out; a baseurl here is still honoured when
+# server.yaml has none.
 # baseurl: https://frugaliot.example.org

@@ -175,6 +175,18 @@ describe('/mcp', () => {
       expect(url.searchParams.get('tz')).toBe('Asia/Kolkata');
       expect(url.searchParams.get('title')).toBe('Heat');
     });
+    it('the link uses the server\'s public address, not the address the request arrived at', async () => {
+      const behindProxy = express();
+      behindProxy.use((req, res, next) => { req.isAuthenticated = () => true; req.user = user; next(); });
+      behindProxy.use(express.json());
+      behindProxy.use('/mcp', createMcpRouter({
+        db: null, dataDir: dir, organizations: () => ({ dev: {} }), publicBase: () => 'https://farm.example.org',
+        loggerClient: createLoggerClient({ flush: (cb) => cb(), reportNodes: () => ({}), getNodeState: () => ({}), clients: {} }),
+      }));
+      const r = await request(behindProxy).post('/mcp').set('Accept', 'application/json, text/event-stream')
+        .send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'graph_link', arguments: { devices: ['dev/lotus/a'], from: String(DAY) } } });
+      expect(JSON.parse(r.body.result.content[0].text).url).toMatch(/^https:\/\/farm\.example\.org\/dashboard\/graph\.html\?/);
+    });
     it('refuses a project without MCP, and a selection with nothing recorded', async () => {
       expect((await call('graph_link', { devices: ['dev/magi/c'], from: String(DAY) })).body.error).toBe('not_allowed');
       expect((await call('graph_link', { devices: ['dev/lotus/+/sht/pressure'], from: String(DAY) })).body.error).toBe('device_not_found');

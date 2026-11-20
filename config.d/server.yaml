@@ -1,5 +1,11 @@
 port: 8080
 
+# The address this server is reached at from outside, for links it hands out - chart links from an AI
+# assistant, the enrolment URL in a node's build, device schemas, password reset emails. Needed
+# behind a reverse proxy (nginx, Apache), where the server would otherwise see only the proxy's
+# 127.0.0.1:8080. Not needed on a Pi reached directly.
+#baseurl: https://frugaliot.example.org
+
 # Log every HTTP request. Off here because the usual installation runs from an SD card, where each
 # line logged is a write and writes wear the card out. Set it to true (or to a morgan format
 # string) while debugging. A server whose server.yaml does not mention morgan at all logs requests,

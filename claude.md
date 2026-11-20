@@ -250,6 +250,12 @@ The schema files in `config.d/schema/` are one of two things `frugal-iot-init` u
 every local line is still in the release's version, the release only added to it, and installing
 it loses nothing. Otherwise it keeps the local copy and shows just the lines the release lacks.
 
+The settings files (`config.yaml`, `config.d/server.yaml`, `mqtt.yaml`, `logger.yaml`, `email.yaml`,
+`mapping.yaml`) are never updated, but `frugal-iot-init` names any setting the release's copy has and
+the local one lacks entirely (`scripts/settings-missing.js`) - otherwise a new one such as `mcplog`
+arrives silently and runs on its default. Missing only, never different: an installation's values
+are meant to differ, and a note that appears at every upgrade regardless is one nobody reads.
+
 The other is the install directory's `package.json`, which gets this package's `overrides`, followed
 by an `npm install`. **npm reads `overrides` only from the top-level project**, and on an install that
 is the directory's own `package.json`, so the ones in this package (and the logger's) are silently
@@ -395,6 +401,9 @@ sudo service frugaliot start
 ```
 
 **Important**: OTA updates require HTTPS, so the server should be deployed behind a reverse proxy (nginx/Apache) with SSL.
+Behind one, set `baseurl` in `config.d/server.yaml` to the public address. Every link the server hands
+out - MCP chart links, the enrolment URL in node builds, device schemas, reset emails - comes from
+`lib/public-base.js`, and without it they point at the proxy's `http://127.0.0.1:8080`.
 
 ## SenML Data Format
 

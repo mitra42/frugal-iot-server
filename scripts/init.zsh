@@ -44,10 +44,21 @@ DIFFER_OURS=() # ...and the lines in each that this release does not have
 # Only pass "compare" for files like that - config.yaml, mqtt.yaml and server.yaml are this
 # installation's own settings, so of course they differ, and warning about them every time would
 # train you to ignore the warning that matters.
+# "settings" is for those: they are kept, but a setting the release has and this copy lacks
+# entirely is named (scripts/settings-missing.js) - a new one would otherwise pass unnoticed, using
+# its default. Missing only, never different, so it is silent unless a release adds something.
 copy_if_missing() {
-  local from=$1 to=$2 compare=${3:-} ours
+  local from=$1 to=$2 compare=${3:-} ours new
   if [[ -e "$to" ]]; then
-    if [[ "$compare" == compare && -e "$from" ]] && ! cmp -s "$from" "$to"; then
+    if [[ "$compare" == settings && -e "$from" ]]; then
+      new=$(node "${PKG}/scripts/settings-missing.js" "$from" "$to") || true
+      if [[ -n "$new" ]]; then
+        echo "  kept    ${to} - it does not set: ${(j:, :)${(f)new}}"
+        echo "          the server uses the default for each; to change one, copy it from ${from}"
+      else
+        echo "  kept    ${to} (already present)"
+      fi
+    elif [[ "$compare" == compare && -e "$from" ]] && ! cmp -s "$from" "$to"; then
       ours=$(diff "$to" "$from" | sed -n 's/^< //p') || true
       if [[ -z "$ours" ]]; then
         cp "$from" "$to"
@@ -74,9 +85,9 @@ copy_if_missing() {
 }
 
 echo "Configuration:"
-copy_if_missing "${PKG}/config.yaml" "./config.yaml"
+copy_if_missing "${PKG}/config.yaml" "./config.yaml" settings
 for f in logger.yaml mqtt.yaml server.yaml email.yaml mapping.yaml; do
-  copy_if_missing "${PKG}/config.d/${f}" "./config.d/${f}"
+  copy_if_missing "${PKG}/config.d/${f}" "./config.d/${f}" settings
 done
 # The schema describes the sensor types the software understands, so a release changing it matters
 for f in "${PKG}"/config.d/schema/*.yaml(N); do
