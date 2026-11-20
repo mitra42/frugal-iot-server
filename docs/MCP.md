@@ -104,7 +104,8 @@ at once, and each user has an hourly limit.
 
 ## For whoever runs the server
 
-- **Where the code is:** `/mcp` is in `lib/mcp.js`. It reads through `lib/data-query.js`, so it
+- **Where the code is:** `/mcp` is in `lib/mcp.js`. The MCP protocol itself is `lib/mcp-protocol.js`, which
+  replaces the MCP SDK. It reads through `lib/data-query.js`, so it
   shares its limits and its concurrency guard with `GET /api/data`.
 - **Node thresholds need a newer logger.** `describe_node` and `summarize_field` get each node's
   configured min and max from frugal-iot-logger. A logger that does not yet keep those settings

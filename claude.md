@@ -111,7 +111,9 @@ frugal-iot-server/
 
 #### MCP (a user's own Claude - issue #44, docs/MCP.md)
 - `POST /mcp` - MCP Streamable HTTP, stateless, read-only tools (`list_scope`, `describe_node`,
-  `get_series`, `summarize_field`, `graph_link`) in `lib/mcp.js`. Token of purpose `mcp` (`lib/tokens.js`) or a
+  `get_series`, `summarize_field`, `graph_link`) in `lib/mcp.js`. The protocol is our own, `lib/mcp-protocol.js`
+  (initialize, ping, tools/list, tools/call; JSON only, no session) - not `@modelcontextprotocol/sdk`,
+  which brought hono, jose, ajv and zod onto every Pi for those four messages. Token of purpose `mcp` (`lib/tokens.js`) or a
   dashboard session; needs `MCP` and `READ` on each project it reads (`mayUseMCP`). Readings come
   through `lib/data-query.js`, so its limits and the read guard are shared with `GET /api/data`.
   A node's configured min/max come from the logger's `getNodeState`, which needs a logger that keeps
