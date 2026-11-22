@@ -185,6 +185,20 @@
                 <a href="https://docs.google.com/spreadsheets/d/1mPHvPFW4YwRvxtTQXP4fKKDjWbYN8JpeaIAVgeFIfgA/edit?gid=0#gid=0">Google Sheet</a>
             </div>
         </div>
+        <!-- The pages an AI assistant's graph_link and map_link give. "+" is %2B: a bare + in a
+             query string is a space. from=-7d is relative, so these links always show the latest week -->
+        <div class="nav-box">
+            <div class="nav-box-background" style="background-image: url('/images/icon-logger.png')"></div>
+            <div class="nav-box-content">
+                <a href="/dashboard/graph.html?device=dev/lotus/%2B/sht/temperature&amp;from=-7d&amp;bucket=1h&amp;title=Lotus%20temperatures">Graph: a week of temperatures</a>
+            </div>
+        </div>
+        <div class="nav-box">
+            <div class="nav-box-background" style="background-image: url('/images/icon-nodes.png')"></div>
+            <div class="nav-box-content">
+                <a href="/dashboard/map.html?device=dev/lotus/%2B/sht/temperature&amp;from=-7d&amp;bucket=1h&amp;title=Lotus%20temperatures">Map: a week of temperatures</a>
+            </div>
+        </div>
     </div>
 </div>
     <script>

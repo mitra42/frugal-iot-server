@@ -779,8 +779,9 @@ function shouldIBeLoggedIn(req, res, next) {
   // req.path, not req.url: the latter carries the query string, and the page is reached with one in
   // ordinary use - login.html passes "lang" back - so /dashboard/?lang=fr would match neither name
   // here and be served to whoever asked.
-  // graph.html as well: a link to it (MCP's graph_link) is often the first page someone opens
-  if ((['/','/index.html','/graph.html'].includes(req.path)) && !req.isAuthenticated()) {
+  // graph.html and map.html as well: a link to one (MCP's graph_link, map_link) is often the first
+  // page someone opens
+  if ((['/','/index.html','/graph.html','/map.html'].includes(req.path)) && !req.isAuthenticated()) {
     console.log(`Not authenticated redirecting ${req.url} for login`);
     // Capture the full original URL as-is in "url" (so e.g. /data?... comes back with all its params
     // intact), encoded so its own query string can't corrupt this redirect's query string. Carry "lang"

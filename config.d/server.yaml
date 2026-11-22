@@ -10,7 +10,7 @@ port: 8080
 # line logged is a write and writes wear the card out. Set it to true (or to a morgan format
 # string) while debugging. A server whose server.yaml does not mention morgan at all logs requests,
 # so this setting arriving in a new release never quietens a machine that was logging before.
-morgan: false
+morgan: true
 
 # Where the web client is. Installed with npm it is a dependency, so it is here:
 htmldir: ./node_modules/frugal-iot-client

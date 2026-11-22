@@ -44,7 +44,7 @@ describe('/mcp', () => {
       flush: (cb) => cb(),
       reportNodes: () => ({ dev: { lotus: { a: { lastseen: new Date(DAY + 3 * H).toISOString(), 'frugal_iot/name': 'Alpha' } } } }),
       getNodeState: (org, project, node) => (node === 'a'
-        ? { 'sht/temperature': { value: 20, max: 30, min: 10 }, 'sht/humidity': { value: 70 } }
+        ? { 'sht/temperature': { value: 20, max: 30, min: 10 }, 'sht/humidity': { value: 70 }, 'frugal_iot/location': { value: '-8.5,115.2' } }
         : {}),
       clients: {
         dev: {
@@ -78,7 +78,7 @@ describe('/mcp', () => {
     it('lists the read-only tools', async () => {
       const r = await rpc('tools/list', {});
       const tools = r.body.result.tools;
-      expect(tools.map((t) => t.name).sort()).toEqual(['describe_node', 'get_series', 'graph_link', 'list_scope', 'summarize_field']);
+      expect(tools.map((t) => t.name).sort()).toEqual(['describe_node', 'get_series', 'graph_link', 'list_scope', 'map_link', 'summarize_field']);
       expect(tools.every((t) => t.annotations.readOnlyHint)).toBe(true);
     });
     it('POST only', async () => {
@@ -102,7 +102,8 @@ describe('/mcp', () => {
       expect(body.organizations[0].projects.map((p) => p.project)).toEqual(['dev/lotus']);
       const nodes = body.organizations[0].projects[0].nodes;
       expect(nodes.map((n) => n.node)).toEqual(['dev/lotus/a', 'dev/lotus/b']);
-      expect(nodes[0]).toMatchObject({ name: 'Alpha', has_recorded_data: true });
+      expect(nodes[0]).toMatchObject({ name: 'Alpha', has_recorded_data: true, location: { lat: -8.5, lon: 115.2, source: 'set' } });
+      expect(nodes[1].location).toBeUndefined();
     });
   });
 
@@ -110,6 +111,7 @@ describe('/mcp', () => {
     it('fields with units, current value, configured thresholds and recorded days', async () => {
       const { body } = await call('describe_node', { node: 'dev/lotus/a' });
       expect(body.name).toBe('Alpha');
+      expect(body.location).toEqual({ lat: -8.5, lon: 115.2, source: 'set' });
       expect(body.modules.sht.name).toBe('SHT30');
       expect(body.modules.sht.fields.temperature).toEqual({
         name: 'Temperature', units: 'Cel', type: 'float', current: 20,
@@ -194,6 +196,22 @@ describe('/mcp', () => {
     it('refuses a bucket that is not one', async () => {
       const r = await call('graph_link', { devices: ['dev/lotus/a'], from: String(DAY), bucket: 'lots' });
       expect(r.body.error).toBe('invalid_request');
+    });
+  });
+
+  describe('map_link', () => {
+    it('a link to the map page, with a bucket even when none was asked for', async () => {
+      const { body } = await call('map_link', { devices: ['dev/lotus/+/sht/temperature'], from: String(DAY), title: 'Where' });
+      const url = new URL(body.url);
+      expect(url.pathname).toBe('/dashboard/map.html');
+      expect(url.searchParams.getAll('device')).toEqual(['dev/lotus/+/sht/temperature']);
+      expect(url.searchParams.get('bucket')).toBe('1h');
+      expect(url.searchParams.get('title')).toBe('Where');
+      const daily = await call('map_link', { devices: ['dev/lotus/a'], from: String(DAY), bucket: '1d' });
+      expect(new URL(daily.body.url).searchParams.get('bucket')).toBe('1d');
+    });
+    it('refuses as graph_link does', async () => {
+      expect((await call('map_link', { devices: ['dev/magi/c'], from: String(DAY) })).body.error).toBe('not_allowed');
     });
   });
 });

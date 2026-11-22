@@ -111,7 +111,7 @@ frugal-iot-server/
 
 #### MCP (a user's own AI assistant - issue #44; for users: https://github.com/mitra42/frugal-iot/wiki/Using-AI-with-Frugal-IoT)
 - `POST /mcp` - MCP Streamable HTTP, stateless, read-only tools (`list_scope`, `describe_node`,
-  `get_series`, `summarize_field`, `graph_link`) in `lib/mcp.js`. The protocol is our own, `lib/mcp-protocol.js`
+  `get_series`, `summarize_field`, `graph_link`, `map_link`) in `lib/mcp.js`. The protocol is our own, `lib/mcp-protocol.js`
   (initialize, ping, tools/list, tools/call; JSON only, no session) - not `@modelcontextprotocol/sdk`,
   which brought hono, jose, ajv and zod onto every Pi for those four messages. Token of purpose `mcp` (`lib/tokens.js`) or a
   dashboard session; needs `MCP` and `READ` on each project it reads (`mayUseMCP`). Readings come
@@ -123,9 +123,16 @@ frugal-iot-server/
   it. A refused call is logged with its reason, which is the list of what to improve.
 - `GET /dashboard/graph.html?device=…&from=…&bucket=…&tz=…` - the client's chart of `/api/data`,
   which `graph_link` links to. It needs a login like `/dashboard/index.html`: see `shouldIBeLoggedIn`.
+- `GET /dashboard/map.html?…` - the same parameters as pins on a map, coloured by value, with a slider
+  through the buckets; `map_link` links to it. Where each node is comes from `GET /api/locations`
+  (`lib/locations.js`): its current location chosen as the dashboard's map chooses (a GPS with a fix,
+  else the location set on the dashboard, which is `log: false` and so has no history), and a GPS
+  node's bucketed `gps/latitude`/`gps/longitude` - min and max are its box, mean its pin. A node
+  with no fix publishes NaN, which `readRows` drops, so no-fix readings never reach a bucket.
 
 #### API Endpoints (Device-Platform to Farm-Platform)
 - `GET /data?device={id}&from={ts}&to={ts}[&bucket=1h&agg=mean,min,max,count&tz=…]` - Request historical data, raw or bucketed; several devices and `+` allowed (`lib/data-query.js`, shared with MCP)
+- `GET /locations?node={org/project/node,…}[&from&to&bucket&tz]` - not in API.md: where nodes are, for `map.html` (`lib/locations.js`)
 - `POST /users/register` - Register farm platform user
 - `POST /devices/register` - Register device to user
 - `POST /devices/command` - Send command to device

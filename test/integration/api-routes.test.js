@@ -289,12 +289,31 @@ describe('GET /api/data - reading history', () => {
     put('dev/magi/c/sht/temperature', [[DAY + 1000, 40]]);
     app = express();
     app.use((req, res, next) => { req.isAuthenticated = () => !!user; req.user = user; next(); });
-    app.use('/api', createAPIRouter(null, dir, { flush: async () => {} }));
+    app.use('/api', createAPIRouter(null, dir, {
+      flush: async () => {},
+      getNodeState: (org, project, node) => (node === 'a' ? { 'frugal_iot/location': { value: '-8.5,115.2' } } : {}),
+    }));
     app.use(createAPIErrorHandler());
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
   beforeEach(() => {
     user = { id: 2, permissions: [{ capability: 'READ', org: 'dev', project: 'lotus' }] };
+  });
+
+  // GET /api/locations shares this data directory and permission check - see lib/locations.js
+  it('locations: where each named node is now, null for one with none', async () => {
+    const r = await request(app).get('/api/locations').query({ node: 'dev/lotus/a,dev/lotus/b' });
+    expect(r.status).toBe(200);
+    expect(r.body.nodes).toEqual([
+      { node: 'dev/lotus/a', location: { lat: -8.5, lon: 115.2, source: 'set' } },
+      { node: 'dev/lotus/b', location: null },
+    ]);
+  });
+  it('locations: READ per project, a login, and a node', async () => {
+    expect((await request(app).get('/api/locations').query({ node: 'dev/magi/c' })).status).toBe(403);
+    expect((await request(app).get('/api/locations')).status).toBe(400);
+    user = null;
+    expect((await request(app).get('/api/locations').query({ node: 'dev/lotus/a' })).status).toBe(401);
   });
 
   it('one node: the single-device SenML pack, named from the node, not from what was asked', async () => {
